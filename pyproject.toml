@@ -12,6 +12,15 @@ dependencies = [
     "rich>=13.7.0",
 ]
 
+[project.optional-dependencies]
+diarize = [
+    "pyannote.audio>=3.1.0",
+]
+dev = [
+    "pytest>=7.4",
+    "ruff>=0.5.0",
+]
+
 [project.scripts]
 speechtotext = "main:app"
 
@@ -22,3 +31,17 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 py-modules = ["main"]
 package-dir = { "" = "src" }
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "W"]
+# B008: typer.Option/Argument en defaults es el patrón canónico del framework.
+ignore = ["E501", "B008"]
