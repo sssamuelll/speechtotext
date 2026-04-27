@@ -1,0 +1,24 @@
+[project]
+name = "speechtotext"
+version = "0.2.0"
+description = "Transcripción de audio a texto 100% local y gratuita con faster-whisper."
+readme = { text = "Transcripción local con faster-whisper. Uso: `python src/main.py audio.wav`.", content-type = "text/plain" }
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["speech-to-text", "whisper", "faster-whisper", "asr", "spanish", "offline"]
+dependencies = [
+    "faster-whisper>=1.0.3",
+    "typer>=0.12.0",
+    "rich>=13.7.0",
+]
+
+[project.scripts]
+speechtotext = "main:app"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["main"]
+package-dir = { "" = "src" }

@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# Virtual envs
+.venv/
+venv/
+env/
+.python-version
+
+# Editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Outputs / runtime artefacts
+src/static/chunk*.wav
+src/static/texto.txt
+src/static/*.srt
+src/static/*.json
+*.log
+
+# Modelos descargados por faster-whisper (caché Hugging Face)
+.cache/
+models/
