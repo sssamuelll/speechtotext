@@ -1,11 +1,22 @@
 [project]
 name = "speechtotext"
-version = "0.2.0"
-description = "Transcripción de audio a texto 100% local y gratuita con faster-whisper."
-readme = { text = "Transcripción local con faster-whisper. Uso: `python src/main.py audio.wav`.", content-type = "text/plain" }
+version = "0.3.0"
+description = "Transcripción offline con faster-whisper y servicio HTTP de evaluación de pronunciación con Azure AI Speech."
+readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-keywords = ["speech-to-text", "whisper", "faster-whisper", "asr", "spanish", "offline"]
+keywords = [
+    "speech-to-text",
+    "whisper",
+    "faster-whisper",
+    "asr",
+    "pronunciation",
+    "pronunciation-assessment",
+    "azure",
+    "language-learning",
+    "fastapi",
+    "offline",
+]
 dependencies = [
     "faster-whisper>=1.0.3",
     "typer>=0.12.0",
