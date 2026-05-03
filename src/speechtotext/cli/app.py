@@ -4,78 +4,29 @@ Sin claves de API, sin subir audio a la nube. Solo necesita ffmpeg en el PATH
 (en Linux/macOS: paquete `ffmpeg`; en Windows: https://ffmpeg.org/download.html).
 
 Uso rápido:
-    python src/main.py src/static/audio.wav
-    python src/main.py charla.mp3 --model medium --language auto --formats txt,srt
+    speechtotext src/static/audio.wav
+    speechtotext charla.mp3 --model medium --language auto --formats txt,srt
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 
 import typer
 from faster_whisper import WhisperModel
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
+from speechtotext.core.formats import (
+    parse_formats,
+    write_json,
+    write_srt,
+    write_txt,
+    write_vtt,
+)
+
 app = typer.Typer(add_completion=False, help="Transcripción de audio offline con Whisper.")
 console = Console()
-
-VALID_FORMATS = {"txt", "srt", "vtt", "json"}
-
-
-def _format_timestamp(seconds: float, *, srt: bool) -> str:
-    millis = max(0, round(seconds * 1000))
-    h, millis = divmod(millis, 3_600_000)
-    m, millis = divmod(millis, 60_000)
-    s, millis = divmod(millis, 1_000)
-    sep = "," if srt else "."
-    return f"{h:02d}:{m:02d}:{s:02d}{sep}{millis:03d}"
-
-
-def _write_txt(segments: list, path: Path) -> None:
-    path.write_text("\n".join(s.text.strip() for s in segments) + "\n", encoding="utf-8")
-
-
-def _write_srt(segments: list, path: Path) -> None:
-    lines: list[str] = []
-    for i, seg in enumerate(segments, start=1):
-        lines.append(str(i))
-        lines.append(
-            f"{_format_timestamp(seg.start, srt=True)} --> {_format_timestamp(seg.end, srt=True)}"
-        )
-        lines.append(seg.text.strip())
-        lines.append("")
-    path.write_text("\n".join(lines), encoding="utf-8")
-
-
-def _write_vtt(segments: list, path: Path) -> None:
-    lines: list[str] = ["WEBVTT", ""]
-    for seg in segments:
-        lines.append(
-            f"{_format_timestamp(seg.start, srt=False)} --> {_format_timestamp(seg.end, srt=False)}"
-        )
-        lines.append(seg.text.strip())
-        lines.append("")
-    path.write_text("\n".join(lines), encoding="utf-8")
-
-
-def _write_json(segments: list, info, path: Path) -> None:
-    payload = {
-        "language": info.language,
-        "language_probability": round(info.language_probability, 4),
-        "duration": round(info.duration, 2),
-        "segments": [
-            {
-                "id": i,
-                "start": round(s.start, 3),
-                "end": round(s.end, 3),
-                "text": s.text.strip(),
-            }
-            for i, s in enumerate(segments)
-        ],
-    }
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _resolve_output_base(audio: Path, output: Optional[Path]) -> Path:
@@ -88,16 +39,6 @@ def _resolve_output_base(audio: Path, output: Optional[Path]) -> Path:
         return output / audio.stem
     output.parent.mkdir(parents=True, exist_ok=True)
     return output if output.suffix == "" else output.with_suffix("")
-
-
-def _parse_formats(formats: str) -> set[str]:
-    requested = {f.strip().lower() for f in formats.split(",") if f.strip()}
-    invalid = requested - VALID_FORMATS
-    if invalid:
-        raise typer.BadParameter(
-            f"Formatos no soportados: {sorted(invalid)}. Usa: {sorted(VALID_FORMATS)}."
-        )
-    return requested
 
 
 @app.command()
@@ -135,7 +76,11 @@ def transcribe(
     beam_size: int = typer.Option(5, "--beam-size", help="Tamaño del beam search."),
 ) -> None:
     """Transcribe un archivo de audio localmente con Whisper (sin enviar nada a internet)."""
-    requested = _parse_formats(formats)
+    try:
+        requested = parse_formats(formats)
+    except ValueError as e:
+        raise typer.BadParameter(str(e))
+
     base = _resolve_output_base(audio, output)
     base.parent.mkdir(parents=True, exist_ok=True)
 
@@ -173,10 +118,10 @@ def transcribe(
     )
 
     writers: dict[str, tuple[str, callable]] = {
-        "txt": (".txt", lambda p: _write_txt(segments, p)),
-        "srt": (".srt", lambda p: _write_srt(segments, p)),
-        "vtt": (".vtt", lambda p: _write_vtt(segments, p)),
-        "json": (".json", lambda p: _write_json(segments, info, p)),
+        "txt": (".txt", lambda p: write_txt(segments, p)),
+        "srt": (".srt", lambda p: write_srt(segments, p)),
+        "vtt": (".vtt", lambda p: write_vtt(segments, p)),
+        "json": (".json", lambda p: write_json(segments, info, p)),
     }
     for fmt in sorted(requested):
         suffix, write_fn = writers[fmt]
