@@ -12,6 +12,14 @@ dependencies = [
     "rich>=13.7.0",
 ]
 
+[project.optional-dependencies]
+api = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "python-multipart>=0.0.9",
+    "azure-cognitiveservices-speech>=1.40.0",
+]
+
 [project.scripts]
 speechtotext = "main:app"
 
@@ -20,5 +28,5 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["main"]
+py-modules = ["main", "api"]
 package-dir = { "" = "src" }
