@@ -15,7 +15,7 @@ Arrancar en local:
     pip install -e ".[api]"
     export AZURE_SPEECH_KEY=...
     export AZURE_SPEECH_REGION=westeurope
-    uvicorn api:app --reload --port 8000 --app-dir src
+    uvicorn speechtotext.api:app --reload --port 8000
 """
 from __future__ import annotations
 

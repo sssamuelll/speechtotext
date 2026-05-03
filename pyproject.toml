@@ -21,12 +21,14 @@ api = [
 ]
 
 [project.scripts]
-speechtotext = "main:app"
+speechtotext = "speechtotext.cli.app:app"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["main", "api"]
 package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
