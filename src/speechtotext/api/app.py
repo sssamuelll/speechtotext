@@ -20,13 +20,13 @@ Arrancar en local:
 from __future__ import annotations
 
 import os
-import subprocess
-import tempfile
 from pathlib import Path
 
 import azure.cognitiveservices.speech as speechsdk
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+
+from speechtotext.core.audio import FfmpegMissingError, TranscodeError, transcode_to_wav
 
 AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY", "")
 AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "westeurope")
@@ -43,24 +43,6 @@ app.add_middleware(
     allow_methods=["POST", "GET"],
     allow_headers=["*"],
 )
-
-
-def _transcode_to_wav(src_bytes: bytes) -> Path:
-    src = tempfile.NamedTemporaryFile(suffix=".bin", delete=False)
-    src.write(src_bytes)
-    src.close()
-    dst = Path(src.name).with_suffix(".wav")
-    try:
-        subprocess.run(
-            [
-                "ffmpeg", "-y", "-i", src.name,
-                "-ar", "16000", "-ac", "1", "-f", "wav", str(dst),
-            ],
-            check=True, capture_output=True,
-        )
-    finally:
-        Path(src.name).unlink(missing_ok=True)
-    return dst
 
 
 def _score_with_azure(wav_path: Path, reference_text: str, language: str) -> dict:
@@ -147,11 +129,10 @@ async def score_pronunciation(
         raise HTTPException(400, "El archivo de audio está vacío.")
 
     try:
-        wav_path = _transcode_to_wav(audio_bytes)
-    except subprocess.CalledProcessError as e:
-        msg = e.stderr.decode(errors="ignore")[:300] if e.stderr else "ffmpeg error"
-        raise HTTPException(400, f"No se pudo decodificar el audio: {msg}")
-    except FileNotFoundError:
+        wav_path = transcode_to_wav(audio_bytes)
+    except TranscodeError as e:
+        raise HTTPException(400, f"No se pudo decodificar el audio: {e}")
+    except FfmpegMissingError:
         raise HTTPException(500, "ffmpeg no está instalado en el servidor.")
 
     try:
