@@ -49,53 +49,22 @@ def _resolve_output_base(audio: Path, output: Optional[Path]) -> Path:
     return output if output.suffix == "" else output.with_suffix("")
 
 
-@app.command()
-def transcribe(
-    audio: Path = typer.Argument(
-        ..., exists=True, readable=True, dir_okay=False, help="Archivo de audio o vídeo."
-    ),
-    output: Optional[Path] = typer.Option(
-        None, "--output", "-o", help="Carpeta o ruta base de salida (por defecto: junto al audio)."
-    ),
-    language: str = typer.Option(
-        "es",
-        "--language",
-        "-l",
-        help="Código ISO-639-1 (es, en, fr, ...). Usa 'auto' para detección automática.",
-    ),
-    model: str = typer.Option(
-        "small",
-        "--model",
-        "-m",
-        help="tiny | base | small | medium | large-v3 | distil-large-v3",
-    ),
-    formats: str = typer.Option(
-        "txt,srt,json", "--formats", "-f", help="Formatos separados por coma (txt, srt, vtt, json)."
-    ),
-    device: str = typer.Option("cpu", "--device", "-d", help="cpu | cuda | auto"),
-    compute_type: str = typer.Option(
-        "auto",
-        "--compute-type",
-        help="auto | int8 | int8_float16 | float16 | float32. 'auto' elige int8 en CPU y float16 en GPU.",
-    ),
-    vad: bool = typer.Option(
-        True, "--vad/--no-vad", help="Filtro VAD para descartar silencios largos."
-    ),
-    beam_size: int = typer.Option(5, "--beam-size", help="Tamaño del beam search."),
-    diarize: bool = typer.Option(
-        False, "--diarize", "-D", help=r"Marcar quién habla (diarización). Requiere el extra \[diarize]."
-    ),
-    speakers: Optional[int] = typer.Option(
-        None, "--speakers", help="Número de hablantes (pista; auto si se omite)."
-    ),
-    identify: bool = typer.Option(
-        True, "--identify/--no-identify", help="Poner nombre a las voces registradas."
-    ),
-    threshold: float = typer.Option(
-        0.5, "--threshold", help="Umbral de coincidencia de voz (coseno, 0-1)."
-    ),
+def transcribe_file(
+    audio: Path,
+    output: Optional[Path],
+    language: str,
+    model: str,
+    formats: str,
+    device: str,
+    compute_type: str,
+    vad: bool,
+    beam_size: int,
+    diarize: bool,
+    speakers: Optional[int],
+    identify: bool,
+    threshold: float,
 ) -> None:
-    """Transcribe un archivo de audio localmente con Whisper (sin enviar nada a internet)."""
+    """Transcribe un archivo (opcionalmente con diarización) y escribe los formatos pedidos."""
     try:
         requested = parse_formats(formats)
     except ValueError as e:
@@ -151,6 +120,59 @@ def transcribe(
         out_path = base.with_suffix(suffix)
         write_fn(out_path)
         console.print(f"  [green]OK[/green] {out_path}")
+
+
+@app.command()
+def transcribe(
+    audio: Path = typer.Argument(
+        ..., exists=True, readable=True, dir_okay=False, help="Archivo de audio o vídeo."
+    ),
+    output: Optional[Path] = typer.Option(
+        None, "--output", "-o", help="Carpeta o ruta base de salida (por defecto: junto al audio)."
+    ),
+    language: str = typer.Option(
+        "es",
+        "--language",
+        "-l",
+        help="Código ISO-639-1 (es, en, fr, ...). Usa 'auto' para detección automática.",
+    ),
+    model: str = typer.Option(
+        "small",
+        "--model",
+        "-m",
+        help="tiny | base | small | medium | large-v3 | distil-large-v3",
+    ),
+    formats: str = typer.Option(
+        "txt,srt,json", "--formats", "-f", help="Formatos separados por coma (txt, srt, vtt, json)."
+    ),
+    device: str = typer.Option("cpu", "--device", "-d", help="cpu | cuda | auto"),
+    compute_type: str = typer.Option(
+        "auto",
+        "--compute-type",
+        help="auto | int8 | int8_float16 | float16 | float32. 'auto' elige int8 en CPU y float16 en GPU.",
+    ),
+    vad: bool = typer.Option(
+        True, "--vad/--no-vad", help="Filtro VAD para descartar silencios largos."
+    ),
+    beam_size: int = typer.Option(5, "--beam-size", help="Tamaño del beam search."),
+    diarize: bool = typer.Option(
+        False, "--diarize", "-D", help=r"Marcar quién habla (diarización). Requiere el extra \[diarize]."
+    ),
+    speakers: Optional[int] = typer.Option(
+        None, "--speakers", help="Número de hablantes (pista; auto si se omite)."
+    ),
+    identify: bool = typer.Option(
+        True, "--identify/--no-identify", help="Poner nombre a las voces registradas."
+    ),
+    threshold: float = typer.Option(
+        0.5, "--threshold", help="Umbral de coincidencia de voz (coseno, 0-1)."
+    ),
+) -> None:
+    """Transcribe un archivo de audio localmente con Whisper (sin enviar nada a internet)."""
+    transcribe_file(
+        audio, output, language, model, formats, device, compute_type,
+        vad, beam_size, diarize, speakers, identify, threshold,
+    )
 
 
 def _run_diarization(audio, segments, speakers, identify, threshold):
