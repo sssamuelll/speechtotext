@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Iterable
 
 VALID_FORMATS: frozenset[str] = frozenset({"txt", "srt", "vtt", "json"})
 
@@ -35,7 +34,7 @@ def write_txt(segments, path: Path) -> None:
     segs = list(segments)
     if any(_speaker(s) for s in segs):
         lines: list[str] = []
-        cur: str | None = object()  # type: ignore[assignment]
+        cur: str | None = None
         buf: list[str] = []
         for s in segs:
             spk = _speaker(s) or "Hablante ?"
@@ -86,16 +85,17 @@ def write_json(segments, info, path: Path) -> None:
         "language": info.language,
         "language_probability": round(info.language_probability, 4),
         "duration": round(info.duration, 2),
-        "speakers": speakers,
         "segments": [
             {
                 "id": i,
                 "start": round(s.start, 3),
                 "end": round(s.end, 3),
                 "text": s.text.strip(),
-                "speaker": _speaker(s),
+                **({"speaker": _speaker(s)} if speakers else {}),
             }
             for i, s in enumerate(seg_list)
         ],
     }
+    if speakers:
+        payload["speakers"] = speakers
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
