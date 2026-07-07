@@ -24,3 +24,10 @@ def test_enroll_list_get_remove_roundtrip(tmp_path, monkeypatch):
 def test_home_respects_env(tmp_path, monkeypatch):
     monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
     assert registry.home() == tmp_path
+
+
+def test_get_embeddings_skips_missing_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    registry.enroll("Samuel", np.array([1.0, 2.0], dtype=np.float32), seconds=10.0, model="m")
+    (tmp_path / "voices" / "Samuel.npy").unlink()
+    assert registry.get_embeddings() == {}

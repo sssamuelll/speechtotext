@@ -59,7 +59,12 @@ def list_voices() -> list[dict]:
 
 def get_embeddings() -> dict[str, np.ndarray]:
     d = _voices_dir()
-    return {name: np.load(d / meta["file"]) for name, meta in _load_manifest().items()}
+    out: dict[str, np.ndarray] = {}
+    for name, meta in _load_manifest().items():
+        path = d / meta["file"]
+        if path.exists():
+            out[name] = np.load(path)
+    return out
 
 
 def remove(name: str) -> bool:

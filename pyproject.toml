@@ -33,7 +33,6 @@ api = [
 ]
 diarize = [
     "pyannote.audio>=4.0",
-    "numpy>=1.24",
     "torch>=2.0",
 ]
 dev = [

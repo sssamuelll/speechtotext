@@ -154,11 +154,15 @@ def transcribe(
 
 
 def _run_diarization(audio, segments, speakers, identify, threshold):
-    from speechtotext.core.audio import transcode_to_wav
+    from speechtotext.core.audio import FfmpegMissingError, TranscodeError, transcode_to_wav
     from speechtotext.speakers import diarization, registry
     from speechtotext.speakers.identify import assign_names
 
-    wav = transcode_to_wav(audio.read_bytes())
+    try:
+        wav = transcode_to_wav(audio.read_bytes())
+    except (FfmpegMissingError, TranscodeError) as e:
+        console.print(f"[red]No se pudo procesar el audio:[/red] {e}")
+        raise typer.Exit(1)
     try:
         turns, clusters = diarization.diarize(str(wav), num_speakers=speakers)
     except ImportError:
@@ -191,10 +195,14 @@ def enroll(
     import contextlib
     import wave
 
-    from speechtotext.core.audio import transcode_to_wav
+    from speechtotext.core.audio import FfmpegMissingError, TranscodeError, transcode_to_wav
     from speechtotext.speakers import diarization, registry
 
-    wav = transcode_to_wav(sample.read_bytes())
+    try:
+        wav = transcode_to_wav(sample.read_bytes())
+    except (FfmpegMissingError, TranscodeError) as e:
+        console.print(f"[red]No se pudo procesar el audio:[/red] {e}")
+        raise typer.Exit(1)
     try:
         with contextlib.closing(wave.open(str(wav))) as w:
             seconds = w.getnframes() / float(w.getframerate())
