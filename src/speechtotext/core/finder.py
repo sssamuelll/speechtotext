@@ -1,8 +1,12 @@
 """Buscador de segmento: índice de transcripción tiny + búsqueda por regiones."""
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 import unicodedata
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass
@@ -68,3 +72,62 @@ def clip_window(start: float, end: float, context: float) -> tuple[float, float]
     begin = max(0.0, start - context)
     duration = (end - start) + 2 * context
     return begin, duration
+
+
+def _home() -> Path:
+    env = os.environ.get("SPEECHTOTEXT_HOME")
+    return Path(env) if env else Path.home() / ".speechtotext"
+
+
+def index_path(audio: Path, scan_model: str) -> Path:
+    st = audio.stat()
+    key = f"{audio.resolve()}|{st.st_size}|{int(st.st_mtime)}|{scan_model}"
+    digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
+    d = _home() / "index"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / f"{digest}.json"
+
+
+def build_index(audio: Path, scan_model: str) -> list[dict]:
+    from faster_whisper import WhisperModel
+
+    from speechtotext.core.audio import transcode_to_wav
+
+    wav = transcode_to_wav(audio.read_bytes())
+    try:
+        model = WhisperModel(scan_model, device="cpu", compute_type="int8")
+        segments_iter, _info = model.transcribe(str(wav), vad_filter=True)
+        return [
+            {"start": round(s.start, 3), "end": round(s.end, 3), "text": s.text.strip()}
+            for s in segments_iter
+        ]
+    finally:
+        wav.unlink(missing_ok=True)
+
+
+def load_or_build_index(
+    audio: Path, scan_model: str, rebuild: bool = False
+) -> tuple[list[dict], bool]:
+    path = index_path(audio, scan_model)
+    if not rebuild and path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return data["segments"], True
+        except (json.JSONDecodeError, KeyError):
+            pass  # caché corrupta → reconstruir
+    segments = build_index(audio, scan_model)
+    st = audio.stat()
+    path.write_text(
+        json.dumps(
+            {
+                "audio": str(audio.resolve()),
+                "size": st.st_size,
+                "mtime": int(st.st_mtime),
+                "scan_model": scan_model,
+                "segments": segments,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    return segments, False
