@@ -286,12 +286,12 @@ def find(
 
     regions = finder.search(segments, query, top=top)
     if not regions:
-        console.print(f'No se encontró "{query}" en el audio.')
+        console.print(f'No se encontró "{query}" en el audio.', markup=False)
         raise typer.Exit(0)
 
-    console.print(f"{len(regions)} regiones para \"{query}\":")
+    console.print(f"{len(regions)} regiones para \"{query}\":", markup=False)
     for i, r in enumerate(regions, start=1):
-        console.print(f"  {i}.  {_fmt(r.start)} – {_fmt(r.end)}  ({r.hits})  \"{r.snippet}\"")
+        console.print(f"  {i}.  {_fmt(r.start)} – {_fmt(r.end)}  ({r.hits})  \"{r.snippet}\"", markup=False)
 
     if extract:
         _extract_region(

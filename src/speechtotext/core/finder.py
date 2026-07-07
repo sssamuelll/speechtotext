@@ -91,18 +91,12 @@ def index_path(audio: Path, scan_model: str) -> Path:
 def build_index(audio: Path, scan_model: str) -> list[dict]:
     from faster_whisper import WhisperModel
 
-    from speechtotext.core.audio import transcode_to_wav
-
-    wav = transcode_to_wav(audio.read_bytes())
-    try:
-        model = WhisperModel(scan_model, device="cpu", compute_type="int8")
-        segments_iter, _info = model.transcribe(str(wav), vad_filter=True)
-        return [
-            {"start": round(s.start, 3), "end": round(s.end, 3), "text": s.text.strip()}
-            for s in segments_iter
-        ]
-    finally:
-        wav.unlink(missing_ok=True)
+    model = WhisperModel(scan_model, device="cpu", compute_type="int8")
+    segments_iter, _info = model.transcribe(str(audio), vad_filter=True)
+    return [
+        {"start": round(s.start, 3), "end": round(s.end, 3), "text": s.text.strip()}
+        for s in segments_iter
+    ]
 
 
 def load_or_build_index(
