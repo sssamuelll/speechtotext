@@ -134,6 +134,30 @@ de siempre.
 
 ---
 
+## Buscar un segmento
+
+Transcribir un audio largo en calidad tarda mucho. Si solo te interesa un tramo (una
+entrevista, una ponencia), `find` lo ubica sin transcribir todo: hace un pase rápido con
+`tiny`, busca tu consulta y devuelve las **regiones** donde aparece. Con `--extract`, además
+recorta y transcribe en calidad el tramo elegido.
+
+```bash
+# ubicar: imprime las regiones (minutos) donde aparece la consulta
+speechtotext find programa.mp3 "vulnerabilidad sísmica"
+
+# extraer: recorta + transcribe en calidad la región más densa
+speechtotext find programa.mp3 "vulnerabilidad sísmica" --extract
+
+# elegir otra región, y con diarización + nombres
+speechtotext find programa.mp3 "entrevista" --extract --region 2 -D --speakers 4
+```
+
+El primer `find` sobre un archivo construye el índice (lento, una vez); las búsquedas
+siguientes sobre ese mismo archivo son instantáneas. El índice se guarda en
+`~/.speechtotext/index/`; `--rebuild` lo fuerza. La coincidencia ignora acentos y mayúsculas.
+
+---
+
 ## API: evaluación de pronunciación
 
 ### Variables de entorno
