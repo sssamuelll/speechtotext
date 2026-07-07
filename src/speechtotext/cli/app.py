@@ -49,6 +49,11 @@ def _resolve_output_base(audio: Path, output: Optional[Path]) -> Path:
     return output if output.suffix == "" else output.with_suffix("")
 
 
+def _fmt(seconds: float) -> str:
+    m, s = divmod(int(seconds), 60)
+    return f"{m:02d}:{s:02d}"
+
+
 def transcribe_file(
     audio: Path,
     output: Optional[Path],
@@ -206,6 +211,52 @@ def _run_diarization(audio, segments, speakers, identify, threshold):
         if enrolled:
             name_map = assign_names(clusters, enrolled, threshold)
     return diarization.apply_names(labeled, name_map)
+
+
+def _extract_region(audio, regions, region, output, language, model, formats,
+                    diarize, speakers, identify, threshold, context):
+    raise NotImplementedError  # se implementa en Task 5
+
+
+@app.command()
+def find(
+    audio: Path = typer.Argument(..., exists=True, dir_okay=False, help="Audio o vídeo a buscar."),
+    query: str = typer.Argument(..., help="Palabras a buscar."),
+    extract: bool = typer.Option(False, "--extract", "-e", help="Recortar + transcribir la región."),
+    region: int = typer.Option(1, "--region", help="Qué región extraer (1 = la más densa)."),
+    model: str = typer.Option("small", "--model", "-m", help="Modelo para la transcripción en calidad."),
+    scan_model: str = typer.Option("tiny", "--scan-model", help="Modelo del índice."),
+    language: str = typer.Option("es", "--language", "-l", help="Idioma de la transcripción del tramo."),
+    formats: str = typer.Option("txt,srt", "--formats", "-f", help="Formatos de salida del tramo."),
+    diarize: bool = typer.Option(False, "--diarize", "-D", help="Diarizar el tramo extraído."),
+    speakers: Optional[int] = typer.Option(None, "--speakers", help="Nº de hablantes (pista)."),
+    identify: bool = typer.Option(True, "--identify/--no-identify", help="Nombrar voces registradas."),
+    threshold: float = typer.Option(0.5, "--threshold", help="Umbral de coincidencia de voz."),
+    context: float = typer.Option(10.0, "--context", help="Segundos de margen al recortar."),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Carpeta de salida del tramo."),
+    rebuild: bool = typer.Option(False, "--rebuild", help="Forzar reconstrucción del índice."),
+    top: int = typer.Option(5, "--top", help="Cuántas regiones listar."),
+) -> None:
+    """Busca contenido en un audio largo; con --extract recorta y transcribe el tramo."""
+    from speechtotext.core import finder
+
+    segments, cached = finder.load_or_build_index(audio, scan_model, rebuild)
+    console.print(f"Índice: {'caché' if cached else 'construido'} ({scan_model}, {len(segments)} segmentos)")
+
+    regions = finder.search(segments, query, top=top)
+    if not regions:
+        console.print(f'No se encontró "{query}" en el audio.')
+        raise typer.Exit(0)
+
+    console.print(f"{len(regions)} regiones para \"{query}\":")
+    for i, r in enumerate(regions, start=1):
+        console.print(f"  {i}.  {_fmt(r.start)} – {_fmt(r.end)}  ({r.hits})  \"{r.snippet}\"")
+
+    if extract:
+        _extract_region(
+            audio, regions, region, output, language, model, formats,
+            diarize, speakers, identify, threshold, context,
+        )
 
 
 @app.command()
