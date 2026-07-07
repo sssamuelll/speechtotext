@@ -27,45 +27,73 @@ def parse_formats(formats: str) -> set[str]:
     return requested
 
 
-def write_txt(segments: Iterable, path: Path) -> None:
-    path.write_text("\n".join(s.text.strip() for s in segments) + "\n", encoding="utf-8")
+def _speaker(seg):
+    return getattr(seg, "speaker", None)
 
 
-def write_srt(segments: Iterable, path: Path) -> None:
+def write_txt(segments, path: Path) -> None:
+    segs = list(segments)
+    if any(_speaker(s) for s in segs):
+        lines: list[str] = []
+        cur: str | None = object()  # type: ignore[assignment]
+        buf: list[str] = []
+        for s in segs:
+            spk = _speaker(s) or "Hablante ?"
+            if spk != cur:
+                if buf:
+                    lines.append(f"{cur}: {' '.join(buf)}")
+                cur, buf = spk, [s.text.strip()]
+            else:
+                buf.append(s.text.strip())
+        if buf:
+            lines.append(f"{cur}: {' '.join(buf)}")
+    else:
+        lines = [s.text.strip() for s in segs]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_srt(segments, path: Path) -> None:
     lines: list[str] = []
     for i, seg in enumerate(segments, start=1):
         lines.append(str(i))
         lines.append(
             f"{format_timestamp(seg.start, srt=True)} --> {format_timestamp(seg.end, srt=True)}"
         )
-        lines.append(seg.text.strip())
+        spk = _speaker(seg)
+        text = seg.text.strip()
+        lines.append(f"{spk}: {text}" if spk else text)
         lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def write_vtt(segments: Iterable, path: Path) -> None:
+def write_vtt(segments, path: Path) -> None:
     lines: list[str] = ["WEBVTT", ""]
     for seg in segments:
         lines.append(
             f"{format_timestamp(seg.start, srt=False)} --> {format_timestamp(seg.end, srt=False)}"
         )
-        lines.append(seg.text.strip())
+        spk = _speaker(seg)
+        text = seg.text.strip()
+        lines.append(f"{spk}: {text}" if spk else text)
         lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def write_json(segments: Iterable, info, path: Path) -> None:
+def write_json(segments, info, path: Path) -> None:
     seg_list = list(segments)
+    speakers = sorted({_speaker(s) for s in seg_list} - {None})
     payload = {
         "language": info.language,
         "language_probability": round(info.language_probability, 4),
         "duration": round(info.duration, 2),
+        "speakers": speakers,
         "segments": [
             {
                 "id": i,
                 "start": round(s.start, 3),
                 "end": round(s.end, 3),
                 "text": s.text.strip(),
+                "speaker": _speaker(s),
             }
             for i, s in enumerate(seg_list)
         ],
