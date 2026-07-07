@@ -49,53 +49,32 @@ def _resolve_output_base(audio: Path, output: Optional[Path]) -> Path:
     return output if output.suffix == "" else output.with_suffix("")
 
 
-@app.command()
-def transcribe(
-    audio: Path = typer.Argument(
-        ..., exists=True, readable=True, dir_okay=False, help="Archivo de audio o vídeo."
-    ),
-    output: Optional[Path] = typer.Option(
-        None, "--output", "-o", help="Carpeta o ruta base de salida (por defecto: junto al audio)."
-    ),
-    language: str = typer.Option(
-        "es",
-        "--language",
-        "-l",
-        help="Código ISO-639-1 (es, en, fr, ...). Usa 'auto' para detección automática.",
-    ),
-    model: str = typer.Option(
-        "small",
-        "--model",
-        "-m",
-        help="tiny | base | small | medium | large-v3 | distil-large-v3",
-    ),
-    formats: str = typer.Option(
-        "txt,srt,json", "--formats", "-f", help="Formatos separados por coma (txt, srt, vtt, json)."
-    ),
-    device: str = typer.Option("cpu", "--device", "-d", help="cpu | cuda | auto"),
-    compute_type: str = typer.Option(
-        "auto",
-        "--compute-type",
-        help="auto | int8 | int8_float16 | float16 | float32. 'auto' elige int8 en CPU y float16 en GPU.",
-    ),
-    vad: bool = typer.Option(
-        True, "--vad/--no-vad", help="Filtro VAD para descartar silencios largos."
-    ),
-    beam_size: int = typer.Option(5, "--beam-size", help="Tamaño del beam search."),
-    diarize: bool = typer.Option(
-        False, "--diarize", "-D", help=r"Marcar quién habla (diarización). Requiere el extra \[diarize]."
-    ),
-    speakers: Optional[int] = typer.Option(
-        None, "--speakers", help="Número de hablantes (pista; auto si se omite)."
-    ),
-    identify: bool = typer.Option(
-        True, "--identify/--no-identify", help="Poner nombre a las voces registradas."
-    ),
-    threshold: float = typer.Option(
-        0.5, "--threshold", help="Umbral de coincidencia de voz (coseno, 0-1)."
-    ),
+def _fmt(seconds: float) -> str:
+    m, s = divmod(int(seconds), 60)
+    return f"{m:02d}:{s:02d}"
+
+
+def _fmt_file(seconds: float) -> str:
+    m, s = divmod(int(seconds), 60)
+    return f"{m}m{s:02d}s"
+
+
+def transcribe_file(
+    audio: Path,
+    output: Optional[Path],
+    language: str,
+    model: str,
+    formats: str,
+    device: str,
+    compute_type: str,
+    vad: bool,
+    beam_size: int,
+    diarize: bool,
+    speakers: Optional[int],
+    identify: bool,
+    threshold: float,
 ) -> None:
-    """Transcribe un archivo de audio localmente con Whisper (sin enviar nada a internet)."""
+    """Transcribe un archivo (opcionalmente con diarización) y escribe los formatos pedidos."""
     try:
         requested = parse_formats(formats)
     except ValueError as e:
@@ -153,6 +132,59 @@ def transcribe(
         console.print(f"  [green]OK[/green] {out_path}")
 
 
+@app.command()
+def transcribe(
+    audio: Path = typer.Argument(
+        ..., exists=True, readable=True, dir_okay=False, help="Archivo de audio o vídeo."
+    ),
+    output: Optional[Path] = typer.Option(
+        None, "--output", "-o", help="Carpeta o ruta base de salida (por defecto: junto al audio)."
+    ),
+    language: str = typer.Option(
+        "es",
+        "--language",
+        "-l",
+        help="Código ISO-639-1 (es, en, fr, ...). Usa 'auto' para detección automática.",
+    ),
+    model: str = typer.Option(
+        "small",
+        "--model",
+        "-m",
+        help="tiny | base | small | medium | large-v3 | distil-large-v3",
+    ),
+    formats: str = typer.Option(
+        "txt,srt,json", "--formats", "-f", help="Formatos separados por coma (txt, srt, vtt, json)."
+    ),
+    device: str = typer.Option("cpu", "--device", "-d", help="cpu | cuda | auto"),
+    compute_type: str = typer.Option(
+        "auto",
+        "--compute-type",
+        help="auto | int8 | int8_float16 | float16 | float32. 'auto' elige int8 en CPU y float16 en GPU.",
+    ),
+    vad: bool = typer.Option(
+        True, "--vad/--no-vad", help="Filtro VAD para descartar silencios largos."
+    ),
+    beam_size: int = typer.Option(5, "--beam-size", help="Tamaño del beam search."),
+    diarize: bool = typer.Option(
+        False, "--diarize", "-D", help=r"Marcar quién habla (diarización). Requiere el extra \[diarize]."
+    ),
+    speakers: Optional[int] = typer.Option(
+        None, "--speakers", help="Número de hablantes (pista; auto si se omite)."
+    ),
+    identify: bool = typer.Option(
+        True, "--identify/--no-identify", help="Poner nombre a las voces registradas."
+    ),
+    threshold: float = typer.Option(
+        0.5, "--threshold", help="Umbral de coincidencia de voz (coseno, 0-1)."
+    ),
+) -> None:
+    """Transcribe un archivo de audio localmente con Whisper (sin enviar nada a internet)."""
+    transcribe_file(
+        audio, output, language, model, formats, device, compute_type,
+        vad, beam_size, diarize, speakers, identify, threshold,
+    )
+
+
 def _run_diarization(audio, segments, speakers, identify, threshold):
     from speechtotext.core.audio import FfmpegMissingError, TranscodeError, transcode_to_wav
     from speechtotext.speakers import diarization, registry
@@ -184,6 +216,88 @@ def _run_diarization(audio, segments, speakers, identify, threshold):
         if enrolled:
             name_map = assign_names(clusters, enrolled, threshold)
     return diarization.apply_names(labeled, name_map)
+
+
+def _extract_region(audio, regions, region, output, language, model, formats,
+                    diarize, speakers, identify, threshold, context):
+    import subprocess
+
+    from speechtotext.core.finder import clip_window
+
+    if region < 1 or region > len(regions):
+        console.print(f"[red]Región {region} fuera de rango (hay {len(regions)}).[/red]")
+        raise typer.Exit(1)
+
+    r = regions[region - 1]
+    begin, duration = clip_window(r.start, r.end, context)
+    base_dir = output if output is not None else audio.parent
+    base_dir.mkdir(parents=True, exist_ok=True)
+    stem = f"{audio.stem}_{_fmt_file(r.start)}-{_fmt_file(r.end)}"
+    clip = base_dir / f"{stem}.wav"
+
+    cmd = [
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        "-ss", str(begin), "-t", str(duration), "-i", str(audio),
+        "-ar", "16000", "-ac", "1", str(clip),
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True)
+    except FileNotFoundError:
+        console.print(
+            "[red]ffmpeg no está en el PATH.[/red] "
+            "Instálalo: [cyan]winget install Gyan.FFmpeg[/cyan]"
+        )
+        raise typer.Exit(1)
+    except subprocess.CalledProcessError as e:
+        console.print(f"[red]No se pudo recortar el audio:[/red] {e.stderr.decode(errors='ignore')[:200]}")
+        raise typer.Exit(1)
+
+    console.print(f"  [green]Recorte[/green] {clip} ({_fmt(r.start)}–{_fmt(r.end)})")
+    transcribe_file(
+        clip, base_dir, language, model, formats,
+        "cpu", "auto", True, 5, diarize, speakers, identify, threshold,
+    )
+
+
+@app.command()
+def find(
+    audio: Path = typer.Argument(..., exists=True, dir_okay=False, help="Audio o vídeo a buscar."),
+    query: str = typer.Argument(..., help="Palabras a buscar."),
+    extract: bool = typer.Option(False, "--extract", "-e", help="Recortar + transcribir la región."),
+    region: int = typer.Option(1, "--region", help="Qué región extraer (1 = la más densa)."),
+    model: str = typer.Option("small", "--model", "-m", help="Modelo para la transcripción en calidad."),
+    scan_model: str = typer.Option("tiny", "--scan-model", help="Modelo del índice."),
+    language: str = typer.Option("es", "--language", "-l", help="Idioma de la transcripción del tramo."),
+    formats: str = typer.Option("txt,srt", "--formats", "-f", help="Formatos de salida del tramo."),
+    diarize: bool = typer.Option(False, "--diarize", "-D", help="Diarizar el tramo extraído."),
+    speakers: Optional[int] = typer.Option(None, "--speakers", help="Nº de hablantes (pista)."),
+    identify: bool = typer.Option(True, "--identify/--no-identify", help="Nombrar voces registradas."),
+    threshold: float = typer.Option(0.5, "--threshold", help="Umbral de coincidencia de voz."),
+    context: float = typer.Option(10.0, "--context", help="Segundos de margen al recortar."),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Carpeta de salida del tramo."),
+    rebuild: bool = typer.Option(False, "--rebuild", help="Forzar reconstrucción del índice."),
+    top: int = typer.Option(5, "--top", help="Cuántas regiones listar."),
+) -> None:
+    """Busca contenido en un audio largo; con --extract recorta y transcribe el tramo."""
+    from speechtotext.core import finder
+
+    segments, cached = finder.load_or_build_index(audio, scan_model, rebuild)
+    console.print(f"Índice: {'caché' if cached else 'construido'} ({scan_model}, {len(segments)} segmentos)")
+
+    regions = finder.search(segments, query, top=top)
+    if not regions:
+        console.print(f'No se encontró "{query}" en el audio.', markup=False)
+        raise typer.Exit(0)
+
+    console.print(f"{len(regions)} regiones para \"{query}\":", markup=False)
+    for i, r in enumerate(regions, start=1):
+        console.print(f"  {i}.  {_fmt(r.start)} – {_fmt(r.end)}  ({r.hits})  \"{r.snippet}\"", markup=False)
+
+    if extract:
+        _extract_region(
+            audio, regions, region, output, language, model, formats,
+            diarize, speakers, identify, threshold, context,
+        )
 
 
 @app.command()
