@@ -83,7 +83,7 @@ def transcribe(
     ),
     beam_size: int = typer.Option(5, "--beam-size", help="Tamaño del beam search."),
     diarize: bool = typer.Option(
-        False, "--diarize", "-D", help="Marcar quién habla (diarización). Requiere el extra [diarize]."
+        False, "--diarize", "-D", help=r"Marcar quién habla (diarización). Requiere el extra \[diarize]."
     ),
     speakers: Optional[int] = typer.Option(
         None, "--speakers", help="Número de hablantes (pista; auto si se omite)."
@@ -162,7 +162,7 @@ def _run_diarization(audio, segments, speakers, identify, threshold):
     try:
         turns, clusters = diarization.diarize(str(wav), num_speakers=speakers)
     except ImportError:
-        console.print('[red]Falta el extra de diarización:[/red] pip install -e ".[diarize]"')
+        console.print(r'[red]Falta el extra de diarización:[/red] pip install -e ".\[diarize]"')
         raise typer.Exit(1)
     except Exception as e:
         console.print(f"[red]La diarización falló:[/red] {e}")
@@ -205,7 +205,7 @@ def enroll(
         try:
             vec = diarization.embed_voice(str(wav))
         except ImportError:
-            console.print('[red]Falta el extra de diarización:[/red] pip install -e ".[diarize]"')
+            console.print(r'[red]Falta el extra de diarización:[/red] pip install -e ".\[diarize]"')
             raise typer.Exit(1)
         except Exception as e:
             console.print(f"[red]No se pudo registrar la voz:[/red] {e}")
