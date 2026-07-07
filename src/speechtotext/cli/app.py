@@ -9,6 +9,7 @@ Uso rápido:
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -24,6 +25,12 @@ from speechtotext.core.formats import (
     write_txt,
     write_vtt,
 )
+
+# En Windows la consola suele ser cp1252 y rich escribe glifos Unicode (spinner
+# Braille, etc.) que revientan al codificar. Forzamos UTF-8 en los streams.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 
 app = typer.Typer(add_completion=False, help="Transcripción de audio offline con Whisper.")
 console = Console()
