@@ -190,3 +190,12 @@ def run_chunked(audio, opts, jobs, model_name, device, compute_type, log=print):
     info = SimpleNamespace(language=opts.get("language") or "es",
                            language_probability=1.0, duration=duration)
     return segments, info
+
+
+CHUNK_THRESHOLD = 1200.0  # s (20 min): por encima, auto-trocea
+
+
+def should_chunk(duration: float, chunk_flag: bool | None, threshold: float = CHUNK_THRESHOLD) -> bool:
+    if chunk_flag is not None:
+        return chunk_flag
+    return duration > threshold

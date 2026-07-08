@@ -1,6 +1,14 @@
 from types import SimpleNamespace
 
-from speechtotext.core.chunked import TimedSegment, TimedWord, parse_silences, pick_cuts, shift_segments
+from speechtotext.core.chunked import (
+    CHUNK_THRESHOLD,
+    TimedSegment,
+    TimedWord,
+    parse_silences,
+    pick_cuts,
+    should_chunk,
+    shift_segments,
+)
 
 
 def _w(start, end, word):
@@ -208,3 +216,13 @@ def test_probe_duration_desde_pyav(monkeypatch):
             return container
     monkeypatch.setattr(chunked, "av", FakeAv)
     assert chunked.probe_duration(Path("x.mp3")) == 1245.0
+
+
+def test_should_chunk_auto_por_umbral():
+    assert should_chunk(CHUNK_THRESHOLD + 1, None) is True
+    assert should_chunk(CHUNK_THRESHOLD - 1, None) is False
+
+
+def test_should_chunk_flag_explicito_manda():
+    assert should_chunk(10.0, True) is True       # forzar en audio corto
+    assert should_chunk(99999.0, False) is False  # forzar off en audio largo
