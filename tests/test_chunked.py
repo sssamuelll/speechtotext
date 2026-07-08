@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from speechtotext.core.chunked import TimedSegment, TimedWord, parse_silences, shift_segments
+from speechtotext.core.chunked import TimedSegment, TimedWord, parse_silences, pick_cuts, shift_segments
 
 
 def _w(start, end, word):
@@ -41,3 +41,27 @@ def test_parse_silences_extrae_pares():
 def test_parse_silences_descarta_start_sin_end():
     stderr = "silence_start: 5.0\nsilence_end: 6.0\nsilence_start: 900.0\n"
     assert parse_silences(stderr) == [(5.0, 6.0)]
+
+
+def test_pick_cuts_corta_en_silencio_cercano():
+    # frontera en 600; hay silencio en 601.0-602.4 (mid 601.7) dentro de ±60 -> corta en 601.7
+    chunks = pick_cuts([(601.0, 602.4)], duration=1200.0, target_len=600.0, search=60.0)
+    assert chunks == [(0.0, 601.7), (601.7, 1200.0)]
+
+
+def test_pick_cuts_fijo_si_no_hay_silencio_cerca():
+    # silencio lejos de la frontera 600 -> corte fijo en 600
+    chunks = pick_cuts([(100.0, 101.0)], duration=1200.0, target_len=600.0, search=60.0)
+    assert chunks == [(0.0, 600.0), (600.0, 1200.0)]
+
+
+def test_pick_cuts_audio_corto_un_solo_trozo():
+    assert pick_cuts([], duration=300.0, target_len=600.0) == [(0.0, 300.0)]
+
+
+def test_pick_cuts_cubre_toda_la_duracion_contiguo():
+    chunks = pick_cuts([], duration=1500.0, target_len=600.0)
+    assert chunks[0][0] == 0.0
+    assert chunks[-1][1] == 1500.0
+    for a, b in zip(chunks, chunks[1:]):
+        assert a[1] == b[0]  # contiguo, sin huecos ni solapes
