@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 import re
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -107,3 +110,35 @@ def seg_from_dict(d: dict) -> TimedSegment:
     words = d.get("words")
     tw = [TimedWord(w["start"], w["end"], w["word"]) for w in words] if words is not None else None
     return TimedSegment(d["start"], d["end"], d["text"], tw)
+
+
+def transcribe_chunk(audio, start, end, opts, model, model_name):
+    path = chunk_path(audio, opts, model_name, start, end)
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return [seg_from_dict(d) for d in data["segments"]], True
+        except (json.JSONDecodeError, KeyError):
+            pass  # checkpoint corrupto -> recomputar
+
+    fd, tmp = tempfile.mkstemp(suffix=".wav")
+    os.close(fd)
+    try:
+        cmd = [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-ss", str(start), "-t", str(end - start), "-i", str(audio),
+            "-ar", "16000", "-ac", "1", tmp,
+        ]
+        subprocess.run(cmd, check=True, capture_output=True)
+        segments_iter, _info = model.transcribe(tmp, **opts)
+        segs = shift_segments(list(segments_iter), start)
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+    path.write_text(
+        json.dumps({"segments": [seg_to_dict(s) for s in segs]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return segs, False

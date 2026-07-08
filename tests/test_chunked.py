@@ -127,3 +127,42 @@ def test_seg_roundtrip_con_palabras():
 def test_seg_roundtrip_sin_palabras():
     seg = TimedSegment(1.0, 2.0, "x", None)
     assert seg_from_dict(seg_to_dict(seg)) == seg
+
+
+import json
+
+
+def test_transcribe_chunk_usa_cache_si_existe(tmp_path, monkeypatch):
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    audio = tmp_path / "a.mp3"
+    audio.write_bytes(b"12345")
+    # sembrar checkpoint con un segmento global ya offseteado
+    p = chunked.chunk_path(audio, _opts(), "large-v3", 600.0, 1200.0)
+    p.write_text(json.dumps({"segments": [{"start": 601.0, "end": 602.0, "text": " cache"}]}))
+
+    def boom(*a, **k):
+        raise AssertionError("no debió transcribir ni llamar ffmpeg")
+    monkeypatch.setattr(chunked.subprocess, "run", boom)
+    model = SimpleNamespace(transcribe=boom)
+
+    segs, cached = chunked.transcribe_chunk(audio, 600.0, 1200.0, _opts(), model, "large-v3")
+    assert cached is True
+    assert segs[0].text == " cache" and segs[0].start == 601.0
+
+
+def test_transcribe_chunk_transcribe_y_guarda(tmp_path, monkeypatch):
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    audio = tmp_path / "a.mp3"
+    audio.write_bytes(b"12345")
+    monkeypatch.setattr(chunked.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stderr=b""))
+    # modelo devuelve segmentos LOCALES (relativos al trozo)
+    local = [SimpleNamespace(start=1.0, end=2.0, text=" hola", words=None)]
+    model = SimpleNamespace(transcribe=lambda wav, **k: (iter(local), SimpleNamespace()))
+
+    segs, cached = chunked.transcribe_chunk(audio, 600.0, 1200.0, _opts(), model, "large-v3")
+    assert cached is False
+    assert segs[0].start == 601.0 and segs[0].end == 602.0  # +600 offset
+    # persistió el checkpoint con timestamps globales
+    p = chunked.chunk_path(audio, _opts(), "large-v3", 600.0, 1200.0)
+    assert p.exists()
+    assert json.loads(p.read_text())["segments"][0]["start"] == 601.0
