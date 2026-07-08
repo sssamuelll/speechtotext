@@ -1,6 +1,7 @@
 """Transcripción por trozos: durabilidad (checkpoint/resume) + paralelismo."""
 from __future__ import annotations
 
+import av
 import hashlib
 import json
 import os
@@ -142,3 +143,15 @@ def transcribe_chunk(audio, start, end, opts, model, model_name):
         encoding="utf-8",
     )
     return segs, False
+
+
+def probe_duration(audio: Path) -> float:
+    container = av.open(str(audio))
+    if container.duration:
+        return container.duration / 1_000_000.0
+    proc = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=nk=1:nw=1", str(audio)],
+        capture_output=True, text=True,
+    )
+    return float(proc.stdout.strip())

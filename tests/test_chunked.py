@@ -166,3 +166,14 @@ def test_transcribe_chunk_transcribe_y_guarda(tmp_path, monkeypatch):
     p = chunked.chunk_path(audio, _opts(), "large-v3", 600.0, 1200.0)
     assert p.exists()
     assert json.loads(p.read_text())["segments"][0]["start"] == 601.0
+
+
+def test_probe_duration_desde_pyav(monkeypatch):
+    container = SimpleNamespace(duration=1245_000000)  # microsegundos
+
+    class FakeAv:
+        @staticmethod
+        def open(path):
+            return container
+    monkeypatch.setattr(chunked, "av", FakeAv)
+    assert chunked.probe_duration(Path("x.mp3")) == 1245.0
