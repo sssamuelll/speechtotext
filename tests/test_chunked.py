@@ -146,15 +146,17 @@ def test_transcribe_chunk_usa_cache_si_existe(tmp_path, monkeypatch):
     audio.write_bytes(b"12345")
     # sembrar checkpoint con un segmento global ya offseteado
     p = chunked.chunk_path(audio, _opts(), "large-v3", 600.0, 1200.0)
-    p.write_text(json.dumps({"segments": [{"start": 601.0, "end": 602.0, "text": " cache"}]}))
+    p.write_text(json.dumps(
+        {"language": "es", "segments": [{"start": 601.0, "end": 602.0, "text": " cache"}]}))
 
     def boom(*a, **k):
         raise AssertionError("no debió transcribir ni llamar ffmpeg")
     monkeypatch.setattr(chunked.subprocess, "run", boom)
     model = SimpleNamespace(transcribe=boom)
 
-    segs, cached = chunked.transcribe_chunk(audio, 600.0, 1200.0, _opts(), model, "large-v3")
+    segs, cached, lang = chunked.transcribe_chunk(audio, 600.0, 1200.0, _opts(), model, "large-v3")
     assert cached is True
+    assert lang == "es"
     assert segs[0].text == " cache" and segs[0].start == 601.0
 
 
@@ -163,17 +165,20 @@ def test_transcribe_chunk_transcribe_y_guarda(tmp_path, monkeypatch):
     audio = tmp_path / "a.mp3"
     audio.write_bytes(b"12345")
     monkeypatch.setattr(chunked.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stderr=b""))
-    # modelo devuelve segmentos LOCALES (relativos al trozo)
+    # modelo devuelve segmentos LOCALES (relativos al trozo) + idioma detectado
     local = [SimpleNamespace(start=1.0, end=2.0, text=" hola", words=None)]
-    model = SimpleNamespace(transcribe=lambda wav, **k: (iter(local), SimpleNamespace()))
+    model = SimpleNamespace(transcribe=lambda wav, **k: (iter(local), SimpleNamespace(language="es")))
 
-    segs, cached = chunked.transcribe_chunk(audio, 600.0, 1200.0, _opts(), model, "large-v3")
+    segs, cached, lang = chunked.transcribe_chunk(audio, 600.0, 1200.0, _opts(), model, "large-v3")
     assert cached is False
+    assert lang == "es"
     assert segs[0].start == 601.0 and segs[0].end == 602.0  # +600 offset
-    # persistió el checkpoint con timestamps globales
+    # persistió el checkpoint con timestamps globales y el idioma
     p = chunked.chunk_path(audio, _opts(), "large-v3", 600.0, 1200.0)
     assert p.exists()
-    assert json.loads(p.read_text())["segments"][0]["start"] == 601.0
+    data = json.loads(p.read_text())
+    assert data["segments"][0]["start"] == 601.0
+    assert data["language"] == "es"
 
 
 def test_run_chunked_reensambla_en_orden_y_arma_info(monkeypatch):
@@ -182,7 +187,7 @@ def test_run_chunked_reensambla_en_orden_y_arma_info(monkeypatch):
     monkeypatch.setattr(chunked, "plan_chunks", lambda audio, dur, **k: [(0.0, 600.0), (600.0, 1200.0)])
 
     def fake_chunk(audio, start, end, opts, model, model_name):
-        return [TimedSegment(start + 1.0, start + 2.0, f" t{int(start)}")], False
+        return [TimedSegment(start + 1.0, start + 2.0, f" t{int(start)}")], False, "es"
     monkeypatch.setattr(chunked, "transcribe_chunk", fake_chunk)
 
     lines = []
@@ -201,10 +206,24 @@ def test_run_chunked_marca_cache(monkeypatch):
     monkeypatch.setattr(chunked, "probe_duration", lambda audio: 600.0)
     monkeypatch.setattr(chunked, "plan_chunks", lambda audio, dur, **k: [(0.0, 600.0)])
     monkeypatch.setattr(chunked, "transcribe_chunk",
-                        lambda *a, **k: ([TimedSegment(1.0, 2.0, " x")], True))
+                        lambda *a, **k: ([TimedSegment(1.0, 2.0, " x")], True, "es"))
     lines = []
     chunked.run_chunked(Path("x.mp3"), _opts(), 1, "m", "cpu", "int8", log=lines.append)
     assert "cache" in lines[0]
+
+
+def test_run_chunked_reporta_idioma_detectado_en_auto(monkeypatch):
+    # --language auto (opts language=None): info.language debe ser el idioma REAL
+    # detectado por el trozo, no un "es" hardcodeado.
+    monkeypatch.setattr(chunked, "WhisperModel", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(chunked, "probe_duration", lambda audio: 600.0)
+    monkeypatch.setattr(chunked, "plan_chunks", lambda audio, dur, **k: [(0.0, 600.0)])
+    monkeypatch.setattr(chunked, "transcribe_chunk",
+                        lambda *a, **k: ([TimedSegment(1.0, 2.0, " hi")], False, "en"))
+    _, info = chunked.run_chunked(
+        Path("x.mp3"), _opts(language=None), 1, "m", "cpu", "int8", log=lambda m: None,
+    )
+    assert info.language == "en"
 
 
 def test_probe_duration_desde_pyav(monkeypatch):

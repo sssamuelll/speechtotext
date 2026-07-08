@@ -118,11 +118,13 @@ def seg_from_dict(d: dict) -> TimedSegment:
 
 
 def transcribe_chunk(audio, start, end, opts, model, model_name):
+    """Devuelve (segmentos_globales, from_cache, idioma_detectado). El idioma se guarda
+    en el checkpoint para que run_chunked reporte el real bajo --language auto."""
     path = chunk_path(audio, opts, model_name, start, end)
     if path.exists():
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            return [seg_from_dict(d) for d in data["segments"]], True
+            return [seg_from_dict(d) for d in data["segments"]], True, data.get("language")
         except (json.JSONDecodeError, KeyError):
             pass  # checkpoint corrupto -> recomputar
 
@@ -135,18 +137,19 @@ def transcribe_chunk(audio, start, end, opts, model, model_name):
             "-ar", "16000", "-ac", "1", tmp,
         ]
         subprocess.run(cmd, check=True, capture_output=True)
-        segments_iter, _info = model.transcribe(tmp, **opts)
+        segments_iter, info = model.transcribe(tmp, **opts)
         segs = shift_segments(list(segments_iter), start)
+        lang = getattr(info, "language", None)
     finally:
         try:
             os.unlink(tmp)
         except OSError:
             pass
     path.write_text(
-        json.dumps({"segments": [seg_to_dict(s) for s in segs]}, ensure_ascii=False),
+        json.dumps({"language": lang, "segments": [seg_to_dict(s) for s in segs]}, ensure_ascii=False),
         encoding="utf-8",
     )
-    return segs, False
+    return segs, False, lang
 
 
 def probe_duration(audio: Path) -> float:
@@ -175,6 +178,7 @@ def run_chunked(audio, opts, jobs, model_name, device, compute_type, log=print):
         cpu_threads=max(1, (os.cpu_count() or 1) // jobs), num_workers=jobs,
     )
     results: list = [None] * len(chunks)
+    langs: list = [None] * len(chunks)
     with ThreadPoolExecutor(max_workers=jobs) as pool:
         futs = {
             pool.submit(transcribe_chunk, audio, s, e, opts, model, model_name): i
@@ -182,12 +186,15 @@ def run_chunked(audio, opts, jobs, model_name, device, compute_type, log=print):
         }
         for done, fut in enumerate(as_completed(futs), start=1):
             i = futs[fut]
-            results[i], from_cache = fut.result()
+            results[i], from_cache, langs[i] = fut.result()
             s, e = chunks[i]
             tag = "cache" if from_cache else "nuevo"
             log(f"[{done}/{len(chunks)}] {_mmss(s)}-{_mmss(e)} OK ({tag})")
     segments = [seg for chunk_segs in results for seg in chunk_segs]
-    info = SimpleNamespace(language=opts.get("language") or "es",
+    # Bajo --language auto (opts language=None) reporta el idioma REAL que detectó el
+    # primer trozo, no un "es" hardcodeado; si se forzó idioma, ese manda.
+    detected = next((l for l in langs if l), None)
+    info = SimpleNamespace(language=opts.get("language") or detected or "es",
                            language_probability=1.0, duration=duration)
     return segments, info
 
