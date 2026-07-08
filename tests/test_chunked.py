@@ -168,6 +168,37 @@ def test_transcribe_chunk_transcribe_y_guarda(tmp_path, monkeypatch):
     assert json.loads(p.read_text())["segments"][0]["start"] == 601.0
 
 
+def test_run_chunked_reensambla_en_orden_y_arma_info(monkeypatch):
+    monkeypatch.setattr(chunked, "WhisperModel", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(chunked, "probe_duration", lambda audio: 1200.0)
+    monkeypatch.setattr(chunked, "plan_chunks", lambda audio, dur, **k: [(0.0, 600.0), (600.0, 1200.0)])
+
+    def fake_chunk(audio, start, end, opts, model, model_name):
+        return [TimedSegment(start + 1.0, start + 2.0, f" t{int(start)}")], False
+    monkeypatch.setattr(chunked, "transcribe_chunk", fake_chunk)
+
+    lines = []
+    segs, info = chunked.run_chunked(
+        Path("x.mp3"), _opts(), jobs=2, model_name="large-v3",
+        device="cpu", compute_type="int8", log=lines.append,
+    )
+    assert [s.text for s in segs] == [" t0", " t600"]  # orden de trozo
+    assert (segs[0].start, segs[1].start) == (1.0, 601.0)  # timestamps globales
+    assert info.duration == 1200.0
+    assert len(lines) == 2  # una línea por trozo
+
+
+def test_run_chunked_marca_cache(monkeypatch):
+    monkeypatch.setattr(chunked, "WhisperModel", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(chunked, "probe_duration", lambda audio: 600.0)
+    monkeypatch.setattr(chunked, "plan_chunks", lambda audio, dur, **k: [(0.0, 600.0)])
+    monkeypatch.setattr(chunked, "transcribe_chunk",
+                        lambda *a, **k: ([TimedSegment(1.0, 2.0, " x")], True))
+    lines = []
+    chunked.run_chunked(Path("x.mp3"), _opts(), 1, "m", "cpu", "int8", log=lines.append)
+    assert "cache" in lines[0]
+
+
 def test_probe_duration_desde_pyav(monkeypatch):
     container = SimpleNamespace(duration=1245_000000)  # microsegundos
 

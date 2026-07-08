@@ -8,8 +8,12 @@ import os
 import re
 import subprocess
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
+
+from faster_whisper import WhisperModel
 
 from speechtotext.core.finder import _home
 
@@ -155,3 +159,34 @@ def probe_duration(audio: Path) -> float:
         capture_output=True, text=True,
     )
     return float(proc.stdout.strip())
+
+
+def _mmss(sec: float) -> str:
+    m, s = divmod(int(sec), 60)
+    return f"{m:02d}:{s:02d}"
+
+
+def run_chunked(audio, opts, jobs, model_name, device, compute_type, log=print):
+    duration = probe_duration(audio)
+    chunks = plan_chunks(audio, duration)
+    jobs = max(1, min(jobs, len(chunks)))
+    model = WhisperModel(
+        model_name, device=device, compute_type=compute_type,
+        cpu_threads=max(1, (os.cpu_count() or 1) // jobs), num_workers=jobs,
+    )
+    results: list = [None] * len(chunks)
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        futs = {
+            pool.submit(transcribe_chunk, audio, s, e, opts, model, model_name): i
+            for i, (s, e) in enumerate(chunks)
+        }
+        for done, fut in enumerate(as_completed(futs), start=1):
+            i = futs[fut]
+            results[i], from_cache = fut.result()
+            s, e = chunks[i]
+            tag = "cache" if from_cache else "nuevo"
+            log(f"[{done}/{len(chunks)}] {_mmss(s)}-{_mmss(e)} OK ({tag})")
+    segments = [seg for chunk_segs in results for seg in chunk_segs]
+    info = SimpleNamespace(language=opts.get("language") or "es",
+                           language_probability=1.0, duration=duration)
+    return segments, info
