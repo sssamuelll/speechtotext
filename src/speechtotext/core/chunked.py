@@ -94,3 +94,16 @@ def chunk_path(audio: Path, opts: dict, model: str, start: float, end: float) ->
     d = _home() / "chunks"
     d.mkdir(parents=True, exist_ok=True)
     return d / f"{digest}.json"
+
+
+def seg_to_dict(seg: TimedSegment) -> dict:
+    d = {"start": seg.start, "end": seg.end, "text": seg.text}
+    if seg.words is not None:
+        d["words"] = [{"start": w.start, "end": w.end, "word": w.word} for w in seg.words]
+    return d
+
+
+def seg_from_dict(d: dict) -> TimedSegment:
+    words = d.get("words")
+    tw = [TimedWord(w["start"], w["end"], w["word"]) for w in words] if words is not None else None
+    return TimedSegment(d["start"], d["end"], d["text"], tw)

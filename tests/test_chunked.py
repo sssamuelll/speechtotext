@@ -113,3 +113,17 @@ def test_chunk_path_cambia_con_cada_parametro(tmp_path, monkeypatch):
     assert chunked.chunk_path(audio, _opts(hotwords="Boconó"), "large-v3", 0.0, 600.0) != base
     assert chunked.chunk_path(audio, _opts(word_timestamps=True), "large-v3", 0.0, 600.0) != base
     assert chunked.chunk_path(audio, _opts(), "large-v3", 600.0, 1200.0) != base
+
+
+from speechtotext.core.chunked import seg_from_dict, seg_to_dict
+
+
+def test_seg_roundtrip_con_palabras():
+    seg = TimedSegment(600.0, 602.0, " hola", [TimedWord(600.0, 601.0, " hola")])
+    back = seg_from_dict(seg_to_dict(seg))
+    assert back == seg
+
+
+def test_seg_roundtrip_sin_palabras():
+    seg = TimedSegment(1.0, 2.0, "x", None)
+    assert seg_from_dict(seg_to_dict(seg)) == seg
