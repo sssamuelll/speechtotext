@@ -85,3 +85,31 @@ def test_plan_chunks_fallback_si_ffmpeg_falla(monkeypatch):
     monkeypatch.setattr(chunked.subprocess, "run", boom)
     chunks = chunked.plan_chunks(Path("x.mp3"), duration=1200.0, target_len=600.0)
     assert chunks == [(0.0, 600.0), (600.0, 1200.0)]  # cortes fijos
+
+
+def _opts(**over):
+    base = dict(language="es", beam_size=5, vad_filter=True, hotwords=None, word_timestamps=False)
+    base.update(over)
+    return base
+
+
+def test_chunk_path_determinista(tmp_path, monkeypatch):
+    monkeypatch.setenv("SPEECHTEXT_UNUSED", "x")
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    audio = tmp_path / "a.mp3"
+    audio.write_bytes(b"12345")
+    p1 = chunked.chunk_path(audio, _opts(), "large-v3", 0.0, 600.0)
+    p2 = chunked.chunk_path(audio, _opts(), "large-v3", 0.0, 600.0)
+    assert p1 == p2
+    assert p1.parent == tmp_path / "chunks"
+
+
+def test_chunk_path_cambia_con_cada_parametro(tmp_path, monkeypatch):
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    audio = tmp_path / "a.mp3"
+    audio.write_bytes(b"12345")
+    base = chunked.chunk_path(audio, _opts(), "large-v3", 0.0, 600.0)
+    assert chunked.chunk_path(audio, _opts(), "medium", 0.0, 600.0) != base
+    assert chunked.chunk_path(audio, _opts(hotwords="Boconó"), "large-v3", 0.0, 600.0) != base
+    assert chunked.chunk_path(audio, _opts(word_timestamps=True), "large-v3", 0.0, 600.0) != base
+    assert chunked.chunk_path(audio, _opts(), "large-v3", 600.0, 1200.0) != base

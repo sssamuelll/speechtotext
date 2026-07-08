@@ -1,10 +1,13 @@
 """Transcripción por trozos: durabilidad (checkpoint/resume) + paralelismo."""
 from __future__ import annotations
 
+import hashlib
 import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+from speechtotext.core.finder import _home
 
 
 @dataclass
@@ -78,3 +81,16 @@ def plan_chunks(audio: Path, duration: float, target_len: float = 600.0) -> list
     except (FileNotFoundError, OSError):
         silences = []  # sin ffmpeg -> cortes fijos
     return pick_cuts(silences, duration, target_len)
+
+
+def chunk_path(audio: Path, opts: dict, model: str, start: float, end: float) -> Path:
+    st = audio.stat()
+    key = "|".join(str(x) for x in (
+        audio.resolve(), st.st_size, int(st.st_mtime), model,
+        opts["language"], opts["beam_size"], opts["vad_filter"],
+        opts["hotwords"], opts["word_timestamps"], start, end,
+    ))
+    digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
+    d = _home() / "chunks"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / f"{digest}.json"
