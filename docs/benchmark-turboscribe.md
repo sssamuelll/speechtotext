@@ -91,6 +91,8 @@ Misma ponencia, mismo CLI, un solo cambio: `-m large-v3` (antes `small`). Sin di
 
 **Backlog re-priorizado tras Fase 0:** (a) defaults/flags del modelo — recomendar `large-v3` para calidad, cablear `hotwords` + `condition_on_previous_text=False`; (b) alineación palabra→hablante (#2, sin cambios — sigue siendo el fix grande); (c) regex de horas (#3, trivial); (d) hotword list regional (#4).
 
-**Trampas de Windows descubiertas en el camino** (fix pendiente en el CLI, `os.environ.setdefault` al arranque o README):
+**Estado (2026-07-08, rama `feat/whisper-tuning`):** (a) ✅ hecho — `large-v3` recomendado en el help, `--hotwords`/`--hotwords-file` cableados, `condition_on_previous_text=False` en `_transcribe_opts`. (c) ✅ hecho — `normalize_hours` (`core/postprocess.py`) convierte `8.33`→`8:33` y preserva magnitudes de un decimal (`7.2`). (d) el mecanismo de hotwords ya está; por diseño no hay léxico global default (sesgaría todo otro audio). **(b) sigue pendiente** — es el fix grande de diarización, territorio de la rama `feat/diarizacion-batch`, no de tuning.
+
+**Trampas de Windows descubiertas en el camino** (✅ resuelto en `cli/app.py`: `os.environ.setdefault` al arranque, antes de importar `faster_whisper`):
 - `HF_HUB_DISABLE_SYMLINKS=1` — sin esto, la primera descarga de modelo muere con `WinError 1314` sin Developer Mode.
 - `HF_HUB_DISABLE_XET=1` — sin esto, la descarga de modelos grandes se cuelga **en silencio** (el downloader xet en Rust; los archivos chicos bajan por HTTP normal y engañan).

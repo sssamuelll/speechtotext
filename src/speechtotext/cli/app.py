@@ -38,6 +38,8 @@ from speechtotext.core.formats import (
     write_txt,
     write_vtt,
 )
+from speechtotext.core.postprocess import normalize_hours
+from speechtotext.core.segments import LabeledSegment
 
 # En Windows la consola suele ser cp1252 y rich escribe glifos Unicode (spinner
 # Braille, etc.) que revientan al codificar. Forzamos UTF-8 en los streams.
@@ -92,6 +94,20 @@ def _resolve_hotwords(hotwords: Optional[str], hotwords_file: Optional[Path]) ->
     return ", ".join(parts) or None
 
 
+def _transcribe_opts(lang: Optional[str], beam_size: int, vad: bool,
+                     hotwords: Optional[str]) -> dict:
+    """Opciones de decodificación de Whisper. condition_on_previous_text=False corta el
+    arrastre de contexto entre ventanas: sin esto el modelo alucina hacia frases comunes
+    (Fase 0, docs/benchmark-turboscribe.md). Aquí aterrizan futuros knobs de tuning."""
+    return {
+        "language": lang,
+        "beam_size": beam_size,
+        "vad_filter": vad,
+        "hotwords": hotwords,
+        "condition_on_previous_text": False,
+    }
+
+
 def transcribe_file(
     audio: Path,
     output: Optional[Path],
@@ -140,11 +156,7 @@ def transcribe_file(
     ) as progress:
         task = progress.add_task(f"Transcribiendo {audio.name}", total=None)
         segments_iter, info = whisper.transcribe(
-            str(audio),
-            language=lang,
-            beam_size=beam_size,
-            vad_filter=vad,
-            hotwords=hotwords,
+            str(audio), **_transcribe_opts(lang, beam_size, vad, hotwords)
         )
         segments = list(segments_iter)
         progress.update(task, completed=1)
@@ -157,6 +169,13 @@ def transcribe_file(
 
     if diarize:
         segments = _run_diarization(audio, segments, speakers, identify, threshold)
+
+    # Post-proceso textual (horas 8.33->8:33). Uniforma a LabeledSegment: los Segment
+    # de faster_whisper son inmutables y los writers solo leen start/end/text/speaker.
+    segments = [
+        LabeledSegment(s.start, s.end, normalize_hours(s.text), getattr(s, "speaker", None))
+        for s in segments
+    ]
 
     writers: dict[str, tuple[str, callable]] = {
         "txt": (".txt", lambda p: write_txt(segments, p)),
