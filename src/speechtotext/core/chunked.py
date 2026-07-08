@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass
@@ -63,3 +65,16 @@ def pick_cuts(
         boundary = cut + target_len
     bounds = [0.0, *cuts, duration]
     return [(bounds[i], bounds[i + 1]) for i in range(len(bounds) - 1)]
+
+
+def plan_chunks(audio: Path, duration: float, target_len: float = 600.0) -> list[tuple[float, float]]:
+    cmd = [
+        "ffmpeg", "-hide_banner", "-nostats", "-i", str(audio),
+        "-af", "silencedetect=noise=-30dB:d=0.5", "-f", "null", "-",
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True)
+        silences = parse_silences(proc.stderr.decode("utf-8", errors="ignore"))
+    except (FileNotFoundError, OSError):
+        silences = []  # sin ffmpeg -> cortes fijos
+    return pick_cuts(silences, duration, target_len)

@@ -65,3 +65,23 @@ def test_pick_cuts_cubre_toda_la_duracion_contiguo():
     assert chunks[-1][1] == 1500.0
     for a, b in zip(chunks, chunks[1:]):
         assert a[1] == b[0]  # contiguo, sin huecos ni solapes
+
+
+from pathlib import Path
+
+import speechtotext.core.chunked as chunked
+
+
+def test_plan_chunks_usa_silencedetect(monkeypatch):
+    fake = SimpleNamespace(stderr=b"silence_start: 601.0\nsilence_end: 602.4\n", returncode=0)
+    monkeypatch.setattr(chunked.subprocess, "run", lambda *a, **k: fake)
+    chunks = chunked.plan_chunks(Path("x.mp3"), duration=1200.0, target_len=600.0)
+    assert chunks == [(0.0, 601.7), (601.7, 1200.0)]
+
+
+def test_plan_chunks_fallback_si_ffmpeg_falla(monkeypatch):
+    def boom(*a, **k):
+        raise FileNotFoundError("no ffmpeg")
+    monkeypatch.setattr(chunked.subprocess, "run", boom)
+    chunks = chunked.plan_chunks(Path("x.mp3"), duration=1200.0, target_len=600.0)
+    assert chunks == [(0.0, 600.0), (600.0, 1200.0)]  # cortes fijos
