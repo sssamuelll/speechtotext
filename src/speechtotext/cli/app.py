@@ -9,7 +9,19 @@ Uso rápido:
 """
 from __future__ import annotations
 
+import os
 import sys
+
+# En Windows sin Developer Mode la caché de Hugging Face intenta crear symlinks y
+# revienta con WinError 1314; y el downloader xet se cuelga EN SILENCIO con
+# archivos grandes (los chicos bajan por HTTP y engañan). Estas dos flags fuerzan
+# copia + HTTP plano. huggingface_hub congela estas env vars en constantes AL
+# IMPORTARSE (constants.py:275,339), así que hay que setearlas ANTES de importar
+# faster_whisper (que lo arrastra). setdefault: quien ya lo configuró manda.
+if sys.platform == "win32":
+    os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")
+    os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+
 from pathlib import Path
 from typing import Optional
 
@@ -26,6 +38,8 @@ from speechtotext.core.formats import (
     write_txt,
     write_vtt,
 )
+from speechtotext.core.postprocess import normalize_hours
+from speechtotext.core.segments import LabeledSegment
 
 # En Windows la consola suele ser cp1252 y rich escribe glifos Unicode (spinner
 # Braille, etc.) que revientan al codificar. Forzamos UTF-8 en los streams.
@@ -59,6 +73,44 @@ def _fmt_file(seconds: float) -> str:
     return f"{m}m{s:02d}s"
 
 
+def _load_hotwords_file(path: Path) -> Optional[str]:
+    """Lee un léxico de un archivo: un término por línea o separados por coma."""
+    # utf-8-sig tolera el BOM que dejan algunos editores de Windows.
+    text = path.read_text(encoding="utf-8-sig")
+    words = [w.strip() for w in text.replace("\n", ",").split(",")]
+    return ", ".join(w for w in words if w) or None
+
+
+def _resolve_hotwords(hotwords: Optional[str], hotwords_file: Optional[Path]) -> Optional[str]:
+    """Combina --hotwords (inline) y --hotwords-file. Scoped por invocación, sin default global:
+    los hotwords son sesgo probabilístico, un léxico global envenenaría todo otro audio."""
+    parts = []
+    if hotwords_file is not None:
+        from_file = _load_hotwords_file(hotwords_file)
+        if from_file:
+            parts.append(from_file)
+    if hotwords and hotwords.strip():
+        parts.append(hotwords.strip())
+    return ", ".join(parts) or None
+
+
+def _transcribe_opts(lang: Optional[str], beam_size: int, vad: bool,
+                     hotwords: Optional[str], word_timestamps: bool = False) -> dict:
+    """Opciones de decodificación de Whisper. condition_on_previous_text=False corta el
+    arrastre de contexto entre ventanas: sin esto el modelo alucina hacia frases comunes
+    (Fase 0, docs/benchmark-turboscribe.md). word_timestamps sólo se pide al diarizar:
+    la asignación palabra→hablante parte los segmentos en el cambio de voz. Aquí aterrizan
+    futuros knobs de tuning."""
+    return {
+        "language": lang,
+        "beam_size": beam_size,
+        "vad_filter": vad,
+        "hotwords": hotwords,
+        "condition_on_previous_text": False,
+        "word_timestamps": word_timestamps,
+    }
+
+
 def transcribe_file(
     audio: Path,
     output: Optional[Path],
@@ -73,6 +125,7 @@ def transcribe_file(
     speakers: Optional[int],
     identify: bool,
     threshold: float,
+    hotwords: Optional[str] = None,
 ) -> None:
     """Transcribe un archivo (opcionalmente con diarización) y escribe los formatos pedidos."""
     try:
@@ -86,6 +139,10 @@ def transcribe_file(
     lang = None if language.lower() == "auto" else language
     if compute_type == "auto":
         compute_type = "int8" if device == "cpu" else "float16"
+    hotwords = (hotwords or "").strip() or None
+    if hotwords:
+        # markup=False: los términos pueden traer corchetes/acentos que rich malinterpretaría.
+        console.print(f"Hotwords: {hotwords}", markup=False)
 
     console.print(
         f"[bold]Modelo[/bold] [cyan]{model}[/cyan] · "
@@ -102,10 +159,7 @@ def transcribe_file(
     ) as progress:
         task = progress.add_task(f"Transcribiendo {audio.name}", total=None)
         segments_iter, info = whisper.transcribe(
-            str(audio),
-            language=lang,
-            beam_size=beam_size,
-            vad_filter=vad,
+            str(audio), **_transcribe_opts(lang, beam_size, vad, hotwords, word_timestamps=diarize)
         )
         segments = list(segments_iter)
         progress.update(task, completed=1)
@@ -118,6 +172,13 @@ def transcribe_file(
 
     if diarize:
         segments = _run_diarization(audio, segments, speakers, identify, threshold)
+
+    # Post-proceso textual (horas 8.33->8:33). Uniforma a LabeledSegment: los Segment
+    # de faster_whisper son inmutables y los writers solo leen start/end/text/speaker.
+    segments = [
+        LabeledSegment(s.start, s.end, normalize_hours(s.text), getattr(s, "speaker", None))
+        for s in segments
+    ]
 
     writers: dict[str, tuple[str, callable]] = {
         "txt": (".txt", lambda p: write_txt(segments, p)),
@@ -150,7 +211,8 @@ def transcribe(
         "small",
         "--model",
         "-m",
-        help="tiny | base | small | medium | large-v3 | distil-large-v3",
+        help="tiny | base | small | medium | large-v3 | distil-large-v3. "
+        "large-v3 = máxima calidad (puntuación y nombres propios; ~1.1x tiempo real en CPU).",
     ),
     formats: str = typer.Option(
         "txt,srt,json", "--formats", "-f", help="Formatos separados por coma (txt, srt, vtt, json)."
@@ -177,11 +239,26 @@ def transcribe(
     threshold: float = typer.Option(
         0.5, "--threshold", help="Umbral de coincidencia de voz (coseno, 0-1)."
     ),
+    hotwords: Optional[str] = typer.Option(
+        None,
+        "--hotwords",
+        help="Términos difíciles separados por coma (nombres propios, jerga) para sesgar el "
+        "modelo en cada ventana. Escríbelos con mayúsculas y tildes.",
+    ),
+    hotwords_file: Optional[Path] = typer.Option(
+        None,
+        "--hotwords-file",
+        exists=True,
+        dir_okay=False,
+        help="Archivo con términos difíciles (uno por línea o separados por coma), para un "
+        "léxico por proyecto. Se combina con --hotwords.",
+    ),
 ) -> None:
     """Transcribe un archivo de audio localmente con Whisper (sin enviar nada a internet)."""
     transcribe_file(
         audio, output, language, model, formats, device, compute_type,
         vad, beam_size, diarize, speakers, identify, threshold,
+        hotwords=_resolve_hotwords(hotwords, hotwords_file),
     )
 
 
@@ -219,7 +296,7 @@ def _run_diarization(audio, segments, speakers, identify, threshold):
 
 
 def _extract_region(audio, regions, region, output, language, model, formats,
-                    diarize, speakers, identify, threshold, context):
+                    diarize, speakers, identify, threshold, context, hotwords=None):
     import subprocess
 
     from speechtotext.core.finder import clip_window
@@ -256,6 +333,7 @@ def _extract_region(audio, regions, region, output, language, model, formats,
     transcribe_file(
         clip, base_dir, language, model, formats,
         "cpu", "auto", True, 5, diarize, speakers, identify, threshold,
+        hotwords=hotwords,
     )
 
 
@@ -277,6 +355,13 @@ def find(
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Carpeta de salida del tramo."),
     rebuild: bool = typer.Option(False, "--rebuild", help="Forzar reconstrucción del índice."),
     top: int = typer.Option(5, "--top", help="Cuántas regiones listar."),
+    hotwords: Optional[str] = typer.Option(
+        None, "--hotwords", help="Términos difíciles para la transcripción del tramo (ver transcribe)."
+    ),
+    hotwords_file: Optional[Path] = typer.Option(
+        None, "--hotwords-file", exists=True, dir_okay=False,
+        help="Archivo de léxico para la transcripción del tramo (ver transcribe).",
+    ),
 ) -> None:
     """Busca contenido en un audio largo; con --extract recorta y transcribe el tramo."""
     from speechtotext.core import finder
@@ -297,6 +382,7 @@ def find(
         _extract_region(
             audio, regions, region, output, language, model, formats,
             diarize, speakers, identify, threshold, context,
+            hotwords=_resolve_hotwords(hotwords, hotwords_file),
         )
 
 
