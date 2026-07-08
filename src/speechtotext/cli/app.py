@@ -95,16 +95,19 @@ def _resolve_hotwords(hotwords: Optional[str], hotwords_file: Optional[Path]) ->
 
 
 def _transcribe_opts(lang: Optional[str], beam_size: int, vad: bool,
-                     hotwords: Optional[str]) -> dict:
+                     hotwords: Optional[str], word_timestamps: bool = False) -> dict:
     """Opciones de decodificación de Whisper. condition_on_previous_text=False corta el
     arrastre de contexto entre ventanas: sin esto el modelo alucina hacia frases comunes
-    (Fase 0, docs/benchmark-turboscribe.md). Aquí aterrizan futuros knobs de tuning."""
+    (Fase 0, docs/benchmark-turboscribe.md). word_timestamps sólo se pide al diarizar:
+    la asignación palabra→hablante parte los segmentos en el cambio de voz. Aquí aterrizan
+    futuros knobs de tuning."""
     return {
         "language": lang,
         "beam_size": beam_size,
         "vad_filter": vad,
         "hotwords": hotwords,
         "condition_on_previous_text": False,
+        "word_timestamps": word_timestamps,
     }
 
 
@@ -156,7 +159,7 @@ def transcribe_file(
     ) as progress:
         task = progress.add_task(f"Transcribiendo {audio.name}", total=None)
         segments_iter, info = whisper.transcribe(
-            str(audio), **_transcribe_opts(lang, beam_size, vad, hotwords)
+            str(audio), **_transcribe_opts(lang, beam_size, vad, hotwords, word_timestamps=diarize)
         )
         segments = list(segments_iter)
         progress.update(task, completed=1)

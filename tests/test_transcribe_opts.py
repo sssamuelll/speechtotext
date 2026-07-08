@@ -14,3 +14,10 @@ def test_pasa_los_parametros_de_decodificacion():
     assert opts["beam_size"] == 3
     assert opts["vad_filter"] is False
     assert opts["hotwords"] == "Boconó"
+
+
+def test_word_timestamps_se_activa_solo_para_diarizar():
+    # La diarización necesita tiempos por palabra para partir por hablante; sin diarizar
+    # no se piden (cuestan) — off por defecto.
+    assert _transcribe_opts("es", 5, True, None, word_timestamps=True)["word_timestamps"] is True
+    assert _transcribe_opts("es", 5, True, None)["word_timestamps"] is False

@@ -8,16 +8,52 @@ def _overlap(a0: float, a1: float, b0: float, b1: float) -> float:
     return max(0.0, min(a1, b1) - max(a0, b0))
 
 
+def _best_speaker(start: float, end: float, turns) -> str | None:
+    """Hablante con más solape TOTAL con [start, end]. Agrega por hablante, no por turno:
+    pyannote parte a un mismo hablante en varios turnos, y el turno individual más grande
+    puede ser del minoritario. None si no solapa con ninguno. Empate -> el que apareció antes."""
+    totals: dict[str, float] = {}
+    for t0, t1, spk in turns:
+        ov = _overlap(start, end, t0, t1)
+        if ov > 0.0:
+            totals[spk] = totals.get(spk, 0.0) + ov
+    return max(totals, key=totals.get) if totals else None
+
+
 def assign_segments(segments, turns: list[tuple[float, float, str]]) -> list[LabeledSegment]:
+    """Etiqueta cada segmento con su hablante. Con timestamps de palabra (word_timestamps)
+    parte el segmento en los cambios de hablante internos: sin esto un segmento de Whisper
+    que cruza una frontera de turno se etiqueta entero con un solo hablante y la cola se
+    arrastra al siguiente (corta a mitad de sintagma). Sin palabras cae al modo grueso:
+    un hablante por segmento (máximo solape).
+
+    Una palabra sin turno (cae en un hueco entre turnos —pyannote no cubre toda la línea de
+    tiempo— o dura 0s) hereda el hablante del run en curso, no arranca uno nuevo: si no,
+    saldría como 'Hablante ?' de una sola palabra en medio de un monólogo."""
     out: list[LabeledSegment] = []
     for s in segments:
-        best: str | None = None
-        best_ov = 0.0
-        for t0, t1, spk in turns:
-            ov = _overlap(s.start, s.end, t0, t1)
-            if ov > best_ov:
-                best, best_ov = spk, ov
-        out.append(LabeledSegment(start=s.start, end=s.end, text=s.text, speaker=best))
+        words = getattr(s, "words", None)
+        if not words:
+            out.append(LabeledSegment(s.start, s.end, s.text, _best_speaker(s.start, s.end, turns)))
+            continue
+        run_spk: str | None = None
+        run_words: list[str] = []
+        run_start = run_end = None
+        for w in words:
+            spk = _best_speaker(w.start, w.end, turns)
+            if not run_words:
+                run_start, run_spk = w.start, spk
+            elif spk is None or spk == run_spk:
+                pass  # hereda: palabra sin turno o mismo hablante -> sigue el run
+            elif run_spk is None:
+                run_spk = spk  # el run venía sin hablante -> adopta el primero real
+            else:
+                out.append(LabeledSegment(run_start, run_end, "".join(run_words), run_spk))
+                run_words, run_start, run_spk = [], w.start, spk
+            run_words.append(w.word)
+            run_end = w.end
+        if run_words:
+            out.append(LabeledSegment(run_start, run_end, "".join(run_words), run_spk))
     return out
 
 
