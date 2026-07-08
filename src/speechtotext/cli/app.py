@@ -126,6 +126,8 @@ def transcribe_file(
     identify: bool,
     threshold: float,
     hotwords: Optional[str] = None,
+    chunk: Optional[bool] = None,
+    jobs: int = 4,
 ) -> None:
     """Transcribe un archivo (opcionalmente con diarización) y escribe los formatos pedidos."""
     try:
@@ -149,20 +151,25 @@ def transcribe_file(
         f"[bold]device[/bold] [cyan]{device}[/cyan] · "
         f"[bold]compute[/bold] [cyan]{compute_type}[/cyan]"
     )
-    whisper = WhisperModel(model, device=device, compute_type=compute_type)
+    from speechtotext.core.chunked import run_chunked, should_chunk, probe_duration
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        TimeElapsedColumn(),
-        console=console,
-    ) as progress:
-        task = progress.add_task(f"Transcribiendo {audio.name}", total=None)
-        segments_iter, info = whisper.transcribe(
-            str(audio), **_transcribe_opts(lang, beam_size, vad, hotwords, word_timestamps=diarize)
+    opts = _transcribe_opts(lang, beam_size, vad, hotwords, word_timestamps=diarize)
+    if should_chunk(probe_duration(audio), chunk):
+        console.print(f"[bold]Troceado[/bold] (jobs={jobs}) · {model}")
+        segments, info = run_chunked(
+            audio, opts, jobs, model_name=model, device=device,
+            compute_type=compute_type, log=lambda m: console.print(f"  {m}", markup=False),
         )
-        segments = list(segments_iter)
-        progress.update(task, completed=1)
+    else:
+        whisper = WhisperModel(model, device=device, compute_type=compute_type)
+        with Progress(
+            SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
+            TimeElapsedColumn(), console=console,
+        ) as progress:
+            task = progress.add_task(f"Transcribiendo {audio.name}", total=None)
+            segments_iter, info = whisper.transcribe(str(audio), **opts)
+            segments = list(segments_iter)
+            progress.update(task, completed=1)
 
     console.print(
         f"Idioma detectado: [bold]{info.language}[/bold] "
@@ -253,12 +260,20 @@ def transcribe(
         help="Archivo con términos difíciles (uno por línea o separados por coma), para un "
         "léxico por proyecto. Se combina con --hotwords.",
     ),
+    chunk: Optional[bool] = typer.Option(
+        None, "--chunk/--no-chunk",
+        help="Trocear el audio para checkpoint/resume + paralelismo. Auto si dura > 20 min.",
+    ),
+    jobs: int = typer.Option(
+        4, "--jobs", "-j", help="Trozos en paralelo al trocear (comparten un modelo).",
+    ),
 ) -> None:
     """Transcribe un archivo de audio localmente con Whisper (sin enviar nada a internet)."""
     transcribe_file(
         audio, output, language, model, formats, device, compute_type,
         vad, beam_size, diarize, speakers, identify, threshold,
         hotwords=_resolve_hotwords(hotwords, hotwords_file),
+        chunk=chunk, jobs=jobs,
     )
 
 
