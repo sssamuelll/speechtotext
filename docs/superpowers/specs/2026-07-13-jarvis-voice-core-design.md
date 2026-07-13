@@ -5,7 +5,7 @@ Estado: aprobado por Samuel (brainstorming + panel de arquitectura de 6 agentes 
 
 ## 1. Contexto y objetivo
 
-Samuel construye su asistente de voz personal 100% local como hito de carrera **open-source público**. speechtotext (este repo) aporta los activos de voz ya construidos; el asistente vive en un **repo nuevo público** (nombre pendiente de decisión, ver §14).
+Samuel construye su asistente de voz personal 100% local como hito de carrera **open-source público**. speechtotext (este repo) aporta los activos de voz ya construidos; el asistente vive en un **repo nuevo público: `aurelius`** (decidido 2026-07-13, ver §14).
 
 Estrategia: **esqueleto andante**. Primer entregable (3-3.5 semanas a tiempo parcial): un loop end-to-end vivo — oye → piensa → habla — feo pero completo y medido. Después se profundiza órgano por órgano, empezando por la razón de ser del proyecto: un **pipeline DSP profesional en vivo** (supresión de ruido, EQ de frecuencias de voz, compresor, AEC). El esqueleto no incluye el DSP pro, pero instala su fontanería completa (§6).
 
@@ -166,7 +166,7 @@ Turno con cache frío: 10-15 s (se documenta como limitación). La física la fi
 
 ## 14. Decisiones diferidas (con dueño y momento)
 
-1. **Nombre del repo público** — Samuel, antes de crear el repo (S1 día 1). "Jarvis" es marca Marvel/Disney: válido como wake word privado, riesgo tonto como nombre del hito. Se trabajará con proceso de naming aparte.
+1. **Nombre del repo público** — DECIDIDO 2026-07-13: **`aurelius`** (elección de Samuel tras sesión de naming; sin colisiones en el campo de voz/audio). "Hey Jarvis" queda como wake word privado. Pendientes menores: dominio (aurelius.com pertenece a Aurelius Group; usar aurelius.dev u otro al montar el README) y verificar disponibilidad del nombre en PyPI antes del primer publish.
 2. **Voz de Piper** — Samuel, a oído, en S3 (candidatas verificadas: es_MX-claude-high, es_MX-ale-medium, es_ES-davefx-medium, es_ES-sharvard-medium, es_AR-daniela-high).
 3. **Política si el 7B se siente lento** — Samuel, con el loop andando en S2: aceptar 3.5-5 s con brevedad forzada, o fallback a Qwen3-4B (~-1.5 s, menos calidad de español).
 
