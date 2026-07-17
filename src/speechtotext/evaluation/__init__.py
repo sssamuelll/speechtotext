@@ -8,6 +8,11 @@ from speechtotext.evaluation.manifest import (
     load_corpus_manifest,
 )
 from speechtotext.evaluation.splits import DatasetSplit, split_by_recording_day
+from speechtotext.evaluation.training import (
+    LabeledFeatureExample,
+    LabeledFeaturePartition,
+    fit_segment_usable_calibrator,
+)
 from speechtotext.evaluation.metrics import (
     ErrorRate,
     RiskCoveragePoint,
@@ -33,6 +38,12 @@ __all__ = [
 ]
 
 __all__ += ["DatasetSplit", "split_by_recording_day"]
+
+__all__ += [
+    "LabeledFeatureExample",
+    "LabeledFeaturePartition",
+    "fit_segment_usable_calibrator",
+]
 
 __all__ += [
     "ErrorRate",
