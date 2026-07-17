@@ -1,6 +1,7 @@
 from speechtotext.audio.fingerprint import PipelineProvenance, PipelineStep
 from speechtotext.audio.io import AudioDecodeError, decode_audio
 from speechtotext.audio.level import GainResult, apply_fixed_gain
+from speechtotext.audio.quality import compute_audio_quality
 from speechtotext.audio.types import (
     AudioClip,
     AudioQualityReport,
@@ -22,5 +23,6 @@ __all__ = [
     "PipelineStep",
     "SpeechRegion",
     "apply_fixed_gain",
+    "compute_audio_quality",
     "decode_audio",
 ]
