@@ -1,3 +1,5 @@
+import hashlib
+import json
 from dataclasses import replace
 from datetime import date, timedelta
 
@@ -70,6 +72,25 @@ def test_split_no_mezcla_dias_y_es_determinista():
     assert all(partitions)
     assert all(len(days) >= 3 for days in day_sets)
     assert len(first.fingerprint) == 64
+
+
+def test_split_fingerprint_usa_la_serializacion_canonica_del_resto_del_codigo():
+    entries = tuple(_entry(day, day, "a") for day in range(9))
+    manifest = _manifest(entries)
+    split = split_by_recording_day(manifest)
+    payload = {
+        "schema_version": "speechtotext.split/v1",
+        "seed": split.seed,
+        "manifest_fingerprint": split.manifest_fingerprint,
+        "development": list(split.development_ids),
+        "calibration": list(split.calibration_ids),
+        "holdout": list(split.holdout_ids),
+    }
+    expected = hashlib.sha256(json.dumps(
+        payload, ensure_ascii=True, allow_nan=False,
+        separators=(",", ":"), sort_keys=True,
+    ).encode("utf-8")).hexdigest()
+    assert split.fingerprint == expected
 
 
 def test_split_fingerprint_cambia_si_cambia_dataset():

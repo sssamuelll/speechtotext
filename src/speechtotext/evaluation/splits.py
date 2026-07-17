@@ -93,7 +93,10 @@ class DatasetSplit:
             "holdout": list(self.holdout_ids),
         }
         return hashlib.sha256(
-            json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+            json.dumps(
+                payload, ensure_ascii=True, allow_nan=False,
+                separators=(",", ":"), sort_keys=True,
+            ).encode("utf-8")
         ).hexdigest()
 
 

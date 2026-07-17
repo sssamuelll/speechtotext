@@ -5,6 +5,7 @@ import json
 import pytest
 
 from speechtotext.asr import NativeSignals, TranscriptionResult
+from speechtotext.asr.base import AsrError
 from speechtotext.confidence.calibration import (
     CalibratorArtifact,
     LogisticCalibrator,
@@ -408,6 +409,44 @@ def test_decorator_rechaza_binding_antes_de_warm_o_inferencia(backend):
             usable_max_wer=0.10,
         )
     assert raw.warm_calls == raw.transcribe_calls == 0
+
+
+def test_decorator_transcribe_rechaza_request_no_ligado_con_error_tipado(backend):
+    raw = _ReturningBackend(backend.model_artifact)
+    wrapped = CalibratingLocalAsrBackend(
+        raw,
+        LogisticCalibrator(_full_feature_artifact_for(raw)),
+        pipeline=PIPELINE,
+        request=REQUEST,
+        expected_language="es",
+        usable_max_wer=0.10,
+    )
+    other_request = TranscriptionRequest(language="en")
+    with pytest.raises(AsrError, match="pipeline/request"):
+        wrapped.transcribe(_clip(), other_request)
+    assert raw.transcribe_calls == 0
+
+
+def test_decorator_transcribe_rechaza_raw_backend_ya_calibrado(backend):
+    class _PreCalibratedBackend(_ReturningBackend):
+        def transcribe(self, clip, request):
+            self.transcribe_calls += 1
+            return replace(_result(), calibrated_confidence=0.9, calibrator_version="1" * 64)
+
+    raw = _PreCalibratedBackend(backend.model_artifact)
+    wrapped = CalibratingLocalAsrBackend(
+        raw,
+        LogisticCalibrator(_full_feature_artifact_for(raw)),
+        pipeline=PIPELINE,
+        request=REQUEST,
+        expected_language="es",
+        usable_max_wer=0.10,
+    )
+    with pytest.raises(AsrError, match="ya calibrada") as excinfo:
+        wrapped.transcribe(_clip(), REQUEST)
+    assert raw.transcribe_calls == 1
+    assert excinfo.value.code == "calibration_binding"
+    assert excinfo.value.recoverable is False
 
 
 def test_artifact_roundtrip_canonico_en_bytes():

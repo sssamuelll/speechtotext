@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from speechtotext.asr.base import VerifiedLocalAsrBackend
+from speechtotext.asr.base import AsrError, VerifiedLocalAsrBackend
 from speechtotext.asr.types import TranscriptionRequest, TranscriptionResult
 from speechtotext.audio.fingerprint import PipelineProvenance
 from speechtotext.audio.types import AudioClip
@@ -103,11 +103,19 @@ class CalibratingLocalAsrBackend:
             request.fingerprint != self._request.fingerprint
             or view.provenance != self._pipeline
         ):
-            raise ValueError("pipeline/request no coincide con el binding calibrado")
+            raise AsrError(
+                "calibration_binding",
+                False,
+                "pipeline/request no coincide con el binding calibrado",
+            )
         self._validate_binding()
         raw = self._raw_backend.transcribe(clip, request)
         if raw.calibrated_confidence is not None or raw.calibrator_version is not None:
-            raise ValueError("raw backend no puede devolver confianza ya calibrada")
+            raise AsrError(
+                "calibration_binding",
+                False,
+                "raw backend no puede devolver confianza ya calibrada",
+            )
         features = extract_asr_features(
             raw,
             clip.quality,
