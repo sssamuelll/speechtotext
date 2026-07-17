@@ -177,6 +177,10 @@ class DatasetSecurityEvidence(AbstractContextManager):
 
     def require_for(self, dataset_root: Path, manifest: CorpusManifest) -> None:
         self._require_active()
+        if self._manifest_replaced:
+            raise DatasetSecurityError(
+                "el manifest ya fue reemplazado; la evidencia esta consumida"
+            )
         if not self.sufficient:
             raise DatasetSecurityError("evidencia insuficiente de seguridad")
         if _abspath(dataset_root) != _abspath(self._dataset_root):
@@ -267,6 +271,21 @@ class DatasetSecurityEvidence(AbstractContextManager):
             data = lease.stream.read(65)
         if not (32 <= len(data) <= 64):
             raise RetentionError("clave de referencia con longitud invalida")
+        return data
+
+    def read_report_bytes(self, path: Path, *, max_bytes: int) -> bytes:
+        self._require_active()
+        if max_bytes <= 0:
+            raise RetentionError("max_bytes debe ser positivo")
+        if not _within(path, self._reports_root):
+            raise RetentionError("el reporte debe vivir en reports/")
+        # Un solo lease: reparse/hardlink/DACL/cifrado los verifica el adapter
+        # sobre el mismo handle; nunca hay check-then-open ni Path.read_bytes.
+        with self._filesystem.lease_private_file(path, self._reports_root) as lease:
+            lease.stream.seek(0)
+            data = lease.stream.read(max_bytes + 1)
+        if len(data) > max_bytes:
+            raise RetentionError("el reporte excede max_bytes")
         return data
 
     def write_json_report(self, path: Path, payload: Mapping[str, object]) -> None:

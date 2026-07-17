@@ -148,3 +148,33 @@ def test_create_private_secret_es_new_only(tmp_path):
     assert len(key.read_bytes()) == 32
     with pytest.raises(CorpusFilesystemError, match="secreto existente"):
         fs.create_private_secret(key, secrets, size=32)
+
+
+def test_journal_privado_append_es_durable(tmp_path):
+    root = tmp_path / "private"
+    reports = root / "reports"
+    reports.mkdir(parents=True)
+    fs = WindowsCorpusFilesystem(
+        acl_probe=_always(True),
+        encryption_probe=lambda h, p: (True, "efs"),
+    )
+    journal = reports / "purge.journal.jsonl"
+    with fs.reserve_or_resume_private_journal(
+        journal, reports, b'{"kind":"reserved"}\n', max_bytes=1 << 20
+    ) as lease:
+        fs.append_private_journal(lease, b'{"kind":"intent"}\n')
+        fs.append_private_journal(lease, b'{"kind":"deleted"}\n')
+    # Cada record quedo flush-eado en disco antes de cerrar el lease.
+    data = journal.read_bytes()
+    assert b'"kind":"reserved"' in data
+    assert b'"kind":"intent"' in data
+    assert b'"kind":"deleted"' in data
+    # Una reanudacion relee lo persistido.
+    with fs.reserve_or_resume_private_journal(
+        journal, reports, b"ignored", max_bytes=1 << 20
+    ) as resumed:
+        assert b'"kind":"intent"' in resumed.existing_payload
+    # Un journal existente sobre el limite falla antes de operar.
+    with pytest.raises(CorpusFilesystemError, match="limite"):
+        with fs.reserve_or_resume_private_journal(journal, reports, b"x", max_bytes=8):
+            pass

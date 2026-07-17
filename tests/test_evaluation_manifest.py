@@ -183,6 +183,14 @@ def test_manifest_rechaza_paths_ambiguos_en_windows(tmp_path, unsafe):
         )
 
 
+@pytest.mark.parametrize("token", ["NaN", "Infinity", "-Infinity"])
+def test_manifest_rechaza_json_no_finito(tmp_path, token):
+    payload = json.dumps(_manifest(_entry("0" * 64)))
+    payload = payload.replace('"duration_ms": 1500', f'"duration_ms": {token}')
+    with pytest.raises(ValueError, match="no finita"):
+        parse_corpus_manifest_bytes(payload.encode("utf-8"), dataset_root=tmp_path)
+
+
 def test_manifest_exige_un_solo_primario_y_assets_unicos(tmp_path, fs_adapter):
     repo = tmp_path / "repo"
     dataset = tmp_path / "private"

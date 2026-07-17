@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import io
 import os
@@ -134,6 +135,9 @@ class FakeCorpusFilesystem:
         self._mutation_locked = False
         self._update_paths: dict[int, Path] = {}
         self._lease_paths: dict[int, Path] = {}
+        self._identity_shift: dict[str, int] = {}
+        self._readonly_manifest_leases = 0
+        self._journal_state: dict[int, list] = {}
 
     # -- fault injection helpers ------------------------------------------
     def configure_security(self, *, acl_ok: bool, encryption_ok: bool) -> None:
@@ -147,9 +151,14 @@ class FakeCorpusFilesystem:
     def fail_delete_for(self, rel_asset_path: str) -> None:
         self._fail_deletes.add(PurePosixPath(rel_asset_path).as_posix())
 
+    def force_identity_change(self, path: Path) -> None:
+        """Simula que la identidad OS del path cambio (mtime distinto)."""
+        key = os.path.normcase(str(_abspath(path)))
+        self._identity_shift[key] = self._identity_shift.get(key, 0) + 1
+
     # -- identity ---------------------------------------------------------
     @staticmethod
-    def _identity(path: Path) -> CorpusFileIdentity:
+    def _raw_identity(path: Path) -> CorpusFileIdentity:
         info = path.stat(follow_symlinks=False)
         return CorpusFileIdentity(
             volume_serial=int(info.st_dev),
@@ -158,6 +167,15 @@ class FakeCorpusFilesystem:
             mtime_ns=int(info.st_mtime_ns),
             link_count=int(getattr(info, "st_nlink", 1)),
         )
+
+    def _identity(self, path: Path) -> CorpusFileIdentity:
+        identity = self._raw_identity(path)
+        shift = self._identity_shift.get(os.path.normcase(str(_abspath(path))))
+        if shift:
+            identity = dataclasses.replace(
+                identity, mtime_ns=identity.mtime_ns + shift
+            )
+        return identity
 
     def identity(self, path: Path) -> CorpusFileIdentity:
         return self._identity(_abspath(path))
@@ -191,6 +209,12 @@ class FakeCorpusFilesystem:
             raise CorpusFilesystemError("manifest fuera del dataset_root")
         if not path.is_file():
             raise CorpusFilesystemError("manifest no es un archivo regular")
+        # Un replay que retiene un lease read-only (sin share-delete) impide que
+        # la transicion abra el lease de update: modela el bloqueo real.
+        if replaceable and self._readonly_manifest_leases > 0:
+            raise CorpusFilesystemError(
+                "un lease read-only concurrente bloquea la transicion de mutacion"
+            )
         lease = PrivateFileLease(
             stream=io.BytesIO(path.read_bytes()),
             identity=self._identity(path),
@@ -198,11 +222,15 @@ class FakeCorpusFilesystem:
         )
         if replaceable:
             self._update_paths[id(lease)] = path
+        else:
+            self._readonly_manifest_leases += 1
         try:
             yield lease
         finally:
             lease.stream.close()
             self._update_paths.pop(id(lease), None)
+            if not replaceable:
+                self._readonly_manifest_leases -= 1
 
     @contextmanager
     def lease_manifest_mutation_lock(
@@ -342,23 +370,42 @@ class FakeCorpusFilesystem:
             abs_path.write_bytes(initial_record)
             existing = initial_record
         self.journal_events.append("reserved")
-        yield PrivateJournalLease(
+        lease = PrivateJournalLease(
             identity=self._identity(abs_path),
             existing_payload=existing,
             operation_id=hashlib.sha256(initial_record).hexdigest()[:16],
         )
+        # [abs_path, max_bytes, running_total] para append durable y acotado.
+        self._journal_state[id(lease)] = [abs_path, max_bytes, len(existing)]
+        try:
+            yield lease
+        finally:
+            self._journal_state.pop(id(lease), None)
 
     def append_private_journal(
         self, lease: PrivateJournalLease, record: bytes
     ) -> CorpusFileIdentity:
         import json
 
+        state = self._journal_state.get(id(lease))
+        if state is None:
+            raise CorpusFilesystemError("append sin journal activo")
+        abs_path, max_bytes, total = state
+        if len(record) > max_bytes or total + len(record) > max_bytes:
+            raise CorpusFilesystemError("record de journal sobre el limite")
+        # Append durable: el record queda en disco antes de devolver, de modo que
+        # una reanudacion (reserve_or_resume) lo relee como existing_payload.
+        with open(abs_path, "ab") as handle:
+            handle.write(record)
+            handle.flush()
+            os.fsync(handle.fileno())
+        state[2] = total + len(record)
         try:
             kind = json.loads(record.decode("utf-8")).get("kind", "record")
         except (ValueError, AttributeError):
             kind = "record"
         self.journal_events.append(f"{kind}_flushed")
-        return lease.identity
+        return self._identity(abs_path)
 
     # -- security probes --------------------------------------------------
     def current_user_only_acl(self, path: Path) -> bool:
@@ -571,6 +618,7 @@ class WindowsCorpusFilesystem:
         self._encryption_probe = encryption_probe
         self._asset_handles: dict[int, int] = {}
         self._update_target: Path | None = None
+        self._journal_streams: dict[int, list] = {}
 
     def _verify(
         self, handle: int, path: Path, *, directory: bool, label: str
@@ -798,39 +846,74 @@ class WindowsCorpusFilesystem:
         *,
         max_bytes: int,
     ) -> Iterator[PrivateJournalLease]:
+        import msvcrt
+
         if not _within(Path(path), Path(allowed_root)):
             raise CorpusFilesystemError("journal fuera del root permitido")
         target = _abspath(Path(path))
         if len(initial_record) > max_bytes:
             raise CorpusFilesystemError("record inicial sobre el limite")
-        if target.exists():
+        resuming = target.exists()
+        if resuming:
             existing = target.read_bytes()
+            if len(existing) > max_bytes:
+                raise CorpusFilesystemError("journal existente sobre el limite")
+            disposition = self._api.OPEN_EXISTING
         else:
-            handle = self._api.open(
-                target,
-                access=self._api.GENERIC_WRITE,
-                share=self._api.FILE_SHARE_READ,
-                disposition=self._api.CREATE_NEW,
-            )
-            with os.fdopen(
-                __import__("msvcrt").open_osfhandle(handle, os.O_BINARY),
+            existing = initial_record
+            disposition = self._api.CREATE_NEW
+        handle = self._api.open(
+            target,
+            access=self._api.GENERIC_WRITE | self._api.FILE_READ_ATTRIBUTES,
+            share=self._api.FILE_SHARE_READ,
+            disposition=disposition,
+        )
+        stream: BinaryIO | None = None
+        try:
+            self._require_secure(handle, target)
+            stream = os.fdopen(
+                msvcrt.open_osfhandle(handle, os.O_BINARY | os.O_APPEND),
                 "wb",
                 buffering=0,
                 closefd=True,
-            ) as writer:
-                writer.write(initial_record)
-                writer.flush()
-            existing = initial_record
-        yield PrivateJournalLease(
-            identity=self.identity(target),
-            existing_payload=existing,
-            operation_id=hashlib.sha256(initial_record).hexdigest()[:16],
-        )
+            )
+            handle = -1
+            if not resuming:
+                stream.write(initial_record)
+                stream.flush()
+                os.fsync(stream.fileno())
+            lease = PrivateJournalLease(
+                identity=self.identity(target),
+                existing_payload=existing,
+                operation_id=hashlib.sha256(initial_record).hexdigest()[:16],
+            )
+            self._journal_streams[id(lease)] = [stream, target, max_bytes, len(existing)]
+            try:
+                yield lease
+            finally:
+                self._journal_streams.pop(id(lease), None)
+        finally:
+            if stream is not None:
+                stream.close()
+            elif handle != -1:
+                self._api.close(handle)
 
     def append_private_journal(
         self, lease: PrivateJournalLease, record: bytes
     ) -> CorpusFileIdentity:
-        return lease.identity
+        state = self._journal_streams.get(id(lease))
+        if state is None:
+            raise CorpusFilesystemError("append sin journal activo")
+        stream, target, max_bytes, total = state
+        if len(record) > max_bytes or total + len(record) > max_bytes:
+            raise CorpusFilesystemError("record de journal sobre el limite")
+        # Append durable sobre el mismo handle: flush + FlushFileBuffers (fsync)
+        # antes de devolver, para que el intent preceda al side effect destructivo.
+        stream.write(record)
+        stream.flush()
+        os.fsync(stream.fileno())
+        state[3] = total + len(record)
+        return self.identity(target)
 
     def _require_secure(self, handle: int, path: Path) -> None:
         if self._acl_probe is not None and not self._acl_probe(handle, path):
