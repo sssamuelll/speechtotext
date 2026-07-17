@@ -28,6 +28,13 @@ from speechtotext.evaluation.metrics import (
     risk_coverage_curve,
     word_error,
 )
+from speechtotext.evaluation.runner import (
+    collect_labeled_feature_partition,
+    EvaluationConfig,
+    load_entry_clip,
+    preflight_evaluation,
+    run_evaluation,
+)
 
 __all__ = [
     "CorpusEntry",
@@ -59,4 +66,12 @@ __all__ += [
     "percentile",
     "risk_coverage_curve",
     "word_error",
+]
+
+__all__ += [
+    "collect_labeled_feature_partition",
+    "EvaluationConfig",
+    "load_entry_clip",
+    "preflight_evaluation",
+    "run_evaluation",
 ]
