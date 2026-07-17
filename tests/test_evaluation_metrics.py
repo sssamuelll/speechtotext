@@ -86,6 +86,15 @@ def test_upper_es_macro_y_cero_fallos_conserva_incertidumbre():
     assert 0.0 < zero < 0.01
 
 
+def test_bloque_con_wer_mayor_a_uno_no_se_recorta_y_fuerza_fallo():
+    # Un bloque alucinado (mas errores que palabras de referencia) conserva su
+    # tasa >1; recortar la tasa/limite por bloque a <=1.0 enmascararia el fallo.
+    upper = cluster_bootstrap_error_upper(
+        [(3, 2), (0, 100), (0, 100)], resamples=1000, seed=7
+    )
+    assert upper >= 1.5 / 3
+
+
 def test_upper_del_p95_resamplea_dias_completos_y_exige_tres_bloques():
     blocks = ([100.0, 110.0], [200.0, 220.0], [300.0, 330.0])
     upper = cluster_bootstrap_percentile_upper(
