@@ -27,5 +27,6 @@ src/static/*.json
 *.log
 
 # Modelos descargados por faster-whisper (caché Hugging Face)
+# Anclado a la raíz: src/speechtotext/models/ es un paquete Python versionado
 .cache/
-models/
+/models/
