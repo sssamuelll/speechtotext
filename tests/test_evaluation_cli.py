@@ -1,4 +1,5 @@
 # tests/test_evaluation_cli.py
+from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
@@ -480,4 +481,156 @@ def test_execute_job_modelo_activo_distinto_a_identidad_planeada_falla_antes_de_
     with pytest.raises(ValueError, match="identidad planeada"):
         execute_job(_job_args(corpus))
     # verify_model_files/backend/leases/run nunca corren tras el mismatch.
+    assert calls == []
+
+
+# --------------------------------------------------------------------------
+# Composition-root tests para execute_training_job. Mismo enfoque fail-closed:
+# spies en el seam audit/verify/backend prueban que expiracion, politica
+# invalida y el scope del audit (dev+calibration, jamas holdout) se resuelven
+# antes de construir backend, tomar leases o decodificar audio. El happy-path
+# (warm/fit real) queda cubierto por tests/test_evaluation_training.py.
+# --------------------------------------------------------------------------
+
+
+def _training_job_args(corpus, **overrides):
+    values = {
+        "--manifest": str(corpus.manifest_path),
+        "--dataset-root": str(corpus.root),
+        "--repo-root": str(corpus.repo),
+        "--model-manifest": str(corpus.root / "model" / "manifest.json"),
+        "--model-root": str(corpus.root / "model"),
+        "--model-manifest-fingerprint": "a" * 64,
+        "--output": str(corpus.root / "reports" / "calibrator.json"),
+        "--as-of": "2026-07-16",
+        "--artifact-version": "fw-small-es-v1",
+        "--min-effective-voice-ms": "160",
+        "--min-rms-dbfs": "-45",
+        "--min-snr-db": "6",
+        "--max-clipping-ratio": "0.01",
+    }
+    values.update(overrides)
+    argv = []
+    for key, value in values.items():
+        argv.append(key)
+        if value is not None:
+            argv.append(value)
+    return build_training_parser().parse_args(argv)
+
+
+def test_execute_training_job_no_abre_holdout_en_audit_ni_backend(
+    monkeypatch, corpus, fs_adapter
+):
+    entry = corpus.manifest.entries[0]
+    monkeypatch.setattr(cli_module, "default_corpus_filesystem", lambda: fs_adapter)
+    monkeypatch.setattr(
+        cli_module,
+        "split_by_recording_day",
+        lambda manifest, seed: _single_partition_split(manifest, seed),
+    )
+    partitions = []
+
+    def fake_preflight(manifest, split, partition, config, *, today):
+        partitions.append(partition)
+        return (entry,), date(2026, 7, 16), date(2026, 7, 16)
+
+    monkeypatch.setattr(cli_module, "preflight_evaluation", fake_preflight)
+    monkeypatch.setattr(cli_module, "default_model_filesystem", lambda: object())
+    # sample_rate del modelo distinto: aborta tras entrar al audit y antes de
+    # construir el backend, dejando capturado el scope real del audit.
+    monkeypatch.setattr(
+        cli_module,
+        "load_model_manifest",
+        lambda *a, **k: SimpleNamespace(sample_rate=48000),
+    )
+    audited_assets = []
+
+    @contextmanager
+    def fake_audit(*args, assets=(), **kwargs):
+        audited_assets.append(assets)
+        yield SimpleNamespace(
+            require_for=lambda *a, **k: None,
+            write_json_report=lambda *a, **k: pytest.fail("no debe escribir"),
+        )
+
+    monkeypatch.setattr(cli_module, "audit_dataset_security", fake_audit)
+
+    @contextmanager
+    def fake_verify(*args, **kwargs):
+        yield object()
+
+    monkeypatch.setattr(cli_module, "verify_model_files", fake_verify)
+    monkeypatch.setattr(cli_module, "FasterWhisperBackend", _NoBackend)
+
+    with pytest.raises(ValueError, match="sample rate"):
+        cli_module.execute_training_job(_training_job_args(corpus))
+    # Holdout jamas se preflighta; el audit ve solo assets de dev+calibration.
+    assert partitions == ["development", "calibration"]
+    assert len(audited_assets) == 1
+    assert audited_assets[0] == tuple(entry.assets) + tuple(entry.assets)
+
+
+def test_execute_training_job_expirado_no_audita_ni_verifica_modelo(
+    monkeypatch, corpus, fs_adapter
+):
+    calls = []
+    monkeypatch.setattr(cli_module, "default_corpus_filesystem", lambda: fs_adapter)
+    monkeypatch.setattr(
+        cli_module,
+        "split_by_recording_day",
+        lambda manifest, seed: _single_partition_split(manifest, seed),
+    )
+    for name in (
+        "audit_dataset_security",
+        "default_model_filesystem",
+        "load_model_manifest",
+        "verify_model_files",
+        "lease_corpus_asset",
+        "collect_labeled_feature_partition",
+        "fit_segment_usable_calibrator",
+    ):
+        monkeypatch.setattr(
+            cli_module, name, lambda *a, __name=name, **k: calls.append(__name)
+        )
+    monkeypatch.setattr(cli_module, "FasterWhisperBackend", _NoBackend)
+
+    class _FutureDate(date):
+        @classmethod
+        def today(cls):
+            return cls(2028, 1, 1)  # despues de retention_until 2027-01-12
+
+    monkeypatch.setattr(cli_module, "date", _FutureDate)
+
+    with pytest.raises(ValueError, match="corpus_retention_expired"):
+        cli_module.execute_training_job(_training_job_args(corpus))
+    # La expiracion de development corta antes del audit, modelo, leases y fit.
+    assert calls == []
+
+
+def test_execute_training_job_politica_invalida_no_toca_fs_ni_modelo(
+    monkeypatch, corpus
+):
+    calls = []
+    for name in (
+        "default_corpus_filesystem",
+        "load_corpus_manifest",
+        "split_by_recording_day",
+        "preflight_evaluation",
+        "default_model_filesystem",
+        "load_model_manifest",
+        "audit_dataset_security",
+        "verify_model_files",
+    ):
+        monkeypatch.setattr(
+            cli_module, name, lambda *a, __name=name, **k: calls.append(__name)
+        )
+    monkeypatch.setattr(cli_module, "FasterWhisperBackend", _NoBackend)
+
+    for override in (
+        {"--min-precision-lower-95": "1.5"},  # fuera de (0, 1]
+        {"--artifact-version": ""},  # version en blanco
+    ):
+        with pytest.raises(ValueError, match="politica/version"):
+            cli_module.execute_training_job(_training_job_args(corpus, **override))
+    # El guard de politica precede a cualquier acceso a filesystem o modelo.
     assert calls == []
