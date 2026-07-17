@@ -90,9 +90,11 @@ def test_bloque_con_wer_mayor_a_uno_no_se_recorta_y_fuerza_fallo():
     # Un bloque alucinado (mas errores que palabras de referencia) conserva su
     # tasa >1; recortar la tasa/limite por bloque a <=1.0 enmascararia el fallo.
     upper = cluster_bootstrap_error_upper(
-        [(3, 2), (0, 100), (0, 100)], resamples=1000, seed=7
+        [(6, 2), (0, 100), (0, 100)], resamples=1000, seed=7
     )
-    assert upper >= 1.5 / 3
+    # El codigo real devuelve ~2.0; un mutante que recorte la tasa a <=1.0
+    # colapsa a ~0.667, por debajo del umbral, y el test lo mata.
+    assert upper >= 1.0
 
 
 def test_upper_del_p95_resamplea_dias_completos_y_exige_tres_bloques():
