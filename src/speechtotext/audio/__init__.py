@@ -1,4 +1,5 @@
 from speechtotext.audio.fingerprint import PipelineProvenance, PipelineStep
+from speechtotext.audio.io import AudioDecodeError, decode_audio
 from speechtotext.audio.types import (
     AudioClip,
     AudioQualityReport,
@@ -10,6 +11,7 @@ from speechtotext.audio.types import (
 
 __all__ = [
     "AudioClip",
+    "AudioDecodeError",
     "AudioQualityReport",
     "AudioView",
     "AudioViewName",
@@ -17,4 +19,5 @@ __all__ = [
     "PipelineProvenance",
     "PipelineStep",
     "SpeechRegion",
+    "decode_audio",
 ]
