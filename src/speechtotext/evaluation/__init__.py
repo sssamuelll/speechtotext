@@ -7,6 +7,7 @@ from speechtotext.evaluation.manifest import (
     parse_corpus_manifest_bytes,
     load_corpus_manifest,
 )
+from speechtotext.evaluation.splits import DatasetSplit, split_by_recording_day
 
 __all__ = [
     "CorpusEntry",
@@ -15,3 +16,5 @@ __all__ = [
     "parse_corpus_manifest_bytes",
     "load_corpus_manifest",
 ]
+
+__all__ += ["DatasetSplit", "split_by_recording_day"]
