@@ -9,6 +9,7 @@ Uso rápido:
 """
 from __future__ import annotations
 
+import logging
 import os
 import sys
 
@@ -46,6 +47,13 @@ from speechtotext.core.segments import LabeledSegment
 for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
         _stream.reconfigure(encoding="utf-8", errors="replace")
+
+# faster-whisper ya calcula y emite "VAD filter removed X of audio" (una vez por trozo en
+# ruta troceada), pero nadie configura logging en el paquete y ese diagnóstico se pierde:
+# es el único instrumento que distingue un VAD ciego de uno saturado. Root en WARNING para
+# que sólo suba lo que pedimos explícitamente y rich no quede sepultado.
+logging.basicConfig(level=logging.WARNING)
+logging.getLogger("faster_whisper").setLevel(logging.INFO)
 
 app = typer.Typer(add_completion=False, help="Transcripción de audio offline con Whisper.")
 console = Console()
@@ -154,27 +162,74 @@ def transcribe_file(
     from speechtotext.core.chunked import run_chunked, should_chunk, probe_duration
 
     opts = _transcribe_opts(lang, beam_size, vad, hotwords, word_timestamps=diarize)
-    if should_chunk(probe_duration(audio), chunk):
-        console.print(f"[bold]Troceado[/bold] (jobs={jobs}) · {model}")
-        segments, info = run_chunked(
-            audio, opts, jobs, model_name=model, device=device,
-            compute_type=compute_type, log=lambda m: console.print(f"  {m}", markup=False),
+    try:
+        if should_chunk(probe_duration(audio), chunk):
+            console.print(f"[bold]Troceado[/bold] (jobs={jobs}) · {model}")
+            segments, info = run_chunked(
+                audio, opts, jobs, model_name=model, device=device,
+                compute_type=compute_type, log=lambda m: console.print(f"  {m}", markup=False),
+            )
+        else:
+            whisper = WhisperModel(model, device=device, compute_type=compute_type)
+            with Progress(
+                SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
+                TimeElapsedColumn(), console=console,
+            ) as progress:
+                task = progress.add_task(f"Transcribiendo {audio.name}", total=None)
+                segments_iter, info = whisper.transcribe(str(audio), **opts)
+                segments = list(segments_iter)
+                progress.update(task, completed=1)
+    except RuntimeError as e:
+        # El OOM real sube como RuntimeError del allocator ("mkl_malloc: failed to allocate
+        # memory"), y este es el único punto por el que pasan los dos constructores del
+        # camino de transcripción y además la decodificación. Reaccionar al fallo es más
+        # barato y más exacto que sondear la RAM del sistema: nada de psutil ni ctypes.
+        # ponytail: se decide por substring 'alloc', techo conocido; si algún backend
+        # inventa otro texto para el OOM, se propaga crudo — que es la falla correcta.
+        if "alloc" not in str(e).lower():
+            raise
+        console.print("[red]Se quedó sin memoria al transcribir.[/red]")
+        # markup=False: el texto del allocator trae corchetes que rich intentaría parsear.
+        console.print(f"  {e}", markup=False)
+        console.print(
+            "large-v3 pide ~3.5 GB sólo al cargar. Cierra procesos o usa "
+            "[cyan]-m medium[/cyan]. No cubre la muerte nativa de --diarize."
         )
+        raise typer.Exit(1)
+
+    # La cobertura es la única medida que la herramienta tiene de sí misma: sin ella, `OK`
+    # significa "write_text no lanzó" y una corrida que descartó media conversación se ve
+    # igual que una buena. Se suma ANTES de _run_diarization porque esa partición por
+    # palabras alteraría el conteo. Los segmentos no se solapan y los trozos son contiguos,
+    # así que la suma cruda vale.
+    cov = sum(s.end - s.start for s in segments)
+    if info.duration:
+        ratio = cov / info.duration
+        voz = f"con voz {cov / 60:.1f} de {info.duration / 60:.1f} min ({100 * ratio:.0f}%)"
+        if ratio < 0.7:
+            # El consejo sólo aplica a quien tiene el VAD puesto: sugerir --no-vad a quien ya
+            # lo apagó es ruido, y ahí la pérdida viene de otro lado (el modelo no emitió).
+            consejo = ", prueba --no-vad" if vad else ""
+            voz = f"[yellow]{voz} — se perdió audio{consejo}[/yellow]"
     else:
-        whisper = WhisperModel(model, device=device, compute_type=compute_type)
-        with Progress(
-            SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
-            TimeElapsedColumn(), console=console,
-        ) as progress:
-            task = progress.add_task(f"Transcribiendo {audio.name}", total=None)
-            segments_iter, info = whisper.transcribe(str(audio), **opts)
-            segments = list(segments_iter)
-            progress.update(task, completed=1)
+        # duration==0 es el probe fallido. Reportar 0% sería inventar una medida sobre un
+        # denominador que no existe, y encima se contradice con el conteo de segmentos:
+        # el peor caso posible sería el único que no grita.
+        voz = "[yellow]cobertura desconocida (duración no medida)[/yellow]"
+
+    # "Idioma detectado" sobre el flag del propio usuario es una fabricación en el 100% de
+    # las corridas por defecto (-l es): ahí no se midió nada. La probabilidad sólo se
+    # imprime cuando de verdad hubo detección y la ruta la conservó.
+    if lang is not None:
+        idioma = f"Idioma: [bold]{info.language}[/bold] (forzado)"
+    else:
+        idioma = f"Idioma detectado: [bold]{info.language}[/bold]"
+        if info.language_probability is not None:
+            idioma += f" (prob={info.language_probability:.2f})"
 
     console.print(
-        f"Idioma detectado: [bold]{info.language}[/bold] "
-        f"(prob={info.language_probability:.2f}) · duración {info.duration:.1f}s · "
-        f"{len(segments)} segmentos."
+        f"{idioma} · duración {info.duration:.1f}s · "
+        f"{len(segments)} segmentos · {voz}"
     )
 
     if diarize:
