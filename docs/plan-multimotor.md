@@ -129,8 +129,11 @@ Fase 2 de calidad (PR-2) no invalida nada.
   revienta, pagina 25x en silencio (proxy fp16 [medido]). El 19.3x medido hace innecesario el
   paralelismo; el clamp conserva checkpoint/resume. Coste aceptado: recarga del modelo por trozo,
   acotada ≤5 s por trozo de 600 s (<4%) [medido].
-- `--engine whispercpp --device cpu`: permitido, sin clamp, sin medición — sin garantía de
-  velocidad. No se bloquea ni se optimiza en v1.
+- `--engine whispercpp --device cpu`: **derogado en la implementación (2026-07-27)**. El
+  smoke midió que el binario pinneado es build CUDA y corre en la GPU siempre — el
+  adaptador no pasa device, así que "whispercpp en CPU" no existe con este binario
+  (requeriría `-ng`, post-ship). El device efectivo es `cuda` en toda corrida whispercpp:
+  se declara en header/llave/JSON y el remapeo se avisa en consola cuando no pidieron cuda.
 
 ### 2.5 Selección de motor: explícita, invariantes de auditoría como ley
 

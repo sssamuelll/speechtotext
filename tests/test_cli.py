@@ -340,3 +340,16 @@ def test_whispercpp_rechaza_modelo_no_pinneado(tmp_path, monkeypatch):
     assert "no está pinneado" in result.stderr
     assert "large-v3" in result.stderr and "small" in result.stderr
     assert calls == []  # run_chunked jamas se llamo
+
+
+def test_whispercpp_avisa_el_remapeo_de_device(tmp_path, monkeypatch):
+    # Pisar un -d cpu explicito en silencio seria la sustitucion callada que el
+    # contrato prohibe: el remapeo a cuda se avisa siempre que no pidieran cuda.
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0))
+    result = _invoke(audio, tmp_path, "--engine", "whispercpp", "-d", "cpu")
+    assert result.exit_code == 0
+    assert "corre en la GPU; device=cuda" in result.stdout
+
+    result = _invoke(audio, tmp_path, "--engine", "whispercpp", "-d", "cuda")
+    assert result.exit_code == 0
+    assert "corre en la GPU" not in result.stdout  # quien pidio cuda no recibe ruido

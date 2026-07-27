@@ -167,7 +167,14 @@ def transcribe_file(
         # El binario pinneado es build CUDA y corre en la GPU SIEMPRE (medido en el
         # smoke: con -d cpu el exe usa la GPU igual, el adaptador no pasa device).
         # Etiquetar cpu sería mentir en el header, la llave y el JSON: el device
-        # efectivo es cuda y así se declara. Un modo CPU real (-ng) es post-ship.
+        # efectivo es cuda, se declara, y el remapeo se AVISA — pisar un -d cpu
+        # explícito en silencio sería la sustitución callada que el contrato prohíbe.
+        # Un modo CPU real (-ng) es post-ship. typer no distingue default de
+        # explícito, así que el aviso sale siempre que no pidieran cuda.
+        if device != "cuda":
+            console.print(
+                "[yellow]whisper.cpp (build CUDA) corre en la GPU; device=cuda[/yellow]"
+            )
         device = "cuda"
         from speechtotext.core.enginepin import _MODEL_ALIAS
 
