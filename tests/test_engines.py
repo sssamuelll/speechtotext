@@ -325,9 +325,16 @@ def test_contrato_dual_whispercpp_por_el_pipeline_completo(tmp_path):
 def _instalacion_gpu_disponible() -> bool:
     """Guarda de capacidad NO circular: mide el entorno (exe instalado + driver NVIDIA
     respondiendo), jamas llama al codigo bajo test. En CI (sin GPU, sin instalacion)
-    esto es False y el smoke se salta; en la maquina real corre de verdad."""
+    esto es False y el smoke se salta; en la maquina real corre de verdad.
+
+    OJO: skipif se evalua en COLECCION, tambien en Linux, donde LOCALAPPDATA no existe
+    e install_root() reventaria con KeyError antes de poder saltar nada. La guarda que
+    protege del entorno no puede depender del entorno del que protege."""
     import shutil as _shutil
     import subprocess as _sp
+
+    if "LOCALAPPDATA" not in os.environ:
+        return False
 
     from speechtotext.core import enginepin
 
