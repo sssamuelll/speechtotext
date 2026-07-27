@@ -307,8 +307,12 @@ def test_adapter_real_acepta_dacl_read_only_real_y_bloquea_creacion(tmp_path):
         canario = root / "canario-de-entorno.tmp"
         try:
             canario.write_bytes(b"x")
-        except OSError:
-            pass  # denegado: el arbol si quedo read-only y la probe puede demostrarlo
+        except PermissionError:
+            # Denegado: el arbol si quedo read-only y la probe puede demostrarlo.
+            # PermissionError y no OSError a secas: un error de disco, de sharing o de
+            # ruta larga tambien caeria aqui y el test seguiria creyendo que demostro
+            # un arbol protegido. Los demas errores deben propagar y verse.
+            pass
         else:
             canario.unlink()
             pytest.skip(
