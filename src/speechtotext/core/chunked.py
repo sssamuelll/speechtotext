@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -117,9 +118,11 @@ def seg_from_dict(d: dict) -> TimedSegment:
     return TimedSegment(d["start"], d["end"], d["text"], tw)
 
 
-def transcribe_chunk(audio, start, end, opts, model, model_name):
+def transcribe_chunk(audio, start, end, opts, get_model, model_name):
     """Devuelve (segmentos_globales, from_cache, idioma_detectado). El idioma se guarda
-    en el checkpoint para que run_chunked reporte el real bajo --language auto."""
+    en el checkpoint para que run_chunked reporte el real bajo --language auto.
+    `get_model` es un thunk, no el modelo: si el checkpoint sirve nadie paga el pico de
+    carga (~3.5 GB en large-v3 int8), y si está corrupto el modelo aparece justo aquí."""
     path = chunk_path(audio, opts, model_name, start, end)
     if path.exists():
         try:
@@ -137,7 +140,7 @@ def transcribe_chunk(audio, start, end, opts, model, model_name):
             "-ar", "16000", "-ac", "1", tmp,
         ]
         subprocess.run(cmd, check=True, capture_output=True)
-        segments_iter, info = model.transcribe(tmp, **opts)
+        segments_iter, info = get_model().transcribe(tmp, **opts)
         segs = shift_segments(list(segments_iter), start)
         lang = getattr(info, "language", None)
     finally:
@@ -173,15 +176,24 @@ def run_chunked(audio, opts, jobs, model_name, device, compute_type, log=print):
     duration = probe_duration(audio)
     chunks = plan_chunks(audio, duration)
     jobs = max(1, min(jobs, len(chunks)))
-    model = WhisperModel(
-        model_name, device=device, compute_type=compute_type,
-        cpu_threads=max(1, (os.cpu_count() or 1) // jobs), num_workers=jobs,
-    )
+
+    # El modelo se construye la primera vez que un trozo lo pide de verdad: con el 100%
+    # cacheado no se carga nada y el proceso no se juega la RAM por trabajo ya hecho.
+    _lk, _box = threading.Lock(), []
+
+    def get_model():
+        with _lk:                       # ponytail: lock global, basta para jobs<=8
+            if not _box:
+                _box.append(WhisperModel(
+                    model_name, device=device, compute_type=compute_type,
+                    cpu_threads=max(1, (os.cpu_count() or 1) // jobs), num_workers=jobs))
+            return _box[0]
+
     results: list = [None] * len(chunks)
     langs: list = [None] * len(chunks)
     with ThreadPoolExecutor(max_workers=jobs) as pool:
         futs = {
-            pool.submit(transcribe_chunk, audio, s, e, opts, model, model_name): i
+            pool.submit(transcribe_chunk, audio, s, e, opts, get_model, model_name): i
             for i, (s, e) in enumerate(chunks)
         }
         for done, fut in enumerate(as_completed(futs), start=1):
@@ -189,13 +201,21 @@ def run_chunked(audio, opts, jobs, model_name, device, compute_type, log=print):
             results[i], from_cache, langs[i] = fut.result()
             s, e = chunks[i]
             tag = "cache" if from_cache else "nuevo"
-            log(f"[{done}/{len(chunks)}] {_mmss(s)}-{_mmss(e)} OK ({tag})")
+            # "OK" sólo decía que el future no lanzó; el porcentaje dice cuánto del trozo
+            # produjo texto. results[i] trae timestamps GLOBALES: el denominador es (e - s).
+            span = e - s
+            cov = 100 * sum(x.end - x.start for x in results[i]) / span if span > 0 else 0.0
+            log(f"[{done}/{len(chunks)}] {_mmss(s)}-{_mmss(e)} {cov:.0f}% ({tag})")
     segments = [seg for chunk_segs in results for seg in chunk_segs]
     # Bajo --language auto (opts language=None) reporta el idioma REAL que detectó el
     # primer trozo, no un "es" hardcodeado; si se forzó idioma, ese manda.
     detected = next((l for l in langs if l), None)
+    # Si se forzó idioma, 1.0 es fiel al upstream (faster-whisper devuelve 1 cuando se le
+    # impone el idioma). Bajo --language auto la probabilidad real existió por trozo y no
+    # se guardó en el checkpoint, así que None: no se fabrica un número que nadie midió.
     info = SimpleNamespace(language=opts.get("language") or detected or "es",
-                           language_probability=1.0, duration=duration)
+                           language_probability=1.0 if opts.get("language") else None,
+                           duration=duration)
     return segments, info
 
 

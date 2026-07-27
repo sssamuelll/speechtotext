@@ -167,7 +167,8 @@ def test_transcribe_chunk_transcribe_y_guarda(tmp_path, monkeypatch):
     monkeypatch.setattr(chunked.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stderr=b""))
     # modelo devuelve segmentos LOCALES (relativos al trozo) + idioma detectado
     local = [SimpleNamespace(start=1.0, end=2.0, text=" hola", words=None)]
-    model = SimpleNamespace(transcribe=lambda wav, **k: (iter(local), SimpleNamespace(language="es")))
+    # transcribe_chunk recibe un thunk, no el modelo (construcción perezosa)
+    model = lambda: SimpleNamespace(transcribe=lambda wav, **k: (iter(local), SimpleNamespace(language="es")))
 
     segs, cached, lang = chunked.transcribe_chunk(audio, 600.0, 1200.0, _opts(), model, "large-v3")
     assert cached is False
@@ -224,6 +225,66 @@ def test_run_chunked_reporta_idioma_detectado_en_auto(monkeypatch):
         Path("x.mp3"), _opts(language=None), 1, "m", "cpu", "int8", log=lambda m: None,
     )
     assert info.language == "en"
+
+
+def test_run_chunked_no_construye_modelo_si_todo_esta_cacheado(tmp_path, monkeypatch):
+    # F4: con el trabajo ya en disco nadie debe pagar el pico de carga del modelo.
+    # transcribe_chunk va REAL aquí (no se mockea): es lo que prueba que el thunk no se llama.
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    audio = tmp_path / "a.mp3"
+    audio.write_bytes(b"12345")
+    p = chunked.chunk_path(audio, _opts(), "large-v3", 0.0, 600.0)
+    p.write_text(json.dumps(
+        {"language": "es", "segments": [{"start": 1.0, "end": 2.0, "text": " cache"}]}))
+
+    def boom(*a, **k):
+        raise AssertionError("no debió construir el modelo con el trozo cacheado")
+    monkeypatch.setattr(chunked, "WhisperModel", boom)
+    monkeypatch.setattr(chunked, "probe_duration", lambda audio: 600.0)
+    monkeypatch.setattr(chunked, "plan_chunks", lambda audio, dur, **k: [(0.0, 600.0)])
+
+    segs, info = chunked.run_chunked(
+        audio, _opts(), 1, "large-v3", "cpu", "int8", log=lambda m: None,
+    )
+    assert [s.text for s in segs] == [" cache"]
+    assert info.language == "es"
+
+
+def test_run_chunked_loguea_cobertura_del_trozo(monkeypatch):
+    monkeypatch.setattr(chunked, "WhisperModel", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(chunked, "probe_duration", lambda audio: 600.0)
+    monkeypatch.setattr(chunked, "plan_chunks", lambda audio, dur, **k: [(0.0, 600.0)])
+    # 300 s de voz sobre un trozo de 600 s, con timestamps globales -> 50%
+    monkeypatch.setattr(chunked, "transcribe_chunk",
+                        lambda *a, **k: ([TimedSegment(100.0, 400.0, " x")], False, "es"))
+    lines = []
+    chunked.run_chunked(Path("x.mp3"), _opts(), 1, "m", "cpu", "int8", log=lines.append)
+    assert "50%" in lines[0] and "OK" not in lines[0]
+
+
+def test_run_chunked_trozo_sin_voz_loguea_cero(monkeypatch):
+    monkeypatch.setattr(chunked, "WhisperModel", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(chunked, "probe_duration", lambda audio: 600.0)
+    monkeypatch.setattr(chunked, "plan_chunks", lambda audio, dur, **k: [(0.0, 600.0)])
+    monkeypatch.setattr(chunked, "transcribe_chunk", lambda *a, **k: ([], True, "es"))
+    lines = []
+    chunked.run_chunked(Path("x.mp3"), _opts(), 1, "m", "cpu", "int8", log=lines.append)
+    assert "0%" in lines[0]
+
+
+def test_run_chunked_probabilidad_solo_si_no_se_forzo_idioma(monkeypatch):
+    # idioma forzado -> 1.0 (fiel a faster-whisper); auto -> None (nadie la midió)
+    monkeypatch.setattr(chunked, "WhisperModel", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(chunked, "probe_duration", lambda audio: 600.0)
+    monkeypatch.setattr(chunked, "plan_chunks", lambda audio, dur, **k: [(0.0, 600.0)])
+    monkeypatch.setattr(chunked, "transcribe_chunk",
+                        lambda *a, **k: ([TimedSegment(1.0, 2.0, " x")], True, "en"))
+    _, forzado = chunked.run_chunked(
+        Path("x.mp3"), _opts(), 1, "m", "cpu", "int8", log=lambda m: None)
+    _, auto = chunked.run_chunked(
+        Path("x.mp3"), _opts(language=None), 1, "m", "cpu", "int8", log=lambda m: None)
+    assert forzado.language_probability == 1.0
+    assert auto.language_probability is None
 
 
 def test_probe_duration_desde_pyav(monkeypatch):

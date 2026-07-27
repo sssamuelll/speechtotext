@@ -87,6 +87,13 @@ def apply_names(
 
 _PIPELINE = None
 _PIPELINE_NAME = "pyannote/speaker-diarization-community-1"
+# El 32 con el que corre por defecto no es el default de pyannote (que es 1): sale del
+# config.yaml del checkpoint community-1. A 32 el pico son 2620 MB; a 8, 1369 MB (-48%)
+# por +7% de reloj sobre 180 s, con salida idéntica. En una máquina de escritorio el pico
+# de RAM es el recurso escaso, no los 7 s.
+# ponytail: constante, no opción de config. Techo: si algún día esto corre en GPU con VRAM
+# de sobra, sube a parámetro.
+_BATCH = 8
 
 
 def _load_waveform(wav_path) -> dict:
@@ -119,6 +126,9 @@ def _get_pipeline():
         _PIPELINE = Pipeline.from_pretrained(
             _PIPELINE_NAME, token=os.environ.get("HF_TOKEN")
         )
+        # Ambos se leen en tiempo de llamada, así que asignarlos aquí basta.
+        _PIPELINE.embedding_batch_size = _BATCH
+        _PIPELINE.segmentation_batch_size = _BATCH
     return _PIPELINE
 
 

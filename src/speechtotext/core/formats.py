@@ -30,6 +30,23 @@ def _speaker(seg):
     return getattr(seg, "speaker", None)
 
 
+def is_suspect(seg) -> bool:
+    # ponytail: heurística sin calibrar, techo conocido; sube a calibrador si algún día hay corpus
+    dur = seg.end - seg.start
+    ns = getattr(seg, "no_speech", None)
+    if ns is not None and ns > 0.6:          # se enciende sola cuando llegue la Fase 2
+        return True
+    return dur >= 10.0 and len(seg.text.strip()) / dur < 1.0
+
+
+def _marked(seg) -> str:
+    """Texto del segmento con la marca de sospecha. Marcar, no borrar: un falso positivo
+    cuesta un '[?]' de más; un falso negativo cuesta leer una invención como si fuera tu
+    conversación. El campo `text` del JSON queda limpio a propósito (allí va un booleano)."""
+    text = seg.text.strip()
+    return f"[?] {text}" if is_suspect(seg) else text
+
+
 def write_txt(segments, path: Path) -> None:
     segs = list(segments)
     if any(_speaker(s) for s in segs):
@@ -41,13 +58,13 @@ def write_txt(segments, path: Path) -> None:
             if spk != cur:
                 if buf:
                     lines.append(f"{cur}: {' '.join(buf)}")
-                cur, buf = spk, [s.text.strip()]
+                cur, buf = spk, [_marked(s)]
             else:
-                buf.append(s.text.strip())
+                buf.append(_marked(s))
         if buf:
             lines.append(f"{cur}: {' '.join(buf)}")
     else:
-        lines = [s.text.strip() for s in segs]
+        lines = [_marked(s) for s in segs]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -59,7 +76,7 @@ def write_srt(segments, path: Path) -> None:
             f"{format_timestamp(seg.start, srt=True)} --> {format_timestamp(seg.end, srt=True)}"
         )
         spk = _speaker(seg)
-        text = seg.text.strip()
+        text = _marked(seg)
         lines.append(f"{spk}: {text}" if spk else text)
         lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
@@ -72,19 +89,42 @@ def write_vtt(segments, path: Path) -> None:
             f"{format_timestamp(seg.start, srt=False)} --> {format_timestamp(seg.end, srt=False)}"
         )
         spk = _speaker(seg)
-        text = seg.text.strip()
+        text = _marked(seg)
         lines.append(f"{spk}: {text}" if spk else text)
         lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def _gaps(seg_list, duration: float) -> list[list[float]]:
+    """Complemento de los segmentos sobre [0, duration]: el audio que no produjo texto.
+    Los segmentos de Whisper no se solapan dentro de una pasada y los trozos son contiguos
+    por construcción, así que basta un barrido con cursor."""
+    # ponytail: umbral arbitrario, súbelo si el JSON se llena de huecos de respiración
+    min_gap = 5.0
+    out: list[list[float]] = []
+    cursor = 0.0
+    for s in seg_list:
+        if s.start - cursor >= min_gap:
+            out.append([round(cursor, 2), round(s.start, 2)])
+        cursor = max(cursor, s.end)
+    if duration - cursor >= min_gap:
+        out.append([round(cursor, 2), round(duration, 2)])
+    return out
+
+
 def write_json(segments, info, path: Path) -> None:
     seg_list = list(segments)
     speakers = sorted({_speaker(s) for s in seg_list} - {None})
+    prob = info.language_probability
     payload = {
         "language": info.language,
-        "language_probability": round(info.language_probability, 4),
+        # prob es None cuando el idioma se detectó de verdad en ruta troceada y la medición se
+        # perdió; omitir la clave dice "no lo sé" sin fabricar un número.
+        **({"language_probability": round(prob, 4)} if prob is not None else {}),
+        # "duration" sigue siendo la del archivo; "speech_s" es lo que produjo texto.
         "duration": round(info.duration, 2),
+        "speech_s": round(sum(s.end - s.start for s in seg_list), 2),
+        "gaps": _gaps(seg_list, info.duration),
         "segments": [
             {
                 "id": i,
@@ -92,6 +132,7 @@ def write_json(segments, info, path: Path) -> None:
                 "end": round(s.end, 3),
                 "text": s.text.strip(),
                 **({"speaker": _speaker(s)} if speakers else {}),
+                **({"suspect": True} if is_suspect(s) else {}),
             }
             for i, s in enumerate(seg_list)
         ],
