@@ -112,7 +112,7 @@ def _gaps(seg_list, duration: float) -> list[list[float]]:
     return out
 
 
-def write_json(segments, info, path: Path) -> None:
+def write_json(segments, info, path: Path, *, engine_info=None) -> None:
     seg_list = list(segments)
     speakers = sorted({_speaker(s) for s in seg_list} - {None})
     prob = info.language_probability
@@ -139,4 +139,9 @@ def write_json(segments, info, path: Path) -> None:
     }
     if speakers:
         payload["speakers"] = speakers
+    # El dict lo arma el CLI ({name, version, model, quant, device, selection} y, bajo
+    # --diarize, "diarization"); aquí solo se emite tal cual. None = clave ausente, mismo
+    # patrón condicional que language_probability/speaker: omitir dice "no aplica" sin inventar.
+    if engine_info is not None:
+        payload["engine"] = engine_info
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")

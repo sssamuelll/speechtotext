@@ -16,6 +16,10 @@ from types import SimpleNamespace
 
 from faster_whisper import WhisperModel
 
+# Import por modulo (no por nombre): el thunk de run_chunked llama engines.make_engine
+# en el momento, asi los monkeypatch de tests sobre engines.make_engine surten efecto.
+# No es perezoso porque engines.py ya importa faster_whisper perezosamente: es barato.
+from speechtotext.core import engines
 from speechtotext.core.finder import _home
 
 
@@ -92,10 +96,17 @@ def plan_chunks(audio: Path, duration: float, target_len: float = 600.0) -> list
     return pick_cuts(silences, duration, target_len)
 
 
-def chunk_path(audio: Path, opts: dict, model: str, start: float, end: float) -> Path:
+def chunk_path(audio: Path, opts: dict, model: str, start: float, end: float,
+               engine: str = "faster-whisper", quant: str = "", device: str = "") -> Path:
+    """engine/quant/device entran al join (plan 2.3): sin ellos, faster-whisper int8 y
+    whispercpp q5_0 con model='large-v3' darian el MISMO digest — hit silencioso que sirve
+    texto de un motor bajo la firma del otro. `quant` es la cuantizacion EFECTIVA
+    (quant_for), y `opts` deben ser los EFECTIVOS post-mapeo (effective_opts): asi --vad
+    y --no-vad bajo whispercpp comparten digest. Kwargs con default para que los call
+    sites viejos sobrevivan; la invalidacion unica de checkpoints esta asumida (PR-1)."""
     st = audio.stat()
     key = "|".join(str(x) for x in (
-        audio.resolve(), st.st_size, int(st.st_mtime), model,
+        audio.resolve(), st.st_size, int(st.st_mtime), model, engine, quant, device,
         opts["language"], opts["beam_size"], opts["vad_filter"],
         opts["hotwords"], opts["word_timestamps"], start, end,
     ))
@@ -118,12 +129,15 @@ def seg_from_dict(d: dict) -> TimedSegment:
     return TimedSegment(d["start"], d["end"], d["text"], tw)
 
 
-def transcribe_chunk(audio, start, end, opts, get_model, model_name):
+def transcribe_chunk(audio, start, end, opts, get_model, model_name,
+                     engine="faster-whisper", quant="", device=""):
     """Devuelve (segmentos_globales, from_cache, idioma_detectado). El idioma se guarda
     en el checkpoint para que run_chunked reporte el real bajo --language auto.
     `get_model` es un thunk, no el modelo: si el checkpoint sirve nadie paga el pico de
-    carga (~3.5 GB en large-v3 int8), y si está corrupto el modelo aparece justo aquí."""
-    path = chunk_path(audio, opts, model_name, start, end)
+    carga (~3.5 GB en large-v3 int8), y si está corrupto el modelo aparece justo aquí.
+    engine/quant/device solo se reenvían a chunk_path (la identidad del checkpoint);
+    el motor mismo viaja dentro del thunk."""
+    path = chunk_path(audio, opts, model_name, start, end, engine, quant, device)
     if path.exists():
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -172,10 +186,24 @@ def _mmss(sec: float) -> str:
     return f"{m:02d}:{s:02d}"
 
 
-def run_chunked(audio, opts, jobs, model_name, device, compute_type, log=print):
+def run_chunked(audio, opts, jobs, model_name, device, compute_type, log=print,
+                engine=engines.ENGINE_FASTER):
     duration = probe_duration(audio)
     chunks = plan_chunks(audio, duration)
     jobs = max(1, min(jobs, len(chunks)))
+    if engine == engines.ENGINE_WHISPERCPP:
+        # Defensa en profundidad: la CLI ya clampa, pero run_chunked es API publica y
+        # N subprocesos contra una sola GPU paginan en silencio (medido: 2 concurrentes
+        # tardan MAS que en serie, 15.7 s vs 11.4 s). Con jobs=1 la serializacion del
+        # subprocess es estructural: max_workers=1, un solo whisper-cli vivo a la vez.
+        jobs = 1
+
+    # La llave del cache consume los opts EFECTIVOS post-mapeo, no los pedidos: bajo
+    # whispercpp --vad y --no-vad producen el mismo digest (la salida del motor es
+    # identica) y hotwords truthy revienta aqui como doble candado (la cli valida antes).
+    opts = engines.effective_opts(engine, opts)
+    # La cuantizacion EFECTIVA (q5_0 bajo whispercpp) es la que identifica el checkpoint.
+    quant = engines.quant_for(engine, compute_type, device)
 
     # El modelo se construye la primera vez que un trozo lo pide de verdad: con el 100%
     # cacheado no se carga nada y el proceso no se juega la RAM por trabajo ya hecho.
@@ -184,22 +212,41 @@ def run_chunked(audio, opts, jobs, model_name, device, compute_type, log=print):
     def get_model():
         with _lk:                       # ponytail: lock global, basta para jobs<=8
             if not _box:
-                _box.append(WhisperModel(
-                    model_name, device=device, compute_type=compute_type,
-                    cpu_threads=max(1, (os.cpu_count() or 1) // jobs), num_workers=jobs))
+                if engine == engines.ENGINE_WHISPERCPP:
+                    # ponytail: sin _duration_s por trozo (opts es compartido); el
+                    # adaptador usa su techo default de 3600 s = 6x el peor trozo de
+                    # 600 s con JIT frio incluido. H6 ajusta la constante.
+                    _box.append(engines.make_engine(engine, model_name, device, compute_type))
+                else:
+                    # Por el nombre local chunked.WhisperModel: los 7 monkeypatch de los
+                    # tests (y el default byte a byte) dependen de esta costura.
+                    _box.append(WhisperModel(
+                        model_name, device=device, compute_type=compute_type,
+                        cpu_threads=max(1, (os.cpu_count() or 1) // jobs), num_workers=jobs))
             return _box[0]
 
     results: list = [None] * len(chunks)
     langs: list = [None] * len(chunks)
     with ThreadPoolExecutor(max_workers=jobs) as pool:
         futs = {
-            pool.submit(transcribe_chunk, audio, s, e, opts, get_model, model_name): i
+            pool.submit(transcribe_chunk, audio, s, e, opts, get_model, model_name,
+                        engine=engine, quant=quant, device=device): i
             for i, (s, e) in enumerate(chunks)
         }
         for done, fut in enumerate(as_completed(futs), start=1):
             i = futs[fut]
-            results[i], from_cache, langs[i] = fut.result()
             s, e = chunks[i]
+            try:
+                results[i], from_cache, langs[i] = fut.result()
+            except Exception as exc:
+                # Al primer fallo se cancela lo pendiente: con motor roto y fallos LENTOS
+                # (paging, timeout) drenar 17 trozos serian horas (plan H4). El mensaje
+                # nombra motor y trozo — el dueño del contexto es el troceador (G6).
+                pool.shutdown(wait=False, cancel_futures=True)
+                raise RuntimeError(
+                    f"motor {engine} fallo en el trozo {i + 1}/{len(chunks)} "
+                    f"({_mmss(s)}-{_mmss(e)}): {exc}"
+                ) from exc
             tag = "cache" if from_cache else "nuevo"
             # "OK" sólo decía que el future no lanzó; el porcentaje dice cuánto del trozo
             # produjo texto. results[i] trae timestamps GLOBALES: el denominador es (e - s).

@@ -32,6 +32,13 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
+from speechtotext.core.engines import (
+    ENGINE_FASTER,
+    ENGINE_WHISPERCPP,
+    ENGINES,
+    make_engine,
+    quant_for,
+)
 from speechtotext.core.formats import (
     parse_formats,
     write_json,
@@ -136,6 +143,7 @@ def transcribe_file(
     hotwords: Optional[str] = None,
     chunk: Optional[bool] = None,
     jobs: int = 4,
+    engine: str = ENGINE_FASTER,
 ) -> None:
     """Transcribe un archivo (opcionalmente con diarización) y escribe los formatos pedidos."""
     try:
@@ -147,9 +155,61 @@ def transcribe_file(
     base.parent.mkdir(parents=True, exist_ok=True)
 
     lang = None if language.lower() == "auto" else language
-    if compute_type == "auto":
-        compute_type = "int8" if device == "cpu" else "float16"
+    if engine not in ENGINES:
+        raise typer.BadParameter(
+            f"engine {engine!r} no existe; disponibles: {', '.join(ENGINES)}"
+        )
     hotwords = (hotwords or "").strip() or None
+
+    # Contrato de capacidades (CAPS, plan 2.2): se valida ANTES de construir modelo
+    # alguno y antes del import de chunked. Jamás silencio, jamás sustitución callada.
+    if engine == ENGINE_WHISPERCPP:
+        # El binario pinneado es build CUDA y corre en la GPU SIEMPRE (medido en el
+        # smoke: con -d cpu el exe usa la GPU igual, el adaptador no pasa device).
+        # Etiquetar cpu sería mentir en el header, la llave y el JSON: el device
+        # efectivo es cuda y así se declara. Un modo CPU real (-ng) es post-ship.
+        device = "cuda"
+        from speechtotext.core.enginepin import _MODEL_ALIAS
+
+        if model not in _MODEL_ALIAS:
+            # Sin pre-validación, ensure_model revienta con RuntimeError crudo a
+            # mitad de corrida; aquí el error llega antes de construir nada.
+            raise typer.BadParameter(
+                f"modelo {model!r} no está pinneado para whispercpp; disponibles: "
+                f"{', '.join(sorted(_MODEL_ALIAS))}"
+            )
+        try:
+            # 'auto' NO resuelve a float16 aquí: fp16 en la 980 pagina bajo WDDM
+            # (0.53x tiempo real, medido). quant_for mapea o rechaza con la medición.
+            compute_type = quant_for(engine, compute_type, device)
+        except ValueError as e:
+            raise typer.BadParameter(str(e))
+        if hotwords:
+            # Rechazo, no degradación: avisar "degradado" sobre un knob inerte
+            # fabricaría un efecto que no ocurrió. Ni modelo ni caché se tocan.
+            console.print(
+                "--hotwords no tiene efecto con whisper.cpp (--prompt es inerte con "
+                "-mc 0, medido 2026-07-27); usa --engine faster-whisper"
+            )
+            raise typer.Exit(2)
+        if vad:
+            console.print("[yellow]whisper.cpp no trae VAD; se transcribe sin filtro[/yellow]")
+            # vad efectivo = False: entra así a opts (misma llave que --no-vad) y
+            # apaga el consejo "prueba --no-vad" del resumen (el motor no tiene VAD).
+            vad = False
+        if diarize:
+            console.print(
+                "[yellow]atribución por segmento (gruesa), sin cortes intra-segmento; "
+                r"la marca \[?] queda activa[/yellow]"
+            )
+        if jobs != 1:
+            # 4 subprocesos × 1.28 GB contra 4096 MiB: WDDM no revienta, pagina 25x
+            # en silencio (medido). El 19.3x de un solo proceso hace innecesario más.
+            # Sin condición de device: bajo whispercpp el device efectivo es cuda siempre.
+            console.print("[yellow]la GPU no paraleliza; jobs=1[/yellow]")
+            jobs = 1
+    elif compute_type == "auto":
+        compute_type = "int8" if device == "cpu" else "float16"
     if hotwords:
         # markup=False: los términos pueden traer corchetes/acentos que rich malinterpretaría.
         console.print(f"Hotwords: {hotwords}", markup=False)
@@ -159,6 +219,14 @@ def transcribe_file(
         f"[bold]device[/bold] [cyan]{device}[/cyan] · "
         f"[bold]compute[/bold] [cyan]{compute_type}[/cyan]"
     )
+    if engine != ENGINE_FASTER:
+        # El motor no-default se declara en el header (G2); el default queda byte a byte.
+        from speechtotext.core.enginepin import ENGINE_PIN
+
+        console.print(
+            f"[bold]Motor[/bold] [cyan]whisper.cpp {ENGINE_PIN['version']}[/cyan] · "
+            f"[cyan]{model} {compute_type}[/cyan] · [cyan]{device}[/cyan]"
+        )
     from speechtotext.core.chunked import run_chunked, should_chunk, probe_duration
 
     opts = _transcribe_opts(lang, beam_size, vad, hotwords, word_timestamps=diarize)
@@ -168,7 +236,34 @@ def transcribe_file(
             segments, info = run_chunked(
                 audio, opts, jobs, model_name=model, device=device,
                 compute_type=compute_type, log=lambda m: console.print(f"  {m}", markup=False),
+                engine=engine,
             )
+        elif engine == ENGINE_WHISPERCPP:
+            # whisper-cli es main(char**): el path del usuario jamás viaja en argv.
+            # Se transcodifica a wav 16k mono temporal (ASCII) como hace la ruta troceada.
+            from speechtotext.core.audio import FfmpegMissingError, TranscodeError, transcode_to_wav
+
+            dur = probe_duration(audio)
+            try:
+                wav = transcode_to_wav(audio.read_bytes())
+            except (FfmpegMissingError, TranscodeError) as e:
+                console.print(f"[red]No se pudo procesar el audio:[/red] {e}")
+                raise typer.Exit(1)
+            try:
+                whisper = make_engine(engine, model, device, compute_type)
+                with Progress(
+                    SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
+                    TimeElapsedColumn(), console=console,
+                ) as progress:
+                    task = progress.add_task(f"Transcribiendo {audio.name}", total=None)
+                    segments_iter, info = whisper.transcribe(str(wav), _duration_s=dur, **opts)
+                    segments = list(segments_iter)
+                    progress.update(task, completed=1)
+            finally:
+                wav.unlink(missing_ok=True)
+            # Ley de orquestación: los segmentos pertenecen al motor; info.duration la
+            # fabrica el orquestador (el adaptador no la emite, y :206/:231 la consumen).
+            info.duration = dur
         else:
             whisper = WhisperModel(model, device=device, compute_type=compute_type)
             with Progress(
@@ -191,10 +286,18 @@ def transcribe_file(
         console.print("[red]Se quedó sin memoria al transcribir.[/red]")
         # markup=False: el texto del allocator trae corchetes que rich intentaría parsear.
         console.print(f"  {e}", markup=False)
-        console.print(
-            "large-v3 pide ~3.5 GB sólo al cargar. Cierra procesos o usa "
-            "[cyan]-m medium[/cyan]. No cubre la muerte nativa de --diarize."
-        )
+        if engine == ENGINE_WHISPERCPP:
+            # El stderr de CUDA OOM también contiene 'alloc': aconsejar RAM de CPU aquí
+            # sería un falso amigo. El consejo es de VRAM (4 GB en la 980).
+            console.print(
+                "La VRAM de la GPU se agotó. Cierra aplicaciones que usen la GPU, "
+                "prueba un modelo menor o usa [cyan]--engine faster-whisper[/cyan] (CPU)."
+            )
+        else:
+            console.print(
+                "large-v3 pide ~3.5 GB sólo al cargar. Cierra procesos o usa "
+                "[cyan]-m medium[/cyan]. No cubre la muerte nativa de --diarize."
+            )
         raise typer.Exit(1)
 
     # La cobertura es la única medida que la herramienta tiene de sí misma: sin ella, `OK`
@@ -227,9 +330,11 @@ def transcribe_file(
         if info.language_probability is not None:
             idioma += f" (prob={info.language_probability:.2f})"
 
+    # El motor resuelto SIEMPRE en el resumen (G2): dos corridas del mismo audio con
+    # texto distinto tienen que ser distinguibles a simple vista.
     console.print(
         f"{idioma} · duración {info.duration:.1f}s · "
-        f"{len(segments)} segmentos · {voz}"
+        f"{len(segments)} segmentos · {voz} · motor {engine}"
     )
 
     if diarize:
@@ -242,11 +347,32 @@ def transcribe_file(
         for s in segments
     ]
 
+    # Identidad del motor en el JSON (G2): dos corridas del mismo audio con texto
+    # distinto tienen que ser distinguibles también a máquina, no solo en consola.
+    # 'selection' es constante en v1 (no hay auto); mantener la clave evita otro
+    # cambio de payload el día que exista.
+    if engine == ENGINE_WHISPERCPP:
+        from speechtotext.core.enginepin import ENGINE_PIN
+
+        version = f"whisper.cpp {ENGINE_PIN['version']}"
+    else:
+        from importlib.metadata import version as _pkg_version
+
+        version = f"faster-whisper {_pkg_version('faster-whisper')}"
+    engine_info = {
+        "name": engine, "version": version, "model": model,
+        "quant": compute_type, "device": device, "selection": "explicit",
+    }
+    if diarize:
+        # La atribución gruesa (sin words) y la fina son resultados distintos y el
+        # consumidor del JSON merece saber cuál recibió.
+        engine_info["diarization"] = "segment" if engine == ENGINE_WHISPERCPP else "word"
+
     writers: dict[str, tuple[str, callable]] = {
         "txt": (".txt", lambda p: write_txt(segments, p)),
         "srt": (".srt", lambda p: write_srt(segments, p)),
         "vtt": (".vtt", lambda p: write_vtt(segments, p)),
-        "json": (".json", lambda p: write_json(segments, info, p)),
+        "json": (".json", lambda p: write_json(segments, info, p, engine_info=engine_info)),
     }
     for fmt in sorted(requested):
         suffix, write_fn = writers[fmt]
@@ -322,13 +448,18 @@ def transcribe(
     jobs: int = typer.Option(
         4, "--jobs", "-j", help="Trozos en paralelo al trocear (comparten un modelo).",
     ),
+    engine: str = typer.Option(
+        ENGINE_FASTER,
+        "--engine",
+        help="faster-whisper (CPU, default) | whispercpp (whisper.cpp CUDA en la GPU).",
+    ),
 ) -> None:
     """Transcribe un archivo de audio localmente con Whisper (sin enviar nada a internet)."""
     transcribe_file(
         audio, output, language, model, formats, device, compute_type,
         vad, beam_size, diarize, speakers, identify, threshold,
         hotwords=_resolve_hotwords(hotwords, hotwords_file),
-        chunk=chunk, jobs=jobs,
+        chunk=chunk, jobs=jobs, engine=engine,
     )
 
 
