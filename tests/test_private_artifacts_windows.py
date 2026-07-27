@@ -927,31 +927,71 @@ def _efs_supported(tmp_path, api) -> bool:
     return bool(api.advapi32.EncryptFileW(str(probe)))
 
 
-def _owner_is_current_user(tmp_path) -> bool:
-    """Mide la condicion exacta que exige la probe real de ACL: que el owner de lo
-    que creamos sea el usuario actual.
+def _owner_is_current_user() -> bool:
+    """Mide la condicion que exige la probe real de ACL: que el owner de lo que
+    creamos sea el usuario actual.
 
-    Bajo un token elevado el owner por defecto de un objeto nuevo es
-    BUILTIN\\Administrators, no el usuario, y `acl_current_user_only` compara por
-    igualdad estricta contra TokenUser (artifacts.py:1099-1101). Rechazar ahi es
-    correcto: un owner de grupo reparte WRITE_DAC implicito entre todos sus miembros.
+    Se lee del TOKEN, no de un objeto del disco: TokenOwner (clase 4) es el owner que
+    Windows le pone por defecto a todo lo que este proceso cree, y TokenUser (clase 1)
+    es el usuario. Bajo token elevado el primero es BUILTIN\\Administrators y el
+    segundo no, y `acl_current_user_only` compara por igualdad estricta contra
+    TokenUser (mas abajo, en artifacts.py). Rechazar ahi es correcto: un owner de
+    grupo reparte WRITE_DAC implicito entre todos sus miembros.
 
-    Se mide por fuera y NO llamando a la probe bajo test. Si esta guarda usara
-    `acl_current_user_only`, un `return False` en produccion se auto-saltaria estos
-    dos tests, y son los unicos positivos con probe real que tiene el repo: la
-    regresion pasaria el CI en verde.
+    NO se llama a la probe bajo test para decidir el skip. Es lo que importa: estos
+    dos son de los unicos positivos con probe real del repo, asi que una guarda
+    circular convertiria un `return False` en produccion en un skip silencioso y el
+    CI aprobaria la regresion.
+
+    Sin subprocesos a proposito: la primera version pedia el owner por PowerShell y
+    `Get-Acl` sale con codigo 1 en el runner de GitHub, o sea la guarda mataba al test
+    en vez de saltarlo.
     """
-    probe = tmp_path / "owner-probe"
-    probe.mkdir()
-    owner = subprocess.run(
-        ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-         f"(Get-Acl -LiteralPath '{probe}').Owner"],
-        capture_output=True, text=True, check=True,
-    ).stdout.strip()
-    me = subprocess.run(
-        ["whoami"], capture_output=True, text=True, check=True
-    ).stdout.strip()
-    return bool(owner) and owner.casefold() == me.casefold()
+    # ctypes.wintypes solo existe en Windows y este modulo SI se importa en Linux
+    # (pytestmark salta la ejecucion, no la coleccion): el import va aqui dentro.
+    import ctypes
+    from ctypes import wintypes
+
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    # Los tipos son obligatorios, no decoracion: GetCurrentProcess devuelve el
+    # pseudo-handle (HANDLE)-1 y sin restype ctypes lo trata como c_int, que en 64
+    # bits llega truncado y OpenProcessToken responde WinError 6, handle invalido.
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    advapi32.OpenProcessToken.argtypes = [
+        wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)
+    ]
+    advapi32.GetTokenInformation.argtypes = [
+        wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    advapi32.GetLengthSid.argtypes = [ctypes.c_void_p]
+    advapi32.GetLengthSid.restype = wintypes.DWORD
+
+    token = wintypes.HANDLE()
+    if not advapi32.OpenProcessToken(
+        kernel32.GetCurrentProcess(), 0x0008, ctypes.byref(token)  # TOKEN_QUERY
+    ):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        def _sid(info_class: int) -> bytes:
+            needed = wintypes.DWORD()
+            advapi32.GetTokenInformation(
+                token, info_class, None, 0, ctypes.byref(needed)
+            )
+            buffer = ctypes.create_string_buffer(needed.value)
+            if not advapi32.GetTokenInformation(
+                token, info_class, buffer, needed, ctypes.byref(needed)
+            ):
+                raise ctypes.WinError(ctypes.get_last_error())
+            # TOKEN_USER y TOKEN_OWNER empiezan los dos por un puntero al SID.
+            sid = ctypes.cast(buffer, ctypes.POINTER(ctypes.c_void_p)).contents
+            return ctypes.string_at(sid, advapi32.GetLengthSid(sid))
+
+        return _sid(1) == _sid(4)  # TokenUser == TokenOwner
+    finally:
+        kernel32.CloseHandle(token)
 
 
 _SKIP_ELEVADA = (
@@ -964,7 +1004,7 @@ def test_adapter_windows_lease_con_acl_real_y_solo_encryption_inyectado(tmp_path
     # Unica probe sustituida y documentada: encryption (EFS puede no existir
     # en el volumen). La probe de ACL es la REAL por defecto y debe aceptar
     # un arbol provisionado con DACL protegida current-user-only.
-    if not _owner_is_current_user(tmp_path):
+    if not _owner_is_current_user():
         pytest.skip(_SKIP_ELEVADA)
     local = tmp_path / "LocalAppData"
     root = local / "speechtotext" / "artifacts"
@@ -1084,7 +1124,7 @@ def test_adapter_windows_reader_con_acl_real_no_converge_lock_inseguro(
 def test_adapter_windows_promote_y_lease_con_probes_reales_por_defecto(tmp_path):
     # End-to-end con TODAS las probes por defecto: provisioning real
     # (CREATE_NEW + DACL protegida + EFS), promocion y lease.
-    if not _owner_is_current_user(tmp_path):
+    if not _owner_is_current_user():
         pytest.skip(_SKIP_ELEVADA)
     local = tmp_path / "LocalAppData"
     local.mkdir()
