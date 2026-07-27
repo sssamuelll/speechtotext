@@ -187,7 +187,7 @@ def test_run_chunked_reensambla_en_orden_y_arma_info(monkeypatch):
     monkeypatch.setattr(chunked, "probe_duration", lambda audio: 1200.0)
     monkeypatch.setattr(chunked, "plan_chunks", lambda audio, dur, **k: [(0.0, 600.0), (600.0, 1200.0)])
 
-    def fake_chunk(audio, start, end, opts, model, model_name):
+    def fake_chunk(audio, start, end, opts, model, model_name, **kw):
         return [TimedSegment(start + 1.0, start + 2.0, f" t{int(start)}")], False, "es"
     monkeypatch.setattr(chunked, "transcribe_chunk", fake_chunk)
 
@@ -233,7 +233,10 @@ def test_run_chunked_no_construye_modelo_si_todo_esta_cacheado(tmp_path, monkeyp
     monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
     audio = tmp_path / "a.mp3"
     audio.write_bytes(b"12345")
-    p = chunked.chunk_path(audio, _opts(), "large-v3", 0.0, 600.0)
+    # run_chunked ya siembra la llave con engine/quant/device reales (int8 = quant
+    # efectiva de faster-whisper): el checkpoint se siembra con la misma identidad.
+    p = chunked.chunk_path(audio, _opts(), "large-v3", 0.0, 600.0,
+                           engine="faster-whisper", quant="int8", device="cpu")
     p.write_text(json.dumps(
         {"language": "es", "segments": [{"start": 1.0, "end": 2.0, "text": " cache"}]}))
 
@@ -306,3 +309,161 @@ def test_should_chunk_auto_por_umbral():
 def test_should_chunk_flag_explicito_manda():
     assert should_chunk(10.0, True) is True       # forzar en audio corto
     assert should_chunk(99999.0, False) is False  # forzar off en audio largo
+
+
+# --- multimotor (PR-1): identidad del checkpoint, thunk por engine, cancel al fallo ---
+
+import time
+
+import pytest
+
+from speechtotext.core import engines
+
+
+def test_chunk_path_distingue_engine_quant_device(tmp_path, monkeypatch):
+    # Sin engine/quant/device en la llave, faster-whisper int8 y whispercpp q5_0 con el
+    # mismo model_name darian el MISMO digest: texto de un motor bajo la firma del otro.
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    audio = tmp_path / "a.mp3"
+    audio.write_bytes(b"12345")
+    base = chunked.chunk_path(audio, _opts(), "large-v3", 0.0, 600.0,
+                              engine="faster-whisper", quant="int8", device="cpu")
+    assert chunked.chunk_path(audio, _opts(), "large-v3", 0.0, 600.0,
+                              engine="whispercpp", quant="q5_0", device="cuda") != base
+    assert chunked.chunk_path(audio, _opts(), "large-v3", 0.0, 600.0,
+                              engine="faster-whisper", quant="float16", device="cpu") != base
+    assert chunked.chunk_path(audio, _opts(), "large-v3", 0.0, 600.0,
+                              engine="faster-whisper", quant="int8", device="cuda") != base
+
+
+def test_chunk_path_vad_y_no_vad_mismo_digest_bajo_whispercpp(tmp_path, monkeypatch):
+    # La llave consume opts EFECTIVOS: whispercpp no trae VAD, asi que --vad y --no-vad
+    # producen la misma salida y deben compartir digest (cero recompute fantasma).
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    audio = tmp_path / "a.mp3"
+    audio.write_bytes(b"12345")
+    con_vad = engines.effective_opts("whispercpp", _opts(vad_filter=True))
+    sin_vad = engines.effective_opts("whispercpp", _opts(vad_filter=False))
+    kw = dict(engine="whispercpp", quant="q5_0", device="cuda")
+    assert chunked.chunk_path(audio, con_vad, "large-v3", 0.0, 600.0, **kw) == \
+        chunked.chunk_path(audio, sin_vad, "large-v3", 0.0, 600.0, **kw)
+
+
+def test_run_chunked_cancela_pendientes_al_primer_fallo(monkeypatch):
+    monkeypatch.setattr(chunked, "WhisperModel", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(chunked, "probe_duration", lambda audio: 3000.0)
+    monkeypatch.setattr(chunked, "plan_chunks",
+                        lambda audio, dur, **k: [(i * 600.0, (i + 1) * 600.0) for i in range(5)])
+    ran = []
+
+    def stub(audio, start, end, opts, model, model_name, **kw):
+        if start == 0.0:
+            raise RuntimeError("boom")
+        # ponytail: la siesta le da al hilo principal la ventana para cancelar mientras
+        # el worker (jobs=1) duerme el trozo que ya habia agarrado del queue.
+        time.sleep(0.05)
+        ran.append(start)
+        return [], False, "es"
+    monkeypatch.setattr(chunked, "transcribe_chunk", stub)
+
+    with pytest.raises(RuntimeError) as ei:
+        chunked.run_chunked(Path("x.mp3"), _opts(), 1, "m", "cpu", "int8", log=lambda m: None)
+    # El mensaje nombra motor, trozo y rango mm:ss, con la causa encadenada.
+    assert "motor faster-whisper" in str(ei.value)
+    assert "trozo 1/5" in str(ei.value)
+    assert "00:00-10:00" in str(ei.value)
+    assert "boom" in str(ei.value)
+    assert isinstance(ei.value.__cause__, RuntimeError)
+    # cancel_futures: el worker pudo haber agarrado a lo sumo UN trozo antes del
+    # shutdown; sin la cancelacion, los 4 restantes corren completos.
+    assert len(ran) <= 1
+
+
+def test_run_chunked_whispercpp_construye_via_make_engine(tmp_path, monkeypatch):
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    audio = tmp_path / "a.mp3"
+    audio.write_bytes(b"12345")
+
+    def boom(*a, **k):
+        raise AssertionError("bajo whispercpp jamas se construye chunked.WhisperModel")
+    monkeypatch.setattr(chunked, "WhisperModel", boom)
+    monkeypatch.setattr(chunked, "probe_duration", lambda audio: 600.0)
+    monkeypatch.setattr(chunked, "plan_chunks", lambda audio, dur, **k: [(0.0, 600.0)])
+    # ffmpeg del recorte del trozo (transcribe_chunk va real): stub inofensivo
+    monkeypatch.setattr(chunked.subprocess, "run",
+                        lambda *a, **k: SimpleNamespace(returncode=0, stderr=b""))
+    local = [SimpleNamespace(start=1.0, end=2.0, text=" gpu", words=None)]
+    made = []
+
+    def fake_make(engine, model_name, device, compute_type, **kw):
+        made.append((engine, model_name, device, compute_type))
+        return SimpleNamespace(
+            transcribe=lambda wav, **o: (iter(local), SimpleNamespace(language="es")))
+    monkeypatch.setattr(chunked.engines, "make_engine", fake_make)
+
+    segs, info = chunked.run_chunked(
+        audio, _opts(), 1, "large-v3", "cuda", "auto",
+        log=lambda m: None, engine="whispercpp",
+    )
+    assert made == [("whispercpp", "large-v3", "cuda", "auto")]
+    assert [s.text for s in segs] == [" gpu"]
+
+
+def test_run_chunked_whispercpp_vad_y_no_vad_comparten_checkpoint(tmp_path, monkeypatch):
+    # Punta a punta: run_chunked aplica effective_opts y quant_for antes de la llave,
+    # asi un checkpoint sembrado con la identidad efectiva es hit con --vad Y --no-vad,
+    # sin construir motor alguno.
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    audio = tmp_path / "a.mp3"
+    audio.write_bytes(b"12345")
+    eff = engines.effective_opts("whispercpp", _opts(vad_filter=True))
+    p = chunked.chunk_path(audio, eff, "large-v3", 0.0, 600.0,
+                           engine="whispercpp", quant="q5_0", device="cuda")
+    p.write_text(json.dumps(
+        {"language": "es", "segments": [{"start": 1.0, "end": 2.0, "text": " cache"}]}))
+
+    def boom(*a, **k):
+        raise AssertionError("con checkpoint valido no se construye motor")
+    monkeypatch.setattr(chunked, "WhisperModel", boom)
+    monkeypatch.setattr(chunked.engines, "make_engine", boom)
+    monkeypatch.setattr(chunked, "probe_duration", lambda audio: 600.0)
+    monkeypatch.setattr(chunked, "plan_chunks", lambda audio, dur, **k: [(0.0, 600.0)])
+
+    for vad in (True, False):
+        segs, _ = chunked.run_chunked(
+            audio, _opts(vad_filter=vad), 1, "large-v3", "cuda", "auto",
+            log=lambda m: None, engine="whispercpp",
+        )
+        assert [s.text for s in segs] == [" cache"]
+
+
+def test_run_chunked_clampa_jobs_bajo_whispercpp(tmp_path, monkeypatch):
+    # Defensa en profundidad: run_chunked es API publica y N subprocesos contra una
+    # sola GPU paginan en silencio (medido: 2 concurrentes tardan MAS que en serie).
+    # La CLI clampa, pero quien llame run_chunked directo tambien queda protegido.
+    audio = tmp_path / "a.mp3"
+    audio.write_bytes(b"x")
+    monkeypatch.setattr(chunked, "probe_duration", lambda p: 1800.0)
+    monkeypatch.setattr(chunked, "plan_chunks", lambda a, d: [(0.0, 600.0), (600.0, 1200.0), (1200.0, 1800.0)])
+
+    max_workers_visto = []
+    real_executor = chunked.ThreadPoolExecutor
+
+    class SpyExecutor(real_executor):
+        def __init__(self, max_workers=None, **kw):
+            max_workers_visto.append(max_workers)
+            super().__init__(max_workers=max_workers, **kw)
+
+    monkeypatch.setattr(chunked, "ThreadPoolExecutor", SpyExecutor)
+    monkeypatch.setattr(
+        chunked, "transcribe_chunk",
+        lambda audio, s, e, opts, get_model, model_name, **kw: ([], False, "es"),
+    )
+    chunked.run_chunked(
+        audio, {"language": "es", "beam_size": 5, "vad_filter": True,
+                "hotwords": None, "condition_on_previous_text": False,
+                "word_timestamps": False},
+        4, model_name="large-v3", device="cuda", compute_type="q5_0",
+        log=lambda m: None, engine=chunked.engines.ENGINE_WHISPERCPP,
+    )
+    assert max_workers_visto == [1]  # jobs=4 pedido, 1 efectivo: serializacion estructural

@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 from speechtotext.core.segments import LabeledSegment
@@ -174,3 +175,76 @@ def test_json_conserva_language_probability_forzada(tmp_path):
     p = tmp_path / "o.json"
     write_json(segs, info, p)
     assert json.loads(p.read_text(encoding="utf-8"))["language_probability"] == 1.0
+
+
+# --- multimotor (plan 2.6): bloque engine en el JSON ---
+
+# El dict lo arma el CLI; formats solo lo emite. Este es el shape del contrato.
+ENGINE_INFO = {
+    "name": "whispercpp",
+    "version": "v1.9.1",
+    "model": "large-v3",
+    "quant": "q5_0",
+    "device": "cuda",
+    "selection": "explicit",
+}
+
+
+def _info(duration=1.0, prob=1.0):
+    return SimpleNamespace(language="es", language_probability=prob, duration=duration)
+
+
+def test_json_sin_engine_info_omite_la_clave(tmp_path):
+    # regresión: los call sites viejos (sin el kwarg) producen el payload de siempre
+    p = tmp_path / "o.json"
+    write_json([LabeledSegment(0, 1, "hola")], _info(), p)
+    assert "engine" not in json.loads(p.read_text(encoding="utf-8"))
+
+
+def test_json_engine_info_completo(tmp_path):
+    p = tmp_path / "o.json"
+    write_json([LabeledSegment(0, 1, "hola")], _info(), p, engine_info=dict(ENGINE_INFO))
+    assert json.loads(p.read_text(encoding="utf-8"))["engine"] == ENGINE_INFO
+
+
+def test_json_diarization_va_dentro_del_bloque_engine(tmp_path):
+    p = tmp_path / "o.json"
+    write_json(
+        [LabeledSegment(0, 1, "hola", "Samuel")],
+        _info(),
+        p,
+        engine_info={**ENGINE_INFO, "diarization": "segment"},
+    )
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert data["engine"]["diarization"] == "segment"
+    assert "diarization" not in data  # un solo hogar para la metadata de motor (G4)
+
+
+def test_pipeline_whispercpp_fixture_a_write_json(tmp_path):
+    """Contrato dual de punta a punta: la fixture real de -ojf pasa por el parser del
+    núcleo, se convierte en LabeledSegments (el puente que hoy hace el CLI) y sale por
+    write_json. test_engines.py no cubre este último tramo; aquí vive."""
+    from speechtotext.core.engines import _parse_ojf
+
+    fixture = Path(__file__).parent / "fixtures" / "whispercpp_ojf.json"
+    raw_segments, raw_info = _parse_ojf(json.loads(fixture.read_text(encoding="utf-8")))
+    segs = [LabeledSegment(s.start, s.end, s.text) for s in raw_segments]
+    # el parser no fabrica duration (ley G5); la fabrica el orquestador — aquí, el test
+    info = SimpleNamespace(
+        language=raw_info.language,
+        language_probability=raw_info.language_probability,
+        duration=segs[-1].end,
+    )
+    p = tmp_path / "o.json"
+    write_json(segs, info, p, engine_info=dict(ENGINE_INFO))
+    data = json.loads(p.read_text(encoding="utf-8"))
+    # (a) language_probability=None del motor -> clave ausente, jamás 0.0
+    assert "language_probability" not in data
+    assert data["language"] == "es"
+    # (b) el texto sobrevive intacto (write_json solo recorta el espacio decorativo inicial)
+    assert data["segments"][0]["text"] == "Ay, gracias. Gracias por haberme dejado tantos años."
+    assert data["segments"][0]["start"] == 0.0
+    assert data["segments"][0]["end"] == 19.92
+    assert len(data["segments"]) == len(segs)
+    # (c) el bloque engine sale completo con sus 6 claves
+    assert data["engine"] == ENGINE_INFO
