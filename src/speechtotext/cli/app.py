@@ -660,5 +660,167 @@ def forget(name: str = typer.Argument(..., help="Nombre de la voz a borrar.")) -
         raise typer.Exit(1)
 
 
+def _trim_wav(wav: Path, seconds: float) -> Path:
+    """Recorta el wav (ya 16k mono PCM) a los primeros `seconds` con ffmpeg -t.
+
+    Medir las 7 configs sobre el audio completo sería eterno; el recorte acota el
+    coste sin cambiar lo que se compara (todas miden el MISMO trozo).
+    """
+    import subprocess
+
+    out = wav.with_name(wav.stem + "_bench.wav")
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+             "-i", str(wav), "-t", str(seconds), "-c", "copy", str(out)],
+            check=True, capture_output=True,
+        )
+    except subprocess.CalledProcessError as e:
+        # Sin esto el usuario ve un CalledProcessError crudo; con esto, el mismo
+        # patron de mensaje rojo que ya usa el resto del comando.
+        stderr = (e.stderr or b"").decode(errors="replace").strip()
+        raise RuntimeError(f"ffmpeg no pudo recortar el audio: {stderr[-300:]}") from e
+    return out
+
+
+def _print_bench(table: dict) -> None:
+    """Tabla rich del bench + resumen. Misma vista al medir y con --show."""
+    from rich.markup import escape
+
+    def cell(v, fmt="{:.2f}"):
+        if v is None:
+            return "—"
+        return fmt.format(v) if isinstance(v, float) else str(v)
+
+    t = Table("Motor", "Modelo", "x_rt", "load_s", "RAM MB", "VRAM MB", "Caps", "WER", "Error")
+    for r in table["results"]:
+        caps = r.get("capabilities") or {}
+        # H/W/S/V = hotwords/word_timestamps/native_signals/vad, compacto para caber.
+        letras = "".join(
+            l for l, k in (("H", "hotwords"), ("W", "word_timestamps"),
+                           ("S", "native_signals"), ("V", "vad"))
+            if caps.get(k)
+        ) or "—"
+        err = r.get("error")
+        t.add_row(
+            r["engine"], r["model"],
+            cell(r.get("x_realtime")), cell(r.get("load_s")),
+            cell(r.get("peak_ram_mb"), "{:.0f}"), cell(r.get("peak_vram_mb"), "{:.0f}"),
+            letras, cell(r.get("wer_ref"), "{:.3f}"),
+            # Las configs rotas se MARCAN, no se ocultan: la tabla no miente.
+            # escape: el error puede traer corchetes que rich malinterpretaría.
+            f"[red]{escape(err[:30])}[/red]" if err else "",
+        )
+    # ponytail: Console(width=120) fijo para que 9 columnas no se plieguen a 80;
+    # si algún día molesta en terminales angostas, medir el ancho real.
+    Console(width=120).print(t)
+
+    ok = sum(1 for r in table["results"] if not r.get("error"))
+    con_error = len(table["results"]) - ok
+    skipped = table.get("skipped", [])
+    console.print(f"{ok} viables · {con_error} con error · {len(skipped)} saltadas")
+    for s in skipped:
+        console.print(f"  saltada {s['engine']} {s['model']}: {s['reason']}", markup=False)
+
+
+@app.command()
+def bench(
+    audio: Optional[Path] = typer.Argument(
+        None, exists=True, dir_okay=False,
+        help="Audio a medir. Omítelo (o usa --show) para ver la última tabla.",
+    ),
+    seconds: float = typer.Option(
+        60.0, "--seconds",
+        help="Segundos del audio a medir (recorte inicial; acota el coste del bench).",
+    ),
+    quick: bool = typer.Option(
+        False, "--quick",
+        help="Salta medium y large-v3 de faster-whisper: son los lentos en CPU "
+        "(minutos por config) y el resto basta para una primera decisión.",
+    ),
+    show: bool = typer.Option(
+        False, "--show", help="Pinta la tabla guardada sin volver a medir."
+    ),
+) -> None:
+    """Mide las configs ASR viables en ESTA máquina y guarda bench.json."""
+    from speechtotext.core import benchmark
+
+    if show or audio is None:
+        table = benchmark.read_table()
+        if table is None:
+            console.print(
+                "[red]No hay tabla de benchmark.[/red] "
+                "Mídela con: [cyan]speechtotext bench <audio>[/cyan]"
+            )
+            raise typer.Exit(1)
+        _print_bench(table)
+        return
+
+    from speechtotext.core.audio import FfmpegMissingError, TranscodeError, transcode_to_wav
+    from speechtotext.core.chunked import probe_duration
+
+    # Misma ruta que whispercpp directo: wav 16k mono temporal, el path del usuario
+    # jamás viaja crudo a los motores.
+    try:
+        wav = transcode_to_wav(audio.read_bytes())
+    except (FfmpegMissingError, TranscodeError) as e:
+        console.print(f"[red]No se pudo procesar el audio:[/red] {e}")
+        raise typer.Exit(1)
+    try:
+        clip = _trim_wav(wav, seconds)
+    except RuntimeError as e:
+        console.print(f"[red]No se pudo recortar el audio:[/red] {e}")
+        raise typer.Exit(1)
+    finally:
+        wav.unlink(missing_ok=True)
+    try:
+        # duración REAL del recorte (el audio puede durar menos que --seconds).
+        duration_s = probe_duration(clip)
+        configs, _skipped = benchmark.available_configs()
+        quick_saltadas = []
+        if quick:
+            lentas = [
+                c for c in configs
+                if c["engine"] == "faster-whisper" and c["model"] in ("medium", "large-v3")
+            ]
+            configs = [c for c in configs if c not in lentas]
+            # Las quick-saltadas van a skipped: una tabla con filas ausentes sin razón
+            # haría que aurelius eligiera sin saber que faltan candidatas.
+            quick_saltadas = [
+                {"engine": c["engine"], "model": c["model"], "reason": "saltada por --quick"}
+                for c in lentas
+            ]
+        console.print(f"Midiendo {len(configs)} configs sobre {duration_s:.1f}s de audio...")
+
+        def _progress(cfg, res):
+            # Una fila al terminar cada config: el bench tarda minutos y el silencio
+            # se confunde con un cuelgue. markup=False: el error trae corchetes.
+            if res.get("error"):
+                console.print(
+                    f"  FALLO {cfg['engine']} {cfg['model']}: {res['error'][:120]}",
+                    markup=False,
+                )
+            else:
+                console.print(
+                    f"  OK {cfg['engine']} {cfg['model']}: {res['x_realtime']}x "
+                    f"(load {res['load_s']}s, transcribe {res['transcribe_s']}s)",
+                    markup=False,
+                )
+
+        table = benchmark.run_benchmark(clip, duration_s, configs, progress=_progress)
+        table["skipped"].extend(quick_saltadas)
+        path = benchmark.write_table(table)
+    finally:
+        try:
+            clip.unlink(missing_ok=True)
+        except OSError:
+            # ponytail: Windows puede retener el handle del wav unos ms tras morir el
+            # ultimo hijo (WinError 32); un temporal huerfano no justifica tumbar un
+            # bench de 15 minutos YA escrito en disco.
+            pass
+    console.print(f"Tabla escrita en {path}")
+    _print_bench(table)
+
+
 if __name__ == "__main__":
     app()

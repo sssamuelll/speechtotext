@@ -342,6 +342,137 @@ def test_whispercpp_rechaza_modelo_no_pinneado(tmp_path, monkeypatch):
     assert calls == []  # run_chunked jamas se llamo
 
 
+# --- bench · tabla de configs medidas (núcleo SIEMPRE stubbeado, jamás motores) ------
+
+
+def _bench_row(**over):
+    row = {
+        "engine": "faster-whisper", "model": "small", "quant": "int8", "device": "cpu",
+        "load_s": 1.2, "transcribe_s": 7.0, "x_realtime": 8.5,
+        "peak_ram_mb": 900.0, "peak_vram_mb": None, "segments": 12, "chars": 800,
+        "capabilities": {"hotwords": True, "word_timestamps": True,
+                         "native_signals": True, "vad": True},
+        "wer_ref": 0.419, "error": None,
+    }
+    row.update(over)
+    return row
+
+
+def _bench_table(results, skipped=()):
+    return {
+        "schema_version": "speechtotext.bench/v1",
+        "measured_at": "2026-07-27T00:00:00+00:00",
+        "machine": {"cpu": "x", "logical_cores": 8, "ram_gb": 16.0, "gpu": None},
+        "audio": {"source": "a.wav", "duration_s": 60.0, "sha1": "0" * 40},
+        "results": results,
+        "skipped": list(skipped),
+    }
+
+
+def test_bench_show_sin_tabla(tmp_path, monkeypatch):
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    result = runner.invoke(app, ["bench", "--show"])
+    assert result.exit_code == 1
+    assert "speechtotext bench" in result.stdout  # el mensaje dice CÓMO medirla
+
+
+def test_bench_show_con_tabla(tmp_path, monkeypatch):
+    from speechtotext.core import benchmark
+
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    benchmark.write_table(_bench_table([_bench_row()]))
+    result = runner.invoke(app, ["bench", "--show"])
+    assert result.exit_code == 0
+    assert "faster-whisper" in result.stdout
+    assert "8.5" in result.stdout  # x_realtime visible
+
+
+def test_bench_audio_escribe_tabla_y_reporta_skipped(tmp_path, monkeypatch):
+    from speechtotext.cli import app as cli_app
+    from speechtotext.core import audio as core_audio
+    from speechtotext.core import benchmark, chunked
+
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    src = tmp_path / "charla.mp3"
+    src.write_bytes(b"ID3")
+    wav = tmp_path / "t.wav"
+    wav.write_bytes(b"RIFF")
+    clip = tmp_path / "clip.wav"
+    clip.write_bytes(b"RIFF")
+    monkeypatch.setattr(core_audio, "transcode_to_wav", lambda b, **k: wav)
+    monkeypatch.setattr(cli_app, "_trim_wav", lambda w, s: clip)
+    monkeypatch.setattr(chunked, "probe_duration", lambda p: 42.0)
+
+    viable = {"engine": "faster-whisper", "model": "tiny", "quant": "int8", "device": "cpu",
+              "capabilities": _bench_row()["capabilities"], "wer_ref": None}
+    monkeypatch.setattr(benchmark, "available_configs", lambda: ([viable], []))
+
+    def fake_run_benchmark(wav_path, duration_s, configs, *, progress=None):
+        results = []
+        for cfg in configs:
+            res = _bench_row(engine=cfg["engine"], model=cfg["model"])
+            results.append(res)
+            if progress:
+                progress(cfg, res)
+        return _bench_table(
+            results,
+            skipped=[{"engine": "whispercpp", "model": "small", "reason": "exe ausente"}],
+        )
+
+    monkeypatch.setattr(benchmark, "run_benchmark", fake_run_benchmark)
+    result = runner.invoke(app, ["bench", str(src)])
+    assert result.exit_code == 0
+    assert (tmp_path / "bench.json").exists()  # write_table real, home sembrado
+    assert "bench.json" in result.stdout  # el path se imprime
+    assert "exe ausente" in result.stdout  # las saltadas se explican
+    assert "tiny" in result.stdout  # fila de progreso por config
+
+
+def test_bench_quick_salta_los_lentos(tmp_path, monkeypatch):
+    from speechtotext.cli import app as cli_app
+    from speechtotext.core import audio as core_audio
+    from speechtotext.core import benchmark, chunked
+
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    src = tmp_path / "charla.mp3"
+    src.write_bytes(b"ID3")
+    wav = tmp_path / "t.wav"
+    wav.write_bytes(b"RIFF")
+    monkeypatch.setattr(core_audio, "transcode_to_wav", lambda b, **k: wav)
+    monkeypatch.setattr(cli_app, "_trim_wav", lambda w, s: wav)
+    monkeypatch.setattr(chunked, "probe_duration", lambda p: 42.0)
+    caps = _bench_row()["capabilities"]
+    viables = [
+        {"engine": "faster-whisper", "model": m, "quant": "int8", "device": "cpu",
+         "capabilities": caps, "wer_ref": None}
+        for m in ("tiny", "medium", "large-v3")
+    ]
+    monkeypatch.setattr(benchmark, "available_configs", lambda: (viables, []))
+    seen = {}
+
+    def fake_run_benchmark(wav_path, duration_s, configs, *, progress=None):
+        seen["models"] = [c["model"] for c in configs]
+        return _bench_table([])
+
+    monkeypatch.setattr(benchmark, "run_benchmark", fake_run_benchmark)
+    result = runner.invoke(app, ["bench", str(src), "--quick"])
+    assert result.exit_code == 0
+    assert seen["models"] == ["tiny"]  # medium y large-v3 de fw quedan fuera
+
+
+def test_bench_config_con_error_sale_marcada(tmp_path, monkeypatch):
+    from speechtotext.core import benchmark
+
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    rota = _bench_row(model="medium", load_s=None, transcribe_s=None, x_realtime=None,
+                      peak_ram_mb=None, segments=None, chars=None, error="hijo murio rc=1")
+    benchmark.write_table(_bench_table([_bench_row(), rota]))
+    result = runner.invoke(app, ["bench", "--show"])
+    assert result.exit_code == 0
+    assert "hijo murio" in result.stdout  # la fila rota se ve, no se oculta
+    assert "1 con error" in result.stdout
+
+
 def test_whispercpp_avisa_el_remapeo_de_device(tmp_path, monkeypatch):
     # Pisar un -d cpu explicito en silencio seria la sustitucion callada que el
     # contrato prohibe: el remapeo a cuda se avisa siempre que no pidieran cuda.
@@ -353,3 +484,62 @@ def test_whispercpp_avisa_el_remapeo_de_device(tmp_path, monkeypatch):
     result = _invoke(audio, tmp_path, "--engine", "whispercpp", "-d", "cuda")
     assert result.exit_code == 0
     assert "corre en la GPU" not in result.stdout  # quien pidio cuda no recibe ruido
+
+
+def test_bench_quick_documenta_las_saltadas_en_skipped(tmp_path, monkeypatch):
+    # Una tabla con filas ausentes sin razon haria que aurelius eligiera sin saber
+    # que faltan candidatas: las quick-saltadas van a skipped con su motivo.
+    import json
+
+    from speechtotext.core import benchmark
+
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path / "home"))
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"RIFF")
+    from speechtotext.cli import app as app_mod
+
+    monkeypatch.setattr(app_mod, "_trim_wav", lambda wav, s: wav)
+    monkeypatch.setattr(
+        "speechtotext.core.audio.transcode_to_wav", lambda b: tmp_path / "t.wav"
+    )
+    (tmp_path / "t.wav").write_bytes(b"RIFF")
+    monkeypatch.setattr("speechtotext.core.chunked.probe_duration", lambda p: 60.0)
+    monkeypatch.setattr(
+        benchmark, "available_configs",
+        lambda: ([
+            {"engine": "faster-whisper", "model": "small"},
+            {"engine": "faster-whisper", "model": "medium"},
+            {"engine": "faster-whisper", "model": "large-v3"},
+        ], []),
+    )
+    monkeypatch.setattr(
+        benchmark, "run_benchmark",
+        lambda clip, d, configs, progress=None: {
+            "results": [], "skipped": [], "machine": {}, "audio": {},
+        },
+    )
+    result = runner.invoke(app, ["bench", str(audio), "--quick"], catch_exceptions=False)
+    assert result.exit_code == 0
+    tabla = json.loads((tmp_path / "home" / "bench.json").read_text(encoding="utf-8"))
+    razones = {(s["engine"], s["model"]): s["reason"] for s in tabla["skipped"]}
+    assert razones[("faster-whisper", "medium")] == "saltada por --quick"
+    assert razones[("faster-whisper", "large-v3")] == "saltada por --quick"
+
+
+def test_bench_ffmpeg_roto_sale_con_mensaje(tmp_path, monkeypatch):
+    # La ruta de error del recorte: mensaje rojo y exit 1, no traceback crudo.
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"RIFF")
+    monkeypatch.setattr(
+        "speechtotext.core.audio.transcode_to_wav", lambda b: tmp_path / "t.wav"
+    )
+    (tmp_path / "t.wav").write_bytes(b"RIFF")
+    from speechtotext.cli import app as app_mod
+
+    def boom(wav, s):
+        raise RuntimeError("ffmpeg no pudo recortar el audio: pista corrupta")
+
+    monkeypatch.setattr(app_mod, "_trim_wav", boom)
+    result = runner.invoke(app, ["bench", str(audio)])
+    assert result.exit_code == 1
+    assert "No se pudo recortar" in result.stdout
