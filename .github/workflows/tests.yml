@@ -1,0 +1,53 @@
+# Corre la suite fuera de la máquina de desarrollo.
+#
+# El motivo no es ceremonial: este proyecto se instala en modo editable y su .pth ha
+# llegado a apuntar a un árbol distinto del que se estaba editando, con lo que una
+# verificación "verde" corría código viejo sin que nadie lo notara. Aquí no hay venv
+# heredado ni worktree ambiguo: se clona, se instala y se corre.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    name: ${{ matrix.os }} · py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      # Sin fail-fast: si rompe en un solo sistema operativo, eso ES el dato.
+      fail-fast: false
+      matrix:
+        # Dos combinaciones, no la matriz completa. Cubren los dos ejes que importan:
+        # - ubuntu + 3.11 verifica el piso que declara requires-python, que nadie prueba,
+        #   y además ejecuta los tests de symlink que en Windows se saltan por permisos.
+        # - windows + 3.14 es el entorno real de desarrollo, donde vive el código
+        #   específico de plataforma (rutas, cp1252, symlinks de la caché de HF).
+        include:
+          - os: ubuntu-latest
+            python: "3.11"
+          - os: windows-latest
+            python: "3.14"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # Sin los extras `diarize` ni `api`: ningún test los importa. torch y pyannote
+      # entran por import perezoso dentro de speakers/diarization.py, y el test de
+      # configuración siembra un doble en sys.modules en vez de cargarlos. Instalarlos
+      # añadiría cerca de un giga de descarga para no ejecutar una línea más.
+      - name: Instalar
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,evaluation]"
+
+      - name: Tests
+        run: pytest -q
