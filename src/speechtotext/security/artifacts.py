@@ -1325,7 +1325,18 @@ class WindowsPrivateArtifactFilesystem:
         if not owned:
             return identity, ""
         if self._acl_probe(handle, path) is not True:
-            raise ArtifactIntegrityError(f"{label}: acl no demostrada")
+            # La causa de lejos mas comun no es un arbol manipulado sino una sesion
+            # elevada: con token de administrador el owner de todo lo que se crea es
+            # BUILTIN\Administrators y no el usuario, y la probe compara por igualdad
+            # estricta (acl_current_user_only, mas arriba). Fallar cerrado es correcto
+            # —un owner de grupo reparte WRITE_DAC implicito entre sus miembros— pero
+            # sin esta pista el mensaje no le dice a nadie que hacer.
+            raise ArtifactIntegrityError(
+                f"{label}: acl no demostrada. El arbol debe pertenecer al usuario "
+                "actual y tener DACL protegida con una sola ACE suya. Si estas en una "
+                "sesion elevada, el owner es BUILTIN\\Administrators y no tu usuario: "
+                "vuelve a ejecutar sin privilegios de administrador."
+            )
         provider = self._encryption_probe(handle, path)
         if type(provider) is not str or not provider.strip():
             raise ArtifactIntegrityError(f"{label}: encryption no demostrada")

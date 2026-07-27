@@ -726,7 +726,17 @@ class WindowsModelFilesystem:
                 )
             root_handle = handles[-1]
             if not self._read_only_acl_probe(root_handle, requested):
-                raise ModelFilesystemError("DACL read-only del root no demostrada")
+                # En sesion elevada el DACL por defecto del token deja ACEs explicitas
+                # de Administrators y SYSTEM sobre lo que se crea, y `icacls
+                # /inheritance:r` no las quita: solo borra las HEREDADAS. El root
+                # entonces no es read-only de verdad, y negarse es correcto — pero el
+                # mensaje a secas no le dice a nadie por que ni que hacer.
+                raise ModelFilesystemError(
+                    "DACL read-only del root no demostrada. El root debe tener DACL "
+                    "protegida y sin ACEs de escritura. Si estas en una sesion "
+                    "elevada, sobreviven ACEs de Administrators/SYSTEM sobre lo que "
+                    "creas: vuelve a ejecutar sin privilegios de administrador."
+                )
             identity = identities[-1]
             lease = ModelRootLease(
                 root=requested,

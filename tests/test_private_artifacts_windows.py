@@ -927,10 +927,45 @@ def _efs_supported(tmp_path, api) -> bool:
     return bool(api.advapi32.EncryptFileW(str(probe)))
 
 
+def _owner_is_current_user(tmp_path) -> bool:
+    """Mide la condicion exacta que exige la probe real de ACL: que el owner de lo
+    que creamos sea el usuario actual.
+
+    Bajo un token elevado el owner por defecto de un objeto nuevo es
+    BUILTIN\\Administrators, no el usuario, y `acl_current_user_only` compara por
+    igualdad estricta contra TokenUser (artifacts.py:1099-1101). Rechazar ahi es
+    correcto: un owner de grupo reparte WRITE_DAC implicito entre todos sus miembros.
+
+    Se mide por fuera y NO llamando a la probe bajo test. Si esta guarda usara
+    `acl_current_user_only`, un `return False` en produccion se auto-saltaria estos
+    dos tests, y son los unicos positivos con probe real que tiene el repo: la
+    regresion pasaria el CI en verde.
+    """
+    probe = tmp_path / "owner-probe"
+    probe.mkdir()
+    owner = subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+         f"(Get-Acl -LiteralPath '{probe}').Owner"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    me = subprocess.run(
+        ["whoami"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    return bool(owner) and owner.casefold() == me.casefold()
+
+
+_SKIP_ELEVADA = (
+    "sesion elevada: el owner de lo que se crea es BUILTIN\\Administrators y no el "
+    "usuario, asi que la probe real de ACL no puede demostrar nada"
+)
+
+
 def test_adapter_windows_lease_con_acl_real_y_solo_encryption_inyectado(tmp_path):
     # Unica probe sustituida y documentada: encryption (EFS puede no existir
     # en el volumen). La probe de ACL es la REAL por defecto y debe aceptar
     # un arbol provisionado con DACL protegida current-user-only.
+    if not _owner_is_current_user(tmp_path):
+        pytest.skip(_SKIP_ELEVADA)
     local = tmp_path / "LocalAppData"
     root = local / "speechtotext" / "artifacts"
     root.mkdir(parents=True)
@@ -1049,6 +1084,8 @@ def test_adapter_windows_reader_con_acl_real_no_converge_lock_inseguro(
 def test_adapter_windows_promote_y_lease_con_probes_reales_por_defecto(tmp_path):
     # End-to-end con TODAS las probes por defecto: provisioning real
     # (CREATE_NEW + DACL protegida + EFS), promocion y lease.
+    if not _owner_is_current_user(tmp_path):
+        pytest.skip(_SKIP_ELEVADA)
     local = tmp_path / "LocalAppData"
     local.mkdir()
     adapter = WindowsPrivateArtifactFilesystem(known_folder_probe=lambda: local)
