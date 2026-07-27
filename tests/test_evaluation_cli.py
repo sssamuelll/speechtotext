@@ -34,7 +34,10 @@ ARGS = [
     "--model-id", "faster-whisper-small",
     "--model-revision", "b" * 40,
     "--output", r"D:\AudioBench\aurelius-2026\reports\dev.json",
-    "--report-ref-key-file", r"D:\AudioBench\aurelius-2026\secrets\report-ref.key",
+    # Barras normales a propósito: es el único de estos paths del que un assert lee el
+    # basename, y con barra invertida Path en Linux no separa nada — el string entero
+    # queda como nombre de archivo. Con "/" parsea igual en los dos sistemas.
+    "--report-ref-key-file", "D:/AudioBench/aurelius-2026/secrets/report-ref.key",
     "--min-effective-voice-ms", "160",
     "--min-rms-dbfs", "-45",
     "--min-snr-db", "6",

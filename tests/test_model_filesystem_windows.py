@@ -295,6 +295,30 @@ def test_adapter_real_acepta_dacl_read_only_real_y_bloquea_creacion(tmp_path):
         capture_output=True,
     )
     try:
+        # Guarda de capacidad del entorno, no de plataforma. Bajo un token elevado el
+        # DACL por defecto del token deja ACEs explicitas de BUILTIN\Administrators y
+        # SYSTEM que /inheritance:r no borra (solo quita las HEREDADAS), asi que el
+        # arbol no queda read-only de verdad y la probe lo rechaza con razon.
+        #
+        # Se mide escribiendo, NO llamando a la probe bajo test: si esta guarda usara
+        # dacl_is_read_only, un `return False` en produccion se auto-saltaria este test
+        # y la regresion pasaria en verde. Escribir mide la propiedad que de verdad
+        # importa, y es la misma que el test afirma mas abajo con pytest.raises.
+        canario = root / "canario-de-entorno.tmp"
+        try:
+            canario.write_bytes(b"x")
+        except PermissionError:
+            # Denegado: el arbol si quedo read-only y la probe puede demostrarlo.
+            # PermissionError y no OSError a secas: un error de disco, de sharing o de
+            # ruta larga tambien caeria aqui y el test seguiria creyendo que demostro
+            # un arbol protegido. Los demas errores deben propagar y verse.
+            pass
+        else:
+            canario.unlink()
+            pytest.skip(
+                "sesion elevada: el arbol no queda read-only (sobreviven ACEs de "
+                "Administrators), asi que la probe real no puede demostrar nada"
+            )
         filesystem = WindowsModelFilesystem()  # probe DACL real por defecto
         manifest = load_model_manifest(
             manifest_path,
