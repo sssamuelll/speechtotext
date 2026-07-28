@@ -722,6 +722,15 @@ def _print_bench(table: dict) -> None:
     for s in skipped:
         console.print(f"  saltada {s['engine']} {s['model']}: {s['reason']}", markup=False)
 
+    recs = table.get("recommendations") or []
+    if recs:
+        r_t = Table("Caso de uso", "Config", "Motivo", title="¿Qué config para qué?")
+        for rec in recs:
+            e = rec.get("eleccion")
+            config = f"{e['engine']} {e['model']}" if e else "— sin candidata —"
+            r_t.add_row(rec["caso"], config, rec["motivo"])
+        Console(width=120).print(r_t)
+
 
 @app.command()
 def bench(
