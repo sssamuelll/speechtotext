@@ -258,6 +258,125 @@ def _sha1(path) -> str:
     return digest.hexdigest()
 
 
+# Casos de uso del ecosistema: la tabla no solo mide, RECOMIENDA. Cada caso declara
+# requisitos duros (capacidades/engine) y un criterio; la eleccion sale de lo MEDIDO,
+# asi cambia sola si cambia la maquina (GPU nueva, exe ausente, config que revienta).
+#
+# El requisito engine=faster-whisper en conversacion/dictado no es capricho: aurelius
+# mantiene el motor CARGADO en su proceso y transcribe frase a frase; whispercpp es un
+# subprocess que carga el modelo en cada invocacion — pagar la carga por frase lo
+# descarta por arquitectura, no por velocidad.
+USE_CASES = (
+    {
+        "caso": "conversacion_en_vivo",
+        "que": "Aurelius conversando por voz: motor residente, una frase corta cada vez",
+        "requisitos": {"engine": "faster-whisper"},
+        "criterio": "mas_rapido",
+    },
+    {
+        "caso": "dictado_por_voz",
+        "que": "Dictado: mas precision que conversacion con latencia todavia comoda",
+        "requisitos": {"engine": "faster-whisper"},
+        "criterio": "equilibrio",
+    },
+    {
+        "caso": "transcripcion_maxima_calidad",
+        "que": "Transcribir archivos con la mejor calidad disponible",
+        "requisitos": {},
+        "criterio": "mejor_calidad",
+    },
+    {
+        "caso": "transcripcion_con_diarizacion_fina",
+        "que": "Quien-dijo-que palabra a palabra (--diarize fino, corta en el cambio de voz)",
+        "requisitos": {"word_timestamps": True},
+        "criterio": "mejor_calidad",
+    },
+    {
+        "caso": "audio_con_nombres_propios",
+        "que": "Audio lleno de nombres/jerga que el modelo no conoce (--hotwords)",
+        "requisitos": {"hotwords": True},
+        "criterio": "mejor_calidad",
+    },
+    {
+        "caso": "borrador_rapido",
+        "que": "Texto aproximado lo antes posible, la calidad es secundaria",
+        "requisitos": {},
+        "criterio": "mas_rapido",
+    },
+)
+
+
+def _cumple(r: dict, requisitos: dict) -> bool:
+    for clave, valor in requisitos.items():
+        if clave == "engine":
+            if r["engine"] != valor:
+                return False
+        elif not (r.get("capabilities") or {}).get(clave):
+            return False
+    return True
+
+
+def _elegir(candidatas: list[dict], criterio: str) -> tuple[dict | None, str]:
+    """(ganadora, motivo). Los motivos citan numeros MEDIDOS: la recomendacion debe
+    poder defenderse sola ante quien lea la tabla."""
+    if not candidatas:
+        return None, "ninguna config medida cumple los requisitos en esta maquina"
+    rapida = max(candidatas, key=lambda r: r["x_realtime"])
+    con_wer = [r for r in candidatas if r.get("wer_ref") is not None]
+    if criterio == "mas_rapido":
+        return rapida, f"la mas rapida que cumple: {rapida['x_realtime']}x tiempo real"
+    if criterio == "mejor_calidad":
+        if not con_wer:
+            return rapida, (
+                f"sin WER medido entre las candidatas; se elige la mas rapida "
+                f"({rapida['x_realtime']}x)"
+            )
+        mejor = min(con_wer, key=lambda r: (r["wer_ref"], -r["x_realtime"]))
+        return mejor, (
+            f"mejor WER medido ({mejor['wer_ref']}) a {mejor['x_realtime']}x tiempo real"
+        )
+    if criterio == "equilibrio":
+        # ponytail: "comodo" = >= 10x tiempo real; umbral a ojo sobre lo medido hoy,
+        # subelo si el dictado se siente lento.
+        comodas = [r for r in con_wer if r["x_realtime"] >= 10.0]
+        if comodas:
+            mejor = min(comodas, key=lambda r: r["wer_ref"])
+            return mejor, (
+                f"mejor WER ({mejor['wer_ref']}) manteniendo >= 10x tiempo real "
+                f"({mejor['x_realtime']}x)"
+            )
+        if con_wer:
+            mejor = min(con_wer, key=lambda r: r["wer_ref"])
+            return mejor, f"mejor WER medido ({mejor['wer_ref']}); ninguna llega a 10x"
+        return rapida, f"sin WER medido; la mas rapida ({rapida['x_realtime']}x)"
+    return None, f"criterio desconocido: {criterio}"
+
+
+def recommend(results: list[dict]) -> list[dict]:
+    """Una recomendacion por caso de uso, derivada de las filas medidas SIN error.
+
+    Un caso sin candidata viable se declara con su razon (p.ej. diarizacion fina en
+    una maquina donde solo corrio whispercpp): la ausencia explicada vale mas que
+    una recomendacion inventada.
+    """
+    vivas = [r for r in results if not r.get("error") and r.get("x_realtime")]
+    out = []
+    for caso in USE_CASES:
+        eleccion, motivo = _elegir(
+            [r for r in vivas if _cumple(r, caso["requisitos"])], caso["criterio"]
+        )
+        out.append({
+            "caso": caso["caso"],
+            "que": caso["que"],
+            "eleccion": None if eleccion is None else {
+                "engine": eleccion["engine"], "model": eleccion["model"],
+                "quant": eleccion["quant"], "device": eleccion["device"],
+            },
+            "motivo": motivo,
+        })
+    return out
+
+
 def run_benchmark(wav_path, duration_s: float, configs: list[dict], *, progress=None) -> dict:
     """Corre las configs dadas y arma la tabla completa del schema.
 
@@ -279,6 +398,7 @@ def run_benchmark(wav_path, duration_s: float, configs: list[dict], *, progress=
         "audio": {"source": str(wav_path), "duration_s": duration_s, "sha1": _sha1(wav_path)},
         "results": results,
         "skipped": skipped,
+        "recommendations": recommend(results),
     }
 
 
@@ -293,4 +413,9 @@ def read_table(path: Path | None = None) -> dict | None:
     path = path or bench_path()
     if not path.exists():
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    table = json.loads(path.read_text(encoding="utf-8"))
+    if "recommendations" not in table:
+        # Retrocompat: las tablas medidas antes de esta seccion la ganan al leerse,
+        # sin re-medir nada — las recomendaciones son derivadas, la medicion manda.
+        table["recommendations"] = recommend(table.get("results") or [])
+    return table

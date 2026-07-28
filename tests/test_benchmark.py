@@ -154,7 +154,10 @@ def test_write_read_roundtrip(monkeypatch, tmp_path):
     monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
     assert benchmark.bench_path() == tmp_path / "bench.json"
     assert benchmark.read_table() is None
-    table = {"schema_version": "speechtotext.bench/v1", "results": [], "skipped": []}
+    # recommendations presente: sin la clave, read_table la derivaria (retrocompat)
+    # y el roundtrip dejaria de ser identidad.
+    table = {"schema_version": "speechtotext.bench/v1", "results": [], "skipped": [],
+             "recommendations": []}
     benchmark.write_table(table)
     assert benchmark.read_table() == table
 
@@ -200,3 +203,90 @@ def test_run_child_factory_revienta():
     res = run_child(factory, "faster-whisper", "tiny", "cpu", "int8", "x.wav")
     assert "sin modelo" in res["error"]
     assert set(res) == {"error"}
+
+
+# --- recomendaciones por caso de uso ----------------------------------------------------
+
+
+def _fila(engine, model, x_rt, wer=None, error=None, caps=None):
+    if caps is None:
+        caps = benchmark._CAPS[engine]
+    return {
+        "engine": engine, "model": model, "quant": "int8" if engine == "faster-whisper" else "q5_0",
+        "device": "cpu" if engine == "faster-whisper" else "cuda",
+        "x_realtime": x_rt, "wer_ref": wer, "error": error, "capabilities": dict(caps),
+    }
+
+
+def _tabla_realista():
+    # La forma de la tabla medida el 2026-07-27 en la maquina real.
+    return [
+        _fila("faster-whisper", "base", 53.96),
+        _fila("faster-whisper", "small", 21.15, wer=0.419),
+        _fila("faster-whisper", "large-v3", 4.89, wer=0.355),
+        _fila("whispercpp", "large-v3", 10.66, wer=0.355),
+    ]
+
+
+def test_recommend_cubre_todos_los_casos_declarados():
+    recs = benchmark.recommend(_tabla_realista())
+    assert [r["caso"] for r in recs] == [c["caso"] for c in benchmark.USE_CASES]
+    assert all(r["que"] and r["motivo"] for r in recs)
+
+
+def test_recommend_conversacion_exige_motor_residente():
+    # whispercpp es subprocess (carga el modelo por frase): aunque sea rapido, la
+    # conversacion en vivo solo puede elegir faster-whisper.
+    recs = {r["caso"]: r for r in benchmark.recommend(_tabla_realista())}
+    conv = recs["conversacion_en_vivo"]["eleccion"]
+    assert conv["engine"] == "faster-whisper"
+    assert conv["model"] == "base"  # la mas rapida entre las fw medidas
+
+
+def test_recommend_calidad_elige_mejor_wer_y_desempata_por_velocidad():
+    # large-v3 empata WER (0.355) en fw y whispercpp: gana el mas rapido (whispercpp).
+    recs = {r["caso"]: r for r in benchmark.recommend(_tabla_realista())}
+    top = recs["transcripcion_maxima_calidad"]["eleccion"]
+    assert (top["engine"], top["model"]) == ("whispercpp", "large-v3")
+
+
+def test_recommend_diarizacion_fina_exige_word_timestamps():
+    # whispercpp no tiene words: aunque su large-v3 sea mas rapido, la diarizacion
+    # fina cae al fw large-v3.
+    recs = {r["caso"]: r for r in benchmark.recommend(_tabla_realista())}
+    dia = recs["transcripcion_con_diarizacion_fina"]["eleccion"]
+    assert (dia["engine"], dia["model"]) == ("faster-whisper", "large-v3")
+
+
+def test_recommend_caso_sin_candidata_se_declara_con_razon():
+    # Maquina hipotetica donde solo corrio whispercpp: los casos que exigen
+    # capacidades de fw quedan sin candidata Y CON motivo, no inventados.
+    solo_wcpp = [_fila("whispercpp", "large-v3", 10.66, wer=0.355)]
+    recs = {r["caso"]: r for r in benchmark.recommend(solo_wcpp)}
+    assert recs["conversacion_en_vivo"]["eleccion"] is None
+    assert "ninguna config" in recs["conversacion_en_vivo"]["motivo"]
+    assert recs["transcripcion_maxima_calidad"]["eleccion"] is not None
+
+
+def test_recommend_ignora_configs_con_error():
+    filas = [
+        _fila("faster-whisper", "large-v3", None, wer=0.355, error="murio"),
+        _fila("faster-whisper", "small", 21.15, wer=0.419),
+    ]
+    recs = {r["caso"]: r for r in benchmark.recommend(filas)}
+    top = recs["transcripcion_maxima_calidad"]["eleccion"]
+    assert top["model"] == "small"  # la rota no puede ganar por buen WER
+
+
+def test_read_table_retrocompat_anade_recommendations(tmp_path, monkeypatch):
+    # Una tabla medida ANTES de esta seccion la gana al leerse, sin re-medir.
+    import json as _json
+
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    vieja = {"schema_version": benchmark.SCHEMA_VERSION, "results": _tabla_realista(),
+             "skipped": []}
+    benchmark.bench_path().parent.mkdir(parents=True, exist_ok=True)
+    benchmark.bench_path().write_text(_json.dumps(vieja), encoding="utf-8")
+    table = benchmark.read_table()
+    assert table["recommendations"]
+    assert table["recommendations"][0]["caso"] == "conversacion_en_vivo"
