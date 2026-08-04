@@ -195,6 +195,60 @@ def test_probe_fallido_no_devuelve_el_calculo_a_write_json(tmp_path, monkeypatch
     assert "huecos" not in result.stdout  # la consola sigue callada, como debe
 
 
+# --- 5.2.1 · los contratos de rango los valida typer, no la prosa del --help -----------
+
+
+def test_threshold_fuera_de_rango_sale_con_exit_2(tmp_path, monkeypatch):
+    # Con 2.0 la identificación de voz quedaba desactivada en silencio (assign_names
+    # rompe el bucle en el primer candidato y devuelve {}); con -1 nombraba todo.
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0))
+    result = _invoke(audio, tmp_path, "--threshold", "2.0")
+    assert result.exit_code == 2
+    assert "--threshold" in result.stderr
+
+
+def test_speakers_cero_sale_con_exit_2(tmp_path, monkeypatch):
+    # 0 es falsy y speakers/diarization.py lo reinterpretaba como "auto" sin aviso:
+    # exactamente la sustitución callada que el contrato de capacidades prohíbe.
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0))
+    result = _invoke(audio, tmp_path, "--speakers", "0")
+    assert result.exit_code == 2
+    assert "--speakers" in result.stderr
+
+
+def test_beam_size_cero_sale_con_exit_2(tmp_path, monkeypatch):
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0))
+    result = _invoke(audio, tmp_path, "--beam-size", "0")
+    assert result.exit_code == 2
+    assert "--beam-size" in result.stderr
+
+
+def test_find_threshold_fuera_de_rango_sale_con_exit_2(tmp_path, monkeypatch):
+    # find reexpone los mismos flags: arreglar solo transcribe dejaba una puerta abierta.
+    from speechtotext.core import finder
+
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    audio = tmp_path / "programa.wav"
+    audio.write_bytes(b"x" * 100)
+    # Si la validación falta, el callback corre: que termine rápido y con exit 0.
+    monkeypatch.setattr(finder, "load_or_build_index", lambda *a, **k: ([], True))
+    result = runner.invoke(app, ["find", str(audio), "sismica", "--threshold", "2.0"])
+    assert result.exit_code == 2
+    assert "--threshold" in result.stderr
+
+
+def test_find_speakers_cero_sale_con_exit_2(tmp_path, monkeypatch):
+    from speechtotext.core import finder
+
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    audio = tmp_path / "programa.wav"
+    audio.write_bytes(b"x" * 100)
+    monkeypatch.setattr(finder, "load_or_build_index", lambda *a, **k: ([], True))
+    result = runner.invoke(app, ["find", str(audio), "sismica", "--speakers", "0"])
+    assert result.exit_code == 2
+    assert "--speakers" in result.stderr
+
+
 # --- 1.6 · idioma medido vs forzado -------------------------------------------------
 
 

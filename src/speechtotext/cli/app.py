@@ -1,4 +1,4 @@
-﻿"""Transcripción de audio a texto 100% local con faster-whisper.
+"""Transcripción de audio a texto 100% local con faster-whisper.
 
 Sin claves de API, sin subir audio a la nube. Solo necesita ffmpeg en el PATH
 (en Linux/macOS: paquete `ffmpeg`; en Windows: https://ffmpeg.org/download.html).
@@ -450,18 +450,18 @@ def transcribe(
     vad: bool = typer.Option(
         True, "--vad/--no-vad", help="Filtro VAD para descartar silencios largos."
     ),
-    beam_size: int = typer.Option(5, "--beam-size", help="Tamaño del beam search."),
+    beam_size: int = typer.Option(5, "--beam-size", min=1, help="Tamaño del beam search."),
     diarize: bool = typer.Option(
         False, "--diarize", "-D", help=r"Marcar quién habla (diarización). Requiere el extra \[diarize]."
     ),
     speakers: Optional[int] = typer.Option(
-        None, "--speakers", help="Número de hablantes (pista; auto si se omite)."
+        None, "--speakers", min=1, help="Número de hablantes (pista; auto si se omite)."
     ),
     identify: bool = typer.Option(
         True, "--identify/--no-identify", help="Poner nombre a las voces registradas."
     ),
     threshold: float = typer.Option(
-        0.5, "--threshold", help="Umbral de coincidencia de voz (coseno, 0-1)."
+        0.5, "--threshold", min=0.0, max=1.0, help="Umbral de coincidencia de voz (coseno, 0-1)."
     ),
     hotwords: Optional[str] = typer.Option(
         None,
@@ -585,9 +585,9 @@ def find(
     language: str = typer.Option("es", "--language", "-l", help="Idioma de la transcripción del tramo."),
     formats: str = typer.Option("txt,srt", "--formats", "-f", help="Formatos de salida del tramo."),
     diarize: bool = typer.Option(False, "--diarize", "-D", help="Diarizar el tramo extraído."),
-    speakers: Optional[int] = typer.Option(None, "--speakers", help="Nº de hablantes (pista)."),
+    speakers: Optional[int] = typer.Option(None, "--speakers", min=1, help="Nº de hablantes (pista)."),
     identify: bool = typer.Option(True, "--identify/--no-identify", help="Nombrar voces registradas."),
-    threshold: float = typer.Option(0.5, "--threshold", help="Umbral de coincidencia de voz."),
+    threshold: float = typer.Option(0.5, "--threshold", min=0.0, max=1.0, help="Umbral de coincidencia de voz."),
     context: float = typer.Option(10.0, "--context", help="Segundos de margen al recortar."),
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Carpeta de salida del tramo."),
     rebuild: bool = typer.Option(False, "--rebuild", help="Forzar reconstrucción del índice."),
