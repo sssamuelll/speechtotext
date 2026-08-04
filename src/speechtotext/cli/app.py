@@ -1,4 +1,4 @@
-"""Transcripción de audio a texto 100% local con faster-whisper.
+﻿"""Transcripción de audio a texto 100% local con faster-whisper.
 
 Sin claves de API, sin subir audio a la nube. Solo necesita ffmpeg en el PATH
 (en Linux/macOS: paquete `ffmpeg`; en Windows: https://ffmpeg.org/download.html).
@@ -315,9 +315,12 @@ def transcribe_file(
     # así que la suma cruda vale. gaps igual: una sola cantidad, calculada una vez aquí y
     # pasada al JSON (5.1.3), para que consola y disco no emitan dos números distintos.
     cov = sum(s.end - s.start for s in segments)
-    # duration falsy = probe fallido: sin denominador no hay línea de tiempo sobre la que
-    # existan complementos, así que no se calculan huecos ni se imprime nada de ellos.
-    gaps = find_gaps(segments, info.duration) if info.duration else None
+    # Se calcula SIEMPRE aquí, aunque el probe haya fallado y la consola vaya a callar:
+    # mandarle None a write_json lo hace recalcular sobre los segmentos ya diarizados, que
+    # es el mismo C-13 que este ítem cierra, entrando por la puerta de atrás. Con
+    # duration==0 find_gaps igual devuelve los huecos interiores (el de cola no, porque
+    # duration - cursor sale negativo). Lo que depende de duration es IMPRIMIRLO.
+    gaps = find_gaps(segments, info.duration)
     if info.duration:
         ratio = cov / info.duration
         voz = f"con voz {cov / 60:.1f} de {info.duration / 60:.1f} min ({100 * ratio:.0f}%)"
@@ -348,7 +351,9 @@ def transcribe_file(
     # recalibró): es un hecho geométrico sobre la línea de tiempo, no depende de cómo el
     # VAD remapee los timestamps. Sin huecos se dice explícitamente — callar convertiría la
     # ausencia en una omisión indistinguible de un fallo del instrumento.
-    if gaps is not None:
+    # duration falsy = probe fallido: sin denominador no hay línea de tiempo sobre la que
+    # afirmar ni los huecos ni su ausencia, así que ahí no se imprime nada de ellos.
+    if info.duration:
         if gaps:
             # ponytail: se listan los primeros 5 huecos y luego "y N más (ver el JSON)"; con
             # 40 huecos la consola se inunda y el artefacto completo ya existe. Techo: si
@@ -360,9 +365,12 @@ def transcribe_file(
             # lo apagó (o a whispercpp, que no trae VAD) es ruido, y ahí la pérdida viene de
             # otro lado (el modelo no emitió).
             consejo = " — prueba --no-vad" if vad else ""
-            console.print(f"{len(gaps)} huecos sin texto: {lista}{consejo}")
+            plural = "hueco" if len(gaps) == 1 else "huecos"
+            console.print(f"{len(gaps)} {plural} sin texto: {lista}{consejo}")
         else:
-            console.print("sin huecos > 5 s")
+            # find_gaps corta en >= 5.0, no en > 5.0: decir "> 5 s" declararía menos de lo
+            # que la herramienta sabe, y este plan trata justo de eso (Q9).
+            console.print("sin huecos de 5 s o más")
 
     if diarize:
         segments = _run_diarization(audio, segments, speakers, identify, threshold)

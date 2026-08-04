@@ -93,6 +93,19 @@ def test_resumen_lista_los_huecos(tmp_path, monkeypatch):
     assert "prueba --no-vad" in result.stdout
 
 
+def test_cobertura_alta_con_hueco_real_lo_lista(tmp_path, monkeypatch):
+    # 90%: el número se ve sano y hay 100 s sin texto. Es LA banda que el plan señala
+    # (§1.3: "70-90%, exactamente donde se pierde contenido caro") y el caso que el
+    # umbral borrado nunca disparaba. Bajo el código viejo esta corrida imprimía "90%"
+    # y nada más; si esta línea desaparece, la Fase 1 perdió su razón de existir.
+    segs = [_seg(0.0, 900.0)]
+    audio = _fake_transcribe(monkeypatch, tmp_path, segs, _info(1000.0))
+    result = _invoke(audio, tmp_path)
+    assert result.exit_code == 0
+    assert "90%" in result.stdout
+    assert "1 hueco sin texto: 15:00-16:40 (100 s)" in result.stdout
+
+
 def test_resumen_sin_huecos_lo_dice_explicitamente(tmp_path, monkeypatch):
     # Un solo segmento contiguo: la ausencia de huecos se afirma, no se calla.
     segs = [_seg(0.0, 900.0)]
@@ -100,7 +113,7 @@ def test_resumen_sin_huecos_lo_dice_explicitamente(tmp_path, monkeypatch):
     result = _invoke(audio, tmp_path)
     assert result.exit_code == 0
     assert "100%" in result.stdout
-    assert "sin huecos > 5 s" in result.stdout
+    assert "sin huecos de 5 s o más" in result.stdout
     assert "--no-vad" not in result.stdout
 
 
@@ -131,8 +144,55 @@ def test_no_sugiere_no_vad_a_quien_ya_lo_apago(tmp_path, monkeypatch):
     audio = _fake_transcribe(monkeypatch, tmp_path, segs, _info(2206.0))
     result = _invoke(audio, tmp_path, "--no-vad")
     assert result.exit_code == 0
-    assert "1 huecos sin texto: 05:00-36:46 (1906 s)" in result.stdout
+    assert "1 hueco sin texto: 05:00-36:46 (1906 s)" in result.stdout
     assert "--no-vad" not in result.stdout
+
+
+# --- 5.1.3 · una sola cantidad, calculada antes de diarizar --------------------------
+
+
+def _diarize_recomprimiendo(monkeypatch, salida):
+    """Lo que hace la diarización real: cada span se recomprime a la extensión de sus
+    palabras (speakers/diarization.py:51,56). Medir después publica otro número con el
+    mismo nombre — C-13."""
+    from speechtotext.cli import app as cli_app
+
+    monkeypatch.setattr(cli_app, "_run_diarization", lambda audio, segs, *a: salida)
+
+
+def test_json_mide_sobre_lo_que_el_asr_emitio_no_sobre_lo_diarizado(tmp_path, monkeypatch):
+    # El cableado que arregla C-13. Sin este test la regresión pasa en verde: basta con
+    # mover `cov = sum(...)` debajo de _run_diarization y los otros 604 siguen pasando.
+    import json
+
+    _diarize_recomprimiendo(monkeypatch, [_seg(0.0, 1.0), _seg(600.0, 601.0)])
+    segs = [_seg(0.0, 300.0), _seg(600.0, 850.0)]
+    audio = _fake_transcribe(monkeypatch, tmp_path, segs, _info(2206.0))
+    result = _invoke(audio, tmp_path, "-f", "json", "--diarize")
+    assert result.exit_code == 0
+    payload = json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))
+    assert payload["speech_s"] == 550.0  # 300 + 250; post-diarización daría 2.0
+    assert payload["gaps"] == [[300.0, 600.0], [850.0, 2206.0]]
+    # Y es exactamente lo que la consola dijo: una cantidad, dos canales.
+    assert "2 huecos sin texto: 05:00-10:00 (300 s), 14:10-36:46 (1356 s)" in result.stdout
+
+
+def test_probe_fallido_no_devuelve_el_calculo_a_write_json(tmp_path, monkeypatch):
+    # El corner: con duration==0 la consola calla, pero el JSON sale igual. Si gaps se
+    # guarda tras `if info.duration` y llega None, write_json lo recalcula sobre los
+    # segmentos ya diarizados y C-13 vuelve por la puerta de atrás. find_gaps con
+    # duration==0 SÍ devuelve los huecos interiores (verificado), así que la rama es real.
+    import json
+
+    _diarize_recomprimiendo(monkeypatch, [_seg(0.0, 1.0), _seg(40.0, 41.0)])
+    segs = [_seg(0.0, 20.0), _seg(40.0, 60.0)]
+    audio = _fake_transcribe(monkeypatch, tmp_path, segs, _info(0.0))
+    result = _invoke(audio, tmp_path, "-f", "json", "--diarize")
+    assert result.exit_code == 0
+    payload = json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))
+    assert payload["speech_s"] == 40.0  # 20 + 20, antes de diarizar
+    assert payload["gaps"] == [[20.0, 40.0]]  # post-diarización daría [[1.0, 40.0]]
+    assert "huecos" not in result.stdout  # la consola sigue callada, como debe
 
 
 # --- 1.6 · idioma medido vs forzado -------------------------------------------------
@@ -240,7 +300,7 @@ def test_whispercpp_no_sugiere_no_vad(tmp_path, monkeypatch):
     audio = _fake_transcribe(monkeypatch, tmp_path, segs, _info(2206.0))
     result = _invoke(audio, tmp_path, "--engine", "whispercpp")
     assert result.exit_code == 0
-    assert "1 huecos sin texto: 05:00-36:46 (1906 s)" in result.stdout
+    assert "1 hueco sin texto: 05:00-36:46 (1906 s)" in result.stdout
     assert "prueba --no-vad" not in result.stdout
 
 
