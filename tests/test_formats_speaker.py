@@ -131,9 +131,16 @@ def test_txt_marca_sospechoso_sin_diarizacion(tmp_path):
 
 
 def test_txt_marca_sospechoso_con_diarizacion(tmp_path):
+    # La forma que la ruta real SÍ produce bajo --diarize: el span se recomprime a la
+    # extensión de las palabras (speakers/diarization.py) y la duración del segmento
+    # ASR viaja en src_dur. El LabeledSegment(0, 30, "Gracias.", "Samuel") construido
+    # a mano que había aquí certificaba un caso imposible: con --diarize puesto, la
+    # ruta jamás emite un span de 30 s con una palabra — lo emite de ~1 s con
+    # src_dur=30.0. La rama de respaldo (sin src_dur) sigue cubierta por los tests
+    # sin diarizar de este mismo archivo.
     segs = [
-        LabeledSegment(0, 30, "Gracias.", "Samuel"),
-        LabeledSegment(30, 33, "Bueno, entonces quedamos así.", "Ale"),
+        LabeledSegment(0.4, 1.4, "Gracias.", "Samuel", src_dur=30.0),
+        LabeledSegment(30.2, 32.8, "Bueno, entonces quedamos así.", "Ale", src_dur=3.0),
     ]
     p = tmp_path / "o.txt"
     write_txt(segs, p)

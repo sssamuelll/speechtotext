@@ -32,7 +32,10 @@ def _speaker(seg):
 
 def is_suspect(seg) -> bool:
     # ponytail: heurística sin calibrar, techo conocido; sube a calibrador si algún día hay corpus
-    dur = seg.end - seg.start
+    # src_dur es la extensión del segmento que el ASR emitió, antes de que la diarización
+    # recomprima el span a sus palabras (C-13): sin ella el gate de 10 s deja de disparar
+    # bajo --diarize. None (ruta sin diarizar) -> el span propio, como siempre.
+    dur = getattr(seg, "src_dur", None) or (seg.end - seg.start)
     ns = getattr(seg, "no_speech", None)
     if ns is not None and ns > 0.6:          # se enciende sola cuando llegue la Fase 2
         return True

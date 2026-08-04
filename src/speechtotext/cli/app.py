@@ -99,7 +99,11 @@ def _load_hotwords_file(path: Path) -> Optional[str]:
 
 def _resolve_hotwords(hotwords: Optional[str], hotwords_file: Optional[Path]) -> Optional[str]:
     """Combina --hotwords (inline) y --hotwords-file. Scoped por invocación, sin default global:
-    los hotwords son sesgo probabilístico, un léxico global envenenaría todo otro audio."""
+    los términos entran al prompt después de tokenizer.sot_prev, o sea como texto previo de la
+    conversación (faster_whisper/transcribe.py:1542-1548), no como prior sobre el vocabulario.
+    Un léxico global envenenaría todo otro audio: el modelo lo continuaría como si fuera la
+    conversación en curso, y una lista larga degrada la corrida entera (ablación en §4 del
+    plan de calidad 2)."""
     parts = []
     if hotwords_file is not None:
         from_file = _load_hotwords_file(hotwords_file)
@@ -219,8 +223,25 @@ def transcribe_file(
     elif compute_type == "auto":
         compute_type = "int8" if device == "cpu" else "float16"
     if hotwords:
-        # markup=False: los términos pueden traer corchetes/acentos que rich malinterpretaría.
-        console.print(f"Hotwords: {hotwords}", markup=False)
+        n_terms = len([t for t in hotwords.split(",") if t.strip()])
+        # ponytail: se cuentan términos y caracteres, no tokens. El conteo exacto necesita
+        # el tokenizer del modelo, que en este punto todavía no está cargado; 223 tokens
+        # son del orden de 600-700 caracteres en español. Techo: si alguien necesita el
+        # número exacto, se cuenta después de construir el modelo.
+        console.print(
+            f"Hotwords ({n_terms} términos, {len(hotwords)} caracteres): {hotwords}",
+            # markup=False: los términos pueden traer corchetes/acentos que rich malinterpretaría.
+            markup=False,
+        )
+        if n_terms >= 10 or len(hotwords) >= 300:
+            # Techos conservadores, uno por daño verificado: la ablación midió degradación
+            # con 25 términos (con 3 no hubo pérdida, §4 del plan) y la librería trunca
+            # en silencio a los 223 tokens. Se avisa mucho antes de ambos.
+            console.print(
+                "[yellow]Lista larga de hotwords: 25 términos degradaron la cobertura "
+                "9 puntos sobre 240 s de audio real (2026-08-03); entran como texto "
+                "previo, no como léxico.[/yellow]"
+            )
 
     console.print(
         f"[bold]Modelo[/bold] [cyan]{model}[/cyan] · "
@@ -377,8 +398,11 @@ def transcribe_file(
 
     # Post-proceso textual (horas 8.33->8:33). Uniforma a LabeledSegment: los Segment
     # de faster_whisper son inmutables y los writers solo leen start/end/text/speaker.
+    # src_dur se propaga: reconstruir sin él apagaría la marca [?] justo en la ruta
+    # diarizada que 5.2.3 arregla (is_suspect lo usa de denominador y de gate).
     segments = [
-        LabeledSegment(s.start, s.end, normalize_hours(s.text), getattr(s, "speaker", None))
+        LabeledSegment(s.start, s.end, normalize_hours(s.text), getattr(s, "speaker", None),
+                       src_dur=getattr(s, "src_dur", None))
         for s in segments
     ]
 
@@ -450,24 +474,25 @@ def transcribe(
     vad: bool = typer.Option(
         True, "--vad/--no-vad", help="Filtro VAD para descartar silencios largos."
     ),
-    beam_size: int = typer.Option(5, "--beam-size", help="Tamaño del beam search."),
+    beam_size: int = typer.Option(5, "--beam-size", min=1, help="Tamaño del beam search."),
     diarize: bool = typer.Option(
         False, "--diarize", "-D", help=r"Marcar quién habla (diarización). Requiere el extra \[diarize]."
     ),
     speakers: Optional[int] = typer.Option(
-        None, "--speakers", help="Número de hablantes (pista; auto si se omite)."
+        None, "--speakers", min=1, help="Número de hablantes (pista; auto si se omite)."
     ),
     identify: bool = typer.Option(
         True, "--identify/--no-identify", help="Poner nombre a las voces registradas."
     ),
     threshold: float = typer.Option(
-        0.5, "--threshold", help="Umbral de coincidencia de voz (coseno, 0-1)."
+        0.5, "--threshold", min=0.0, max=1.0, help="Umbral de coincidencia de voz (coseno, 0-1)."
     ),
     hotwords: Optional[str] = typer.Option(
         None,
         "--hotwords",
-        help="Términos difíciles separados por coma (nombres propios, jerga) para sesgar el "
-        "modelo en cada ventana. Escríbelos con mayúsculas y tildes.",
+        help="Términos difíciles separados por coma (nombres propios, jerga): entran a cada "
+        "ventana como si fueran la conversación previa, así que una lista corta ayuda y una "
+        "larga degrada. Escríbelos con mayúsculas y tildes.",
     ),
     hotwords_file: Optional[Path] = typer.Option(
         None,
@@ -475,7 +500,9 @@ def transcribe(
         exists=True,
         dir_okay=False,
         help="Archivo con términos difíciles (uno por línea o separados por coma), para un "
-        "léxico por proyecto. Se combina con --hotwords.",
+        "léxico por proyecto. Se combina con --hotwords. Techo: por encima de 223 tokens "
+        "(~600-700 caracteres) la lista se trunca en silencio "
+        "(faster_whisper/transcribe.py:1546-1547).",
     ),
     chunk: Optional[bool] = typer.Option(
         None, "--chunk/--no-chunk",
@@ -502,7 +529,7 @@ def transcribe(
 def _run_diarization(audio, segments, speakers, identify, threshold):
     from speechtotext.core.audio import FfmpegMissingError, TranscodeError, transcode_to_wav
     from speechtotext.speakers import diarization, registry
-    from speechtotext.speakers.identify import assign_names
+    from speechtotext.speakers.identify import assign_names, cosine
 
     try:
         wav = transcode_to_wav(audio.read_bytes())
@@ -525,10 +552,39 @@ def _run_diarization(audio, segments, speakers, identify, threshold):
 
     labeled = diarization.assign_segments(segments, turns)
     name_map: dict[str, str] = {}
+    enrolled: dict = {}
     if identify:
         enrolled = registry.get_embeddings()
         if enrolled:
             name_map = assign_names(clusters, enrolled, threshold)
+
+    # Reporte de calidad de la diarización, con los datos que ya están en memoria (5.2.4).
+    # Sin él la identificación de voz no se puede diagnosticar: assign_names rompe el
+    # bucle en el primer candidato bajo umbral sin registrar el near-miss y el score no
+    # salía por ningún sitio. Cuando nadie alcanza el umbral se imprime el mejor score.
+    n = len(clusters)
+    sin_atribuir = (
+        round(100 * sum(1 for s in labeled if s.speaker is None) / len(labeled))
+        if labeled else 0
+    )
+    partes = [f"{n} hablante{'s' if n != 1 else ''}", f"{sin_atribuir}% sin atribuir"]
+    if enrolled:
+        parte = f"{len(name_map)} de {len(enrolled)} voces identificadas"
+        if not name_map and clusters:
+            mejor = max(
+                cosine(vec, ref) for vec in clusters.values() for ref in enrolled.values()
+            )
+            parte += f" (mejor score {mejor:.2f} < {threshold:.2f})"
+        partes.append(parte)
+    console.print(" · ".join(partes))
+    if speakers is None and n > 5:
+        # ponytail: 5 sale de conversaciones reales, no de una medición; el fallo típico
+        # de pyannote en automático es "encontrar" voces de más en audio ruidoso. Techo:
+        # si llega una grabación con más de 5 hablantes reales, sube el número.
+        console.print(
+            f"[yellow]{n} hablantes detectados en automático; si sabes cuántos son, "
+            "fija el número con --speakers N[/yellow]"
+        )
     return diarization.apply_names(labeled, name_map)
 
 
@@ -585,9 +641,9 @@ def find(
     language: str = typer.Option("es", "--language", "-l", help="Idioma de la transcripción del tramo."),
     formats: str = typer.Option("txt,srt", "--formats", "-f", help="Formatos de salida del tramo."),
     diarize: bool = typer.Option(False, "--diarize", "-D", help="Diarizar el tramo extraído."),
-    speakers: Optional[int] = typer.Option(None, "--speakers", help="Nº de hablantes (pista)."),
+    speakers: Optional[int] = typer.Option(None, "--speakers", min=1, help="Nº de hablantes (pista)."),
     identify: bool = typer.Option(True, "--identify/--no-identify", help="Nombrar voces registradas."),
-    threshold: float = typer.Option(0.5, "--threshold", help="Umbral de coincidencia de voz."),
+    threshold: float = typer.Option(0.5, "--threshold", min=0.0, max=1.0, help="Umbral de coincidencia de voz."),
     context: float = typer.Option(10.0, "--context", help="Segundos de margen al recortar."),
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Carpeta de salida del tramo."),
     rebuild: bool = typer.Option(False, "--rebuild", help="Forzar reconstrucción del índice."),

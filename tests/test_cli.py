@@ -1,4 +1,5 @@
 import logging
+import re
 from types import SimpleNamespace
 
 import numpy as np
@@ -50,6 +51,22 @@ def _invoke(audio, tmp_path, *extra, catch=True):
         ["transcribe", str(audio), "-f", "txt", "-o", str(tmp_path / "out")] + list(extra),
         catch_exceptions=catch,
     )
+
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plana(salida: str) -> str:
+    """Normaliza lo que rich renderiza para poder asertar contra ello.
+
+    Dos cosas fuera de nuestro control: envuelve a 80 columnas bajo CliRunner, y cuando
+    hay color colorea el primer guion de un flag aparte del resto —
+    `'\\x1b[1m-\\x1b[0m\\x1b[1m-threshold\\x1b[0m'` — con lo que `--threshold` deja de
+    existir como substring. Local corre sin color y CI con color, así que asertar sobre
+    el texto crudo pasa aquí y falla allá. Lo renderizado no es un contrato de nadie:
+    se limpia antes de mirarlo.
+    """
+    return " ".join(_ANSI.sub("", salida).split())
 
 
 def test_voices_empty(tmp_path, monkeypatch):
@@ -193,6 +210,161 @@ def test_probe_fallido_no_devuelve_el_calculo_a_write_json(tmp_path, monkeypatch
     assert payload["speech_s"] == 40.0  # 20 + 20, antes de diarizar
     assert payload["gaps"] == [[20.0, 40.0]]  # post-diarización daría [[1.0, 40.0]]
     assert "huecos" not in result.stdout  # la consola sigue callada, como debe
+
+
+# --- 5.2.1 · los contratos de rango los valida typer, no la prosa del --help -----------
+
+
+def test_threshold_fuera_de_rango_sale_con_exit_2(tmp_path, monkeypatch):
+    # Con 2.0 la identificación de voz quedaba desactivada en silencio (assign_names
+    # rompe el bucle en el primer candidato y devuelve {}); con -1 nombraba todo.
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0))
+    result = _invoke(audio, tmp_path, "--threshold", "2.0")
+    assert result.exit_code == 2
+    assert "--threshold" in _plana(result.stderr)
+
+
+def test_speakers_cero_sale_con_exit_2(tmp_path, monkeypatch):
+    # 0 es falsy y speakers/diarization.py lo reinterpretaba como "auto" sin aviso:
+    # exactamente la sustitución callada que el contrato de capacidades prohíbe.
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0))
+    result = _invoke(audio, tmp_path, "--speakers", "0")
+    assert result.exit_code == 2
+    assert "--speakers" in _plana(result.stderr)
+
+
+def test_beam_size_cero_sale_con_exit_2(tmp_path, monkeypatch):
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0))
+    result = _invoke(audio, tmp_path, "--beam-size", "0")
+    assert result.exit_code == 2
+    assert "--beam-size" in _plana(result.stderr)
+
+
+def test_find_threshold_fuera_de_rango_sale_con_exit_2(tmp_path, monkeypatch):
+    # find reexpone los mismos flags: arreglar solo transcribe dejaba una puerta abierta.
+    from speechtotext.core import finder
+
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    audio = tmp_path / "programa.wav"
+    audio.write_bytes(b"x" * 100)
+    # Si la validación falta, el callback corre: que termine rápido y con exit 0.
+    monkeypatch.setattr(finder, "load_or_build_index", lambda *a, **k: ([], True))
+    result = runner.invoke(app, ["find", str(audio), "sismica", "--threshold", "2.0"])
+    assert result.exit_code == 2
+    assert "--threshold" in _plana(result.stderr)
+
+
+def test_find_speakers_cero_sale_con_exit_2(tmp_path, monkeypatch):
+    from speechtotext.core import finder
+
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    audio = tmp_path / "programa.wav"
+    audio.write_bytes(b"x" * 100)
+    monkeypatch.setattr(finder, "load_or_build_index", lambda *a, **k: ([], True))
+    result = runner.invoke(app, ["find", str(audio), "sismica", "--speakers", "0"])
+    assert result.exit_code == 2
+    assert "--speakers" in _plana(result.stderr)
+
+
+# --- 5.2.3 · la marca [?] sobrevive a --diarize ----------------------------------------
+
+
+def test_diarize_marca_sospechoso_igual_que_sin_diarizar(tmp_path, monkeypatch):
+    # El caso canónico del plan: un segmento ASR de 30 s con una sola palabra de 1 s.
+    # Sin --diarize el gate mide los 30 s del span; con --diarize el span se recomprime
+    # a 1 s y solo src_dur salva la marca. Ruta real de punta a punta: diarize y el
+    # registro de voces stubbeados, assign_segments/apply_names/post-proceso reales.
+    from speechtotext.core import audio as core_audio
+    from speechtotext.speakers import diarization
+
+    palabra = SimpleNamespace(start=0.4, end=1.4, word=" Gracias.")
+    seg = SimpleNamespace(start=0.0, end=30.0, text=" Gracias.", words=[palabra])
+    audio = _fake_transcribe(monkeypatch, tmp_path, [seg], _info(30.0))
+    monkeypatch.setattr(core_audio, "transcode_to_wav", lambda b: tmp_path / "t.wav")
+    monkeypatch.setattr(
+        diarization, "diarize",
+        lambda wav, num_speakers=None: (
+            [(0.0, 30.0, "SPEAKER_00")], {"SPEAKER_00": np.array([1.0])}
+        ),
+    )
+    monkeypatch.setattr(registry, "get_embeddings", lambda: {})
+
+    sin = _invoke(audio, tmp_path)
+    assert sin.exit_code == 0
+    assert "[?] Gracias." in (tmp_path / "out.txt").read_text(encoding="utf-8")
+
+    con = _invoke(audio, tmp_path, "--diarize")
+    assert con.exit_code == 0
+    texto = (tmp_path / "out.txt").read_text(encoding="utf-8")
+    assert "[?] Gracias." in texto  # con el span recomprimido a 1 s, solo src_dur la marca
+    assert "Hablante 1" in texto
+
+
+# --- 5.2.4 · reporte de calidad de la diarización --------------------------------------
+
+
+def _fake_diarization(monkeypatch, tmp_path, turns, clusters, enrolled):
+    """Stub de la frontera con modelos: diarize y el registro de voces. El resto de la
+    ruta (assign_segments, assign_names, apply_names, el reporte) corre de verdad."""
+    from speechtotext.core import audio as core_audio
+    from speechtotext.speakers import diarization
+
+    monkeypatch.setattr(core_audio, "transcode_to_wav", lambda b: tmp_path / "t.wav")
+    monkeypatch.setattr(
+        diarization, "diarize", lambda wav, num_speakers=None: (turns, clusters)
+    )
+    monkeypatch.setattr(registry, "get_embeddings", lambda: enrolled)
+
+
+def test_reporte_diarizacion_sin_voces_registradas(tmp_path, monkeypatch):
+    # Dos clusters y ninguna voz registrada: sale el conteo y no sale la línea de score.
+    clusters = {"SPEAKER_00": np.array([1.0, 0.0]), "SPEAKER_01": np.array([0.0, 1.0])}
+    turns = [(0.0, 5.0, "SPEAKER_00"), (5.0, 9.0, "SPEAKER_01")]
+    _fake_diarization(monkeypatch, tmp_path, turns, clusters, {})
+    segs = [_seg(0.0, 5.0), _seg(5.0, 9.0)]
+    audio = _fake_transcribe(monkeypatch, tmp_path, segs, _info(9.0))
+    result = _invoke(audio, tmp_path, "--diarize")
+    assert result.exit_code == 0
+    salida = _plana(result.stdout)
+    assert "2 hablantes · 0% sin atribuir" in salida
+    assert "voces identificadas" not in salida  # sin registro, la cláusula no aplica
+    assert "mejor score" not in salida
+
+
+def test_reporte_diarizacion_mejor_score_bajo_umbral(tmp_path, monkeypatch):
+    # Una voz registrada que no alcanza el umbral: sale el mejor score y el umbral, o
+    # la identificación falla a oscuras (el caso real del plan: 0.38 < 0.50 sin aviso).
+    clusters = {"SPEAKER_00": np.array([1.0, 3.0]), "SPEAKER_01": np.array([0.0, 1.0])}
+    turns = [(0.0, 5.0, "SPEAKER_00"), (5.0, 9.0, "SPEAKER_01")]
+    enrolled = {"Samuel": np.array([1.0, 0.0])}  # coseno con SPEAKER_00: 1/sqrt(10) = 0.32
+    _fake_diarization(monkeypatch, tmp_path, turns, clusters, enrolled)
+    segs = [_seg(0.0, 5.0), _seg(5.0, 9.0)]
+    audio = _fake_transcribe(monkeypatch, tmp_path, segs, _info(9.0))
+    result = _invoke(audio, tmp_path, "--diarize")
+    assert result.exit_code == 0
+    salida = _plana(result.stdout)
+    assert "0 de 1 voces identificadas" in salida
+    assert "mejor score 0.32 < 0.50" in salida
+
+
+def test_reporte_diarizacion_sugiere_speakers_cuando_el_automatico_se_dispara(
+    tmp_path, monkeypatch
+):
+    clusters = {f"SPEAKER_{i:02d}": np.array([1.0, 0.0]) for i in range(6)}
+    turns = [(float(i), float(i + 1), f"SPEAKER_{i:02d}") for i in range(6)]
+    _fake_diarization(monkeypatch, tmp_path, turns, clusters, {})
+    segs = [_seg(float(i), float(i + 1)) for i in range(6)]
+    audio = _fake_transcribe(monkeypatch, tmp_path, segs, _info(6.0))
+
+    result = _invoke(audio, tmp_path, "--diarize")
+    assert result.exit_code == 0
+    assert "6 hablantes" in _plana(result.stdout)
+    assert "--speakers N" in result.stdout
+
+    # Con el número fijado por el usuario la sugerencia no aplica.
+    result = _invoke(audio, tmp_path, "--diarize", "--speakers", "6")
+    assert result.exit_code == 0
+    assert "--speakers N" not in result.stdout
 
 
 # --- 1.6 · idioma medido vs forzado -------------------------------------------------
