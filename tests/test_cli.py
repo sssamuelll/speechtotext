@@ -1,4 +1,5 @@
 import logging
+import re
 from types import SimpleNamespace
 
 import numpy as np
@@ -50,6 +51,22 @@ def _invoke(audio, tmp_path, *extra, catch=True):
         ["transcribe", str(audio), "-f", "txt", "-o", str(tmp_path / "out")] + list(extra),
         catch_exceptions=catch,
     )
+
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plana(salida: str) -> str:
+    """Normaliza lo que rich renderiza para poder asertar contra ello.
+
+    Dos cosas fuera de nuestro control: envuelve a 80 columnas bajo CliRunner, y cuando
+    hay color colorea el primer guion de un flag aparte del resto —
+    `'\\x1b[1m-\\x1b[0m\\x1b[1m-threshold\\x1b[0m'` — con lo que `--threshold` deja de
+    existir como substring. Local corre sin color y CI con color, así que asertar sobre
+    el texto crudo pasa aquí y falla allá. Lo renderizado no es un contrato de nadie:
+    se limpia antes de mirarlo.
+    """
+    return " ".join(_ANSI.sub("", salida).split())
 
 
 def test_voices_empty(tmp_path, monkeypatch):
@@ -204,7 +221,7 @@ def test_threshold_fuera_de_rango_sale_con_exit_2(tmp_path, monkeypatch):
     audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0))
     result = _invoke(audio, tmp_path, "--threshold", "2.0")
     assert result.exit_code == 2
-    assert "--threshold" in result.stderr
+    assert "--threshold" in _plana(result.stderr)
 
 
 def test_speakers_cero_sale_con_exit_2(tmp_path, monkeypatch):
@@ -213,14 +230,14 @@ def test_speakers_cero_sale_con_exit_2(tmp_path, monkeypatch):
     audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0))
     result = _invoke(audio, tmp_path, "--speakers", "0")
     assert result.exit_code == 2
-    assert "--speakers" in result.stderr
+    assert "--speakers" in _plana(result.stderr)
 
 
 def test_beam_size_cero_sale_con_exit_2(tmp_path, monkeypatch):
     audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0))
     result = _invoke(audio, tmp_path, "--beam-size", "0")
     assert result.exit_code == 2
-    assert "--beam-size" in result.stderr
+    assert "--beam-size" in _plana(result.stderr)
 
 
 def test_find_threshold_fuera_de_rango_sale_con_exit_2(tmp_path, monkeypatch):
@@ -234,7 +251,7 @@ def test_find_threshold_fuera_de_rango_sale_con_exit_2(tmp_path, monkeypatch):
     monkeypatch.setattr(finder, "load_or_build_index", lambda *a, **k: ([], True))
     result = runner.invoke(app, ["find", str(audio), "sismica", "--threshold", "2.0"])
     assert result.exit_code == 2
-    assert "--threshold" in result.stderr
+    assert "--threshold" in _plana(result.stderr)
 
 
 def test_find_speakers_cero_sale_con_exit_2(tmp_path, monkeypatch):
@@ -246,7 +263,7 @@ def test_find_speakers_cero_sale_con_exit_2(tmp_path, monkeypatch):
     monkeypatch.setattr(finder, "load_or_build_index", lambda *a, **k: ([], True))
     result = runner.invoke(app, ["find", str(audio), "sismica", "--speakers", "0"])
     assert result.exit_code == 2
-    assert "--speakers" in result.stderr
+    assert "--speakers" in _plana(result.stderr)
 
 
 # --- 5.2.3 · la marca [?] sobrevive a --diarize ----------------------------------------
@@ -297,11 +314,6 @@ def _fake_diarization(monkeypatch, tmp_path, turns, clusters, enrolled):
         diarization, "diarize", lambda wav, num_speakers=None: (turns, clusters)
     )
     monkeypatch.setattr(registry, "get_embeddings", lambda: enrolled)
-
-
-def _plana(stdout: str) -> str:
-    # rich envuelve a 80 columnas bajo CliRunner; normalizar para asertar frases largas.
-    return " ".join(stdout.split())
 
 
 def test_reporte_diarizacion_sin_voces_registradas(tmp_path, monkeypatch):

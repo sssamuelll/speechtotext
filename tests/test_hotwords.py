@@ -1,5 +1,6 @@
 """Checks del léxico de hotwords y de los defaults de entorno HF en Windows."""
 import os
+import re
 import sys
 from types import SimpleNamespace
 
@@ -64,9 +65,13 @@ def _invoke(audio, tmp_path, *extra):
     )
 
 
-def _plana(stdout: str) -> str:
-    # rich envuelve a 80 columnas bajo CliRunner; normalizar para asertar frases largas.
-    return " ".join(stdout.split())
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plana(salida: str) -> str:
+    # rich envuelve a 80 columnas bajo CliRunner y, cuando hay color, mete escapes dentro
+    # de los tokens. Lo renderizado no es contrato: se limpia antes de asertar.
+    return " ".join(_ANSI.sub("", salida).split())
 
 
 def test_docstring_de_resolve_hotwords_no_dice_sesgo():

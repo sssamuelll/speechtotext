@@ -1,4 +1,4 @@
-"""Transcripción de audio a texto 100% local con faster-whisper.
+﻿"""Transcripción de audio a texto 100% local con faster-whisper.
 
 Sin claves de API, sin subir audio a la nube. Solo necesita ffmpeg en el PATH
 (en Linux/macOS: paquete `ffmpeg`; en Windows: https://ffmpeg.org/download.html).
