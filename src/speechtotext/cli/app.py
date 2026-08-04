@@ -1,4 +1,4 @@
-"""Transcripción de audio a texto 100% local con faster-whisper.
+﻿"""Transcripción de audio a texto 100% local con faster-whisper.
 
 Sin claves de API, sin subir audio a la nube. Solo necesita ffmpeg en el PATH
 (en Linux/macOS: paquete `ffmpeg`; en Windows: https://ffmpeg.org/download.html).
@@ -40,6 +40,7 @@ from speechtotext.core.engines import (
     quant_for,
 )
 from speechtotext.core.formats import (
+    find_gaps,
     parse_formats,
     write_json,
     write_srt,
@@ -311,16 +312,18 @@ def transcribe_file(
     # significa "write_text no lanzó" y una corrida que descartó media conversación se ve
     # igual que una buena. Se suma ANTES de _run_diarization porque esa partición por
     # palabras alteraría el conteo. Los segmentos no se solapan y los trozos son contiguos,
-    # así que la suma cruda vale.
+    # así que la suma cruda vale. gaps igual: una sola cantidad, calculada una vez aquí y
+    # pasada al JSON (5.1.3), para que consola y disco no emitan dos números distintos.
     cov = sum(s.end - s.start for s in segments)
+    # Se calcula SIEMPRE aquí, aunque el probe haya fallado y la consola vaya a callar:
+    # mandarle None a write_json lo hace recalcular sobre los segmentos ya diarizados, que
+    # es el mismo C-13 que este ítem cierra, entrando por la puerta de atrás. Con
+    # duration==0 find_gaps igual devuelve los huecos interiores (el de cola no, porque
+    # duration - cursor sale negativo). Lo que depende de duration es IMPRIMIRLO.
+    gaps = find_gaps(segments, info.duration)
     if info.duration:
         ratio = cov / info.duration
         voz = f"con voz {cov / 60:.1f} de {info.duration / 60:.1f} min ({100 * ratio:.0f}%)"
-        if ratio < 0.7:
-            # El consejo sólo aplica a quien tiene el VAD puesto: sugerir --no-vad a quien ya
-            # lo apagó es ruido, y ahí la pérdida viene de otro lado (el modelo no emitió).
-            consejo = ", prueba --no-vad" if vad else ""
-            voz = f"[yellow]{voz} — se perdió audio{consejo}[/yellow]"
     else:
         # duration==0 es el probe fallido. Reportar 0% sería inventar una medida sobre un
         # denominador que no existe, y encima se contradice con el conteo de segmentos:
@@ -343,6 +346,31 @@ def transcribe_file(
         f"{idioma} · duración {info.duration:.1f}s · "
         f"{len(segments)} segmentos · {voz} · motor {engine}"
     )
+
+    # La línea de huecos sale incondicional (C-11: el umbral de cobertura se borró, no se
+    # recalibró): es un hecho geométrico sobre la línea de tiempo, no depende de cómo el
+    # VAD remapee los timestamps. Sin huecos se dice explícitamente — callar convertiría la
+    # ausencia en una omisión indistinguible de un fallo del instrumento.
+    # duration falsy = probe fallido: sin denominador no hay línea de tiempo sobre la que
+    # afirmar ni los huecos ni su ausencia, así que ahí no se imprime nada de ellos.
+    if info.duration:
+        if gaps:
+            # ponytail: se listan los primeros 5 huecos y luego "y N más (ver el JSON)"; con
+            # 40 huecos la consola se inunda y el artefacto completo ya existe. Techo: si
+            # alguien pide los 40 en consola, sale un --gaps-all.
+            lista = ", ".join(f"{_fmt(a)}-{_fmt(b)} ({b - a:.0f} s)" for a, b in gaps[:5])
+            if len(gaps) > 5:
+                lista += f", y {len(gaps) - 5} más (ver el JSON)"
+            # El consejo sólo aplica a quien tiene el VAD puesto: sugerir --no-vad a quien ya
+            # lo apagó (o a whispercpp, que no trae VAD) es ruido, y ahí la pérdida viene de
+            # otro lado (el modelo no emitió).
+            consejo = " — prueba --no-vad" if vad else ""
+            plural = "hueco" if len(gaps) == 1 else "huecos"
+            console.print(f"{len(gaps)} {plural} sin texto: {lista}{consejo}")
+        else:
+            # find_gaps corta en >= 5.0, no en > 5.0: decir "> 5 s" declararía menos de lo
+            # que la herramienta sabe, y este plan trata justo de eso (Q9).
+            console.print("sin huecos de 5 s o más")
 
     if diarize:
         segments = _run_diarization(audio, segments, speakers, identify, threshold)
@@ -379,7 +407,8 @@ def transcribe_file(
         "txt": (".txt", lambda p: write_txt(segments, p)),
         "srt": (".srt", lambda p: write_srt(segments, p)),
         "vtt": (".vtt", lambda p: write_vtt(segments, p)),
-        "json": (".json", lambda p: write_json(segments, info, p, engine_info=engine_info)),
+        "json": (".json", lambda p: write_json(segments, info, p, engine_info=engine_info,
+                                               speech_s=round(cov, 2), gaps=gaps)),
     }
     for fmt in sorted(requested):
         suffix, write_fn = writers[fmt]

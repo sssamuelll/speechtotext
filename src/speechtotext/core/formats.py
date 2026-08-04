@@ -95,7 +95,7 @@ def write_vtt(segments, path: Path) -> None:
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def _gaps(seg_list, duration: float) -> list[list[float]]:
+def find_gaps(seg_list, duration: float) -> list[list[float]]:
     """Complemento de los segmentos sobre [0, duration]: el audio que no produjo texto.
     Los segmentos de Whisper no se solapan dentro de una pasada y los trozos son contiguos
     por construcción, así que basta un barrido con cursor."""
@@ -112,10 +112,17 @@ def _gaps(seg_list, duration: float) -> list[list[float]]:
     return out
 
 
-def write_json(segments, info, path: Path, *, engine_info=None) -> None:
+def write_json(segments, info, path: Path, *, engine_info=None, speech_s=None, gaps=None) -> None:
     seg_list = list(segments)
     speakers = sorted({_speaker(s) for s in seg_list} - {None})
     prob = info.language_probability
+    # speech_s/gaps llegan calculados del CLI (una sola vez, sobre los segmentos que el ASR
+    # emitió, antes de diarizar: C-13). None = calcularlos aquí como siempre, mismo patrón
+    # condicional que engine_info.
+    if speech_s is None:
+        speech_s = round(sum(s.end - s.start for s in seg_list), 2)
+    if gaps is None:
+        gaps = find_gaps(seg_list, info.duration)
     payload = {
         "language": info.language,
         # prob es None cuando el idioma se detectó de verdad en ruta troceada y la medición se
@@ -123,8 +130,8 @@ def write_json(segments, info, path: Path, *, engine_info=None) -> None:
         **({"language_probability": round(prob, 4)} if prob is not None else {}),
         # "duration" sigue siendo la del archivo; "speech_s" es lo que produjo texto.
         "duration": round(info.duration, 2),
-        "speech_s": round(sum(s.end - s.start for s in seg_list), 2),
-        "gaps": _gaps(seg_list, info.duration),
+        "speech_s": speech_s,
+        "gaps": gaps,
         "segments": [
             {
                 "id": i,
