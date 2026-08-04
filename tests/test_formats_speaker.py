@@ -94,6 +94,18 @@ def test_json_gaps_ignora_huecos_cortos(tmp_path):
     assert json.loads(p.read_text(encoding="utf-8"))["gaps"] == []
 
 
+def test_json_speech_s_y_gaps_pasados_se_emiten_tal_cual(tmp_path):
+    # El CLI calcula la métrica una sola vez, antes de diarizar (5.1.3): si llegan los
+    # kwargs, se emiten tal cual aunque los segmentos darían otro valor.
+    segs = [LabeledSegment(0, 1, "hola"), LabeledSegment(40, 41, "chao")]
+    info = SimpleNamespace(language="es", language_probability=1.0, duration=60.0)
+    p = tmp_path / "o.json"
+    write_json(segs, info, p, speech_s=99.0, gaps=[[1, 2]])
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert data["speech_s"] == 99.0
+    assert data["gaps"] == [[1, 2]]
+
+
 # --- 1.5: marca [?] ---
 
 

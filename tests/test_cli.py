@@ -82,22 +82,25 @@ def test_transcribe_still_registered():
 # --- 1.1 · cobertura en la línea de resumen -----------------------------------------
 
 
-def test_resumen_avisa_cuando_se_perdio_audio(tmp_path, monkeypatch):
-    # La corrida del hallazgo: 2206 s de audio, ~25% con texto, e imprimía OK a secas.
+def test_resumen_lista_los_huecos(tmp_path, monkeypatch):
+    # La corrida del hallazgo: 2206 s de audio, texto en 0-300 y 600-850.
     segs = [_seg(0.0, 300.0), _seg(600.0, 850.0)]
     audio = _fake_transcribe(monkeypatch, tmp_path, segs, _info(2206.0))
     result = _invoke(audio, tmp_path)
     assert result.exit_code == 0
     assert "25%" in result.stdout
-    assert "--no-vad" in result.stdout
+    assert "2 huecos sin texto: 05:00-10:00 (300 s), 14:10-36:46 (1356 s)" in result.stdout
+    assert "prueba --no-vad" in result.stdout
 
 
-def test_resumen_no_avisa_con_cobertura_alta(tmp_path, monkeypatch):
+def test_resumen_sin_huecos_lo_dice_explicitamente(tmp_path, monkeypatch):
+    # Un solo segmento contiguo: la ausencia de huecos se afirma, no se calla.
     segs = [_seg(0.0, 900.0)]
-    audio = _fake_transcribe(monkeypatch, tmp_path, segs, _info(1000.0))
+    audio = _fake_transcribe(monkeypatch, tmp_path, segs, _info(900.0))
     result = _invoke(audio, tmp_path)
     assert result.exit_code == 0
-    assert "90%" in result.stdout
+    assert "100%" in result.stdout
+    assert "sin huecos > 5 s" in result.stdout
     assert "--no-vad" not in result.stdout
 
 
@@ -112,14 +115,23 @@ def test_resumen_sobrevive_duracion_cero(tmp_path, monkeypatch):
     assert "0%" not in result.stdout
 
 
+def test_duracion_cero_no_imprime_linea_de_huecos(tmp_path, monkeypatch):
+    # Sin denominador no hay línea de tiempo sobre la que existan complementos: ni huecos
+    # ni "sin huecos" se puede afirmar sin fabricar.
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(0.0))
+    result = _invoke(audio, tmp_path)
+    assert result.exit_code == 0
+    assert "huecos" not in result.stdout
+
+
 def test_no_sugiere_no_vad_a_quien_ya_lo_apago(tmp_path, monkeypatch):
     # Las corridas 2, 3 y 5 del caso real ya iban con --no-vad: repetir el consejo ahí
-    # es ruido garantizado. El aviso de pérdida se queda; la sugerencia no.
+    # es ruido garantizado. La línea de huecos se queda; la sugerencia no.
     segs = [_seg(0.0, 300.0)]
     audio = _fake_transcribe(monkeypatch, tmp_path, segs, _info(2206.0))
     result = _invoke(audio, tmp_path, "--no-vad")
     assert result.exit_code == 0
-    assert "se perdió audio" in result.stdout
+    assert "1 huecos sin texto: 05:00-36:46 (1906 s)" in result.stdout
     assert "--no-vad" not in result.stdout
 
 
@@ -221,13 +233,14 @@ def test_aviso_vad_con_whispercpp(tmp_path, monkeypatch):
 
 
 def test_whispercpp_no_sugiere_no_vad(tmp_path, monkeypatch):
-    # Con cobertura baja, el consejo "prueba --no-vad" es absurdo bajo whispercpp: el
-    # motor no tiene VAD que apagar. El aviso de pérdida se queda; la sugerencia no.
+    # Con huecos en la línea de tiempo, el consejo "prueba --no-vad" es absurdo bajo
+    # whispercpp: el motor no tiene VAD que apagar. La línea de huecos se queda; la
+    # sugerencia no.
     segs = [_seg(0.0, 300.0)]
     audio = _fake_transcribe(monkeypatch, tmp_path, segs, _info(2206.0))
     result = _invoke(audio, tmp_path, "--engine", "whispercpp")
     assert result.exit_code == 0
-    assert "se perdió audio" in result.stdout
+    assert "1 huecos sin texto: 05:00-36:46 (1906 s)" in result.stdout
     assert "prueba --no-vad" not in result.stdout
 
 
