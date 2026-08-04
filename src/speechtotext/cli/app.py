@@ -398,8 +398,11 @@ def transcribe_file(
 
     # Post-proceso textual (horas 8.33->8:33). Uniforma a LabeledSegment: los Segment
     # de faster_whisper son inmutables y los writers solo leen start/end/text/speaker.
+    # src_dur se propaga: reconstruir sin él apagaría la marca [?] justo en la ruta
+    # diarizada que 5.2.3 arregla (is_suspect lo usa de denominador y de gate).
     segments = [
-        LabeledSegment(s.start, s.end, normalize_hours(s.text), getattr(s, "speaker", None))
+        LabeledSegment(s.start, s.end, normalize_hours(s.text), getattr(s, "speaker", None),
+                       src_dur=getattr(s, "src_dur", None))
         for s in segments
     ]
 

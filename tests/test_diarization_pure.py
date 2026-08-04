@@ -100,6 +100,43 @@ def test_hueco_en_transicion_real_se_asigna_al_previo():
     assert out[1].text.strip() == "abro"
 
 
+# --- 5.2.3 · src_dur: la duración del segmento ASR sobrevive a la recompresión ---------
+
+
+def test_assign_segments_llena_src_dur_en_ruta_de_palabras():
+    # El caso canónico del plan: un segmento ASR de 30 s con una sola palabra de 1 s.
+    # El run se recomprime a la palabra, pero src_dur conserva los 30 s del padre.
+    turns = [(0.0, 30.0, "SPEAKER_00")]
+    out = assign_segments([_seg_words(0.0, 30.0, " Gracias.", [_word(0.4, 1.4, " Gracias.")])], turns)
+    assert len(out) == 1
+    assert (out[0].start, out[0].end) == (0.4, 1.4)  # span recomprimido a la palabra
+    assert out[0].src_dur == 30.0
+
+
+def test_assign_segments_src_dur_igual_en_todos_los_runs_del_segmento():
+    # Los N runs de un mismo segmento heredan el src_dur del padre: vienen de la misma
+    # ventana de decodificación.
+    turns = [(0.0, 15.0, "SPEAKER_00"), (15.0, 30.0, "SPEAKER_01")]
+    words = [_word(1.0, 2.0, " hola"), _word(16.0, 17.0, " chao")]
+    out = assign_segments([_seg_words(0.0, 30.0, " hola chao", words)], turns)
+    assert len(out) == 2
+    assert [s.src_dur for s in out] == [30.0, 30.0]
+
+
+def test_assign_segments_llena_src_dur_en_ruta_gruesa():
+    # Sin palabras (whispercpp): un hablante por segmento, y src_dur es el span entero.
+    out = assign_segments([_seg(0.0, 30.0, "Gracias.")], [(0.0, 30.0, "SPEAKER_00")])
+    assert out[0].src_dur == 30.0
+
+
+def test_apply_names_propaga_src_dur():
+    from speechtotext.core.segments import LabeledSegment
+    labeled = [LabeledSegment(0.4, 1.4, " Gracias.", "SPEAKER_00", src_dur=30.0)]
+    out = apply_names(labeled, {"SPEAKER_00": "Samuel"})
+    assert out[0].speaker == "Samuel"
+    assert out[0].src_dur == 30.0
+
+
 def test_humanize_speaker():
     assert humanize_speaker("SPEAKER_00") == "Hablante 1"
     assert humanize_speaker("SPEAKER_01") == "Hablante 2"

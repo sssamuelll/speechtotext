@@ -249,6 +249,40 @@ def test_find_speakers_cero_sale_con_exit_2(tmp_path, monkeypatch):
     assert "--speakers" in result.stderr
 
 
+# --- 5.2.3 · la marca [?] sobrevive a --diarize ----------------------------------------
+
+
+def test_diarize_marca_sospechoso_igual_que_sin_diarizar(tmp_path, monkeypatch):
+    # El caso canónico del plan: un segmento ASR de 30 s con una sola palabra de 1 s.
+    # Sin --diarize el gate mide los 30 s del span; con --diarize el span se recomprime
+    # a 1 s y solo src_dur salva la marca. Ruta real de punta a punta: diarize y el
+    # registro de voces stubbeados, assign_segments/apply_names/post-proceso reales.
+    from speechtotext.core import audio as core_audio
+    from speechtotext.speakers import diarization
+
+    palabra = SimpleNamespace(start=0.4, end=1.4, word=" Gracias.")
+    seg = SimpleNamespace(start=0.0, end=30.0, text=" Gracias.", words=[palabra])
+    audio = _fake_transcribe(monkeypatch, tmp_path, [seg], _info(30.0))
+    monkeypatch.setattr(core_audio, "transcode_to_wav", lambda b: tmp_path / "t.wav")
+    monkeypatch.setattr(
+        diarization, "diarize",
+        lambda wav, num_speakers=None: (
+            [(0.0, 30.0, "SPEAKER_00")], {"SPEAKER_00": np.array([1.0])}
+        ),
+    )
+    monkeypatch.setattr(registry, "get_embeddings", lambda: {})
+
+    sin = _invoke(audio, tmp_path)
+    assert sin.exit_code == 0
+    assert "[?] Gracias." in (tmp_path / "out.txt").read_text(encoding="utf-8")
+
+    con = _invoke(audio, tmp_path, "--diarize")
+    assert con.exit_code == 0
+    texto = (tmp_path / "out.txt").read_text(encoding="utf-8")
+    assert "[?] Gracias." in texto  # con el span recomprimido a 1 s, solo src_dur la marca
+    assert "Hablante 1" in texto
+
+
 # --- 1.6 · idioma medido vs forzado -------------------------------------------------
 
 
