@@ -99,7 +99,11 @@ def _load_hotwords_file(path: Path) -> Optional[str]:
 
 def _resolve_hotwords(hotwords: Optional[str], hotwords_file: Optional[Path]) -> Optional[str]:
     """Combina --hotwords (inline) y --hotwords-file. Scoped por invocación, sin default global:
-    los hotwords son sesgo probabilístico, un léxico global envenenaría todo otro audio."""
+    los términos entran al prompt después de tokenizer.sot_prev, o sea como texto previo de la
+    conversación (faster_whisper/transcribe.py:1542-1548), no como prior sobre el vocabulario.
+    Un léxico global envenenaría todo otro audio: el modelo lo continuaría como si fuera la
+    conversación en curso, y una lista larga degrada la corrida entera (ablación en §4 del
+    plan de calidad 2)."""
     parts = []
     if hotwords_file is not None:
         from_file = _load_hotwords_file(hotwords_file)
@@ -219,8 +223,25 @@ def transcribe_file(
     elif compute_type == "auto":
         compute_type = "int8" if device == "cpu" else "float16"
     if hotwords:
-        # markup=False: los términos pueden traer corchetes/acentos que rich malinterpretaría.
-        console.print(f"Hotwords: {hotwords}", markup=False)
+        n_terms = len([t for t in hotwords.split(",") if t.strip()])
+        # ponytail: se cuentan términos y caracteres, no tokens. El conteo exacto necesita
+        # el tokenizer del modelo, que en este punto todavía no está cargado; 223 tokens
+        # son del orden de 600-700 caracteres en español. Techo: si alguien necesita el
+        # número exacto, se cuenta después de construir el modelo.
+        console.print(
+            f"Hotwords ({n_terms} términos, {len(hotwords)} caracteres): {hotwords}",
+            # markup=False: los términos pueden traer corchetes/acentos que rich malinterpretaría.
+            markup=False,
+        )
+        if n_terms >= 10 or len(hotwords) >= 300:
+            # Techos conservadores, uno por daño verificado: la ablación midió degradación
+            # con 25 términos (con 3 no hubo pérdida, §4 del plan) y la librería trunca
+            # en silencio a los 223 tokens. Se avisa mucho antes de ambos.
+            console.print(
+                "[yellow]Lista larga de hotwords: 25 términos degradaron la cobertura "
+                "9 puntos sobre 240 s de audio real (2026-08-03); entran como texto "
+                "previo, no como léxico.[/yellow]"
+            )
 
     console.print(
         f"[bold]Modelo[/bold] [cyan]{model}[/cyan] · "
@@ -466,8 +487,9 @@ def transcribe(
     hotwords: Optional[str] = typer.Option(
         None,
         "--hotwords",
-        help="Términos difíciles separados por coma (nombres propios, jerga) para sesgar el "
-        "modelo en cada ventana. Escríbelos con mayúsculas y tildes.",
+        help="Términos difíciles separados por coma (nombres propios, jerga): entran a cada "
+        "ventana como si fueran la conversación previa, así que una lista corta ayuda y una "
+        "larga degrada. Escríbelos con mayúsculas y tildes.",
     ),
     hotwords_file: Optional[Path] = typer.Option(
         None,
@@ -475,7 +497,9 @@ def transcribe(
         exists=True,
         dir_okay=False,
         help="Archivo con términos difíciles (uno por línea o separados por coma), para un "
-        "léxico por proyecto. Se combina con --hotwords.",
+        "léxico por proyecto. Se combina con --hotwords. Techo: por encima de 223 tokens "
+        "(~600-700 caracteres) la lista se trunca en silencio "
+        "(faster_whisper/transcribe.py:1546-1547).",
     ),
     chunk: Optional[bool] = typer.Option(
         None, "--chunk/--no-chunk",

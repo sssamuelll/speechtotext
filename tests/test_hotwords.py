@@ -1,8 +1,14 @@
 """Checks del léxico de hotwords y de los defaults de entorno HF en Windows."""
 import os
 import sys
+from types import SimpleNamespace
 
-from speechtotext.cli.app import _load_hotwords_file, _resolve_hotwords
+from typer.testing import CliRunner
+
+from speechtotext.cli.app import _load_hotwords_file, _resolve_hotwords, app
+from speechtotext.core import chunked
+
+runner = CliRunner()
 
 
 def test_load_hotwords_file_lineas_y_comas(tmp_path):
@@ -34,3 +40,66 @@ def test_env_defaults_hf_en_windows():
     if sys.platform == "win32":
         assert os.environ.get("HF_HUB_DISABLE_SYMLINKS") == "1"
         assert os.environ.get("HF_HUB_DISABLE_XET") == "1"
+
+
+# --- 5.2.2 · la prosa dice el mecanismo real y la lista larga avisa --------------------
+
+
+def _fake_transcribe(monkeypatch, tmp_path):
+    """Corta el camino de transcripción justo antes de Whisper: el audio nunca se abre."""
+    audio = tmp_path / "charla.wav"
+    audio.write_bytes(b"RIFF")
+    info = SimpleNamespace(duration=10.0, language="es", language_probability=1.0)
+    segs = [SimpleNamespace(start=0.0, end=9.0, text="hola que tal")]
+    monkeypatch.setattr(chunked, "probe_duration", lambda p: info.duration)
+    monkeypatch.setattr(chunked, "should_chunk", lambda d, c: True)
+    monkeypatch.setattr(chunked, "run_chunked", lambda *a, **k: (segs, info))
+    return audio
+
+
+def _invoke(audio, tmp_path, *extra):
+    return runner.invoke(
+        app,
+        ["transcribe", str(audio), "-f", "txt", "-o", str(tmp_path / "out")] + list(extra),
+    )
+
+
+def _plana(stdout: str) -> str:
+    # rich envuelve a 80 columnas bajo CliRunner; normalizar para asertar frases largas.
+    return " ".join(stdout.split())
+
+
+def test_docstring_de_resolve_hotwords_no_dice_sesgo():
+    # El defecto de este ciclo FUE un docstring que afirmaba un mecanismo falso
+    # ("sesgo probabilístico", §4 del plan): la prosa se testea como el código.
+    assert "sesgo" not in _resolve_hotwords.__doc__
+
+
+def test_help_de_transcribe_no_dice_sesgar():
+    result = runner.invoke(app, ["transcribe", "--help"])
+    assert result.exit_code == 0
+    assert "sesgar" not in result.stdout
+
+
+def test_lista_larga_de_hotwords_imprime_conteo_y_aviso(tmp_path, monkeypatch):
+    # La lista del caso real: 25 términos. Debe salir el conteo y la advertencia con
+    # la medición (9 puntos de cobertura perdidos, 2026-08-03).
+    audio = _fake_transcribe(monkeypatch, tmp_path)
+    lista = ", ".join(f"Término Propio {i:02d}" for i in range(25))
+    result = _invoke(audio, tmp_path, "--hotwords", lista)
+    assert result.exit_code == 0
+    salida = _plana(result.stdout)
+    assert "25 términos" in salida
+    assert "caracteres" in salida
+    assert "degradaron la cobertura 9 puntos" in salida
+    assert "texto previo" in salida
+
+
+def test_lista_corta_de_hotwords_no_avisa(tmp_path, monkeypatch):
+    # Con 3 términos la ablación no midió pérdida: el conteo sale, la advertencia no.
+    audio = _fake_transcribe(monkeypatch, tmp_path)
+    result = _invoke(audio, tmp_path, "--hotwords", "Sofitasa, Boconó, Táchira")
+    assert result.exit_code == 0
+    salida = _plana(result.stdout)
+    assert "3 términos" in salida
+    assert "degradaron" not in salida
