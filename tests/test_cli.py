@@ -283,6 +283,78 @@ def test_diarize_marca_sospechoso_igual_que_sin_diarizar(tmp_path, monkeypatch):
     assert "Hablante 1" in texto
 
 
+# --- 5.2.4 · reporte de calidad de la diarización --------------------------------------
+
+
+def _fake_diarization(monkeypatch, tmp_path, turns, clusters, enrolled):
+    """Stub de la frontera con modelos: diarize y el registro de voces. El resto de la
+    ruta (assign_segments, assign_names, apply_names, el reporte) corre de verdad."""
+    from speechtotext.core import audio as core_audio
+    from speechtotext.speakers import diarization
+
+    monkeypatch.setattr(core_audio, "transcode_to_wav", lambda b: tmp_path / "t.wav")
+    monkeypatch.setattr(
+        diarization, "diarize", lambda wav, num_speakers=None: (turns, clusters)
+    )
+    monkeypatch.setattr(registry, "get_embeddings", lambda: enrolled)
+
+
+def _plana(stdout: str) -> str:
+    # rich envuelve a 80 columnas bajo CliRunner; normalizar para asertar frases largas.
+    return " ".join(stdout.split())
+
+
+def test_reporte_diarizacion_sin_voces_registradas(tmp_path, monkeypatch):
+    # Dos clusters y ninguna voz registrada: sale el conteo y no sale la línea de score.
+    clusters = {"SPEAKER_00": np.array([1.0, 0.0]), "SPEAKER_01": np.array([0.0, 1.0])}
+    turns = [(0.0, 5.0, "SPEAKER_00"), (5.0, 9.0, "SPEAKER_01")]
+    _fake_diarization(monkeypatch, tmp_path, turns, clusters, {})
+    segs = [_seg(0.0, 5.0), _seg(5.0, 9.0)]
+    audio = _fake_transcribe(monkeypatch, tmp_path, segs, _info(9.0))
+    result = _invoke(audio, tmp_path, "--diarize")
+    assert result.exit_code == 0
+    salida = _plana(result.stdout)
+    assert "2 hablantes · 0% sin atribuir" in salida
+    assert "voces identificadas" not in salida  # sin registro, la cláusula no aplica
+    assert "mejor score" not in salida
+
+
+def test_reporte_diarizacion_mejor_score_bajo_umbral(tmp_path, monkeypatch):
+    # Una voz registrada que no alcanza el umbral: sale el mejor score y el umbral, o
+    # la identificación falla a oscuras (el caso real del plan: 0.38 < 0.50 sin aviso).
+    clusters = {"SPEAKER_00": np.array([1.0, 3.0]), "SPEAKER_01": np.array([0.0, 1.0])}
+    turns = [(0.0, 5.0, "SPEAKER_00"), (5.0, 9.0, "SPEAKER_01")]
+    enrolled = {"Samuel": np.array([1.0, 0.0])}  # coseno con SPEAKER_00: 1/sqrt(10) = 0.32
+    _fake_diarization(monkeypatch, tmp_path, turns, clusters, enrolled)
+    segs = [_seg(0.0, 5.0), _seg(5.0, 9.0)]
+    audio = _fake_transcribe(monkeypatch, tmp_path, segs, _info(9.0))
+    result = _invoke(audio, tmp_path, "--diarize")
+    assert result.exit_code == 0
+    salida = _plana(result.stdout)
+    assert "0 de 1 voces identificadas" in salida
+    assert "mejor score 0.32 < 0.50" in salida
+
+
+def test_reporte_diarizacion_sugiere_speakers_cuando_el_automatico_se_dispara(
+    tmp_path, monkeypatch
+):
+    clusters = {f"SPEAKER_{i:02d}": np.array([1.0, 0.0]) for i in range(6)}
+    turns = [(float(i), float(i + 1), f"SPEAKER_{i:02d}") for i in range(6)]
+    _fake_diarization(monkeypatch, tmp_path, turns, clusters, {})
+    segs = [_seg(float(i), float(i + 1)) for i in range(6)]
+    audio = _fake_transcribe(monkeypatch, tmp_path, segs, _info(6.0))
+
+    result = _invoke(audio, tmp_path, "--diarize")
+    assert result.exit_code == 0
+    assert "6 hablantes" in _plana(result.stdout)
+    assert "--speakers N" in result.stdout
+
+    # Con el número fijado por el usuario la sugerencia no aplica.
+    result = _invoke(audio, tmp_path, "--diarize", "--speakers", "6")
+    assert result.exit_code == 0
+    assert "--speakers N" not in result.stdout
+
+
 # --- 1.6 · idioma medido vs forzado -------------------------------------------------
 
 

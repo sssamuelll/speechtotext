@@ -529,7 +529,7 @@ def transcribe(
 def _run_diarization(audio, segments, speakers, identify, threshold):
     from speechtotext.core.audio import FfmpegMissingError, TranscodeError, transcode_to_wav
     from speechtotext.speakers import diarization, registry
-    from speechtotext.speakers.identify import assign_names
+    from speechtotext.speakers.identify import assign_names, cosine
 
     try:
         wav = transcode_to_wav(audio.read_bytes())
@@ -552,10 +552,39 @@ def _run_diarization(audio, segments, speakers, identify, threshold):
 
     labeled = diarization.assign_segments(segments, turns)
     name_map: dict[str, str] = {}
+    enrolled: dict = {}
     if identify:
         enrolled = registry.get_embeddings()
         if enrolled:
             name_map = assign_names(clusters, enrolled, threshold)
+
+    # Reporte de calidad de la diarización, con los datos que ya están en memoria (5.2.4).
+    # Sin él la identificación de voz no se puede diagnosticar: assign_names rompe el
+    # bucle en el primer candidato bajo umbral sin registrar el near-miss y el score no
+    # salía por ningún sitio. Cuando nadie alcanza el umbral se imprime el mejor score.
+    n = len(clusters)
+    sin_atribuir = (
+        round(100 * sum(1 for s in labeled if s.speaker is None) / len(labeled))
+        if labeled else 0
+    )
+    partes = [f"{n} hablante{'s' if n != 1 else ''}", f"{sin_atribuir}% sin atribuir"]
+    if enrolled:
+        parte = f"{len(name_map)} de {len(enrolled)} voces identificadas"
+        if not name_map and clusters:
+            mejor = max(
+                cosine(vec, ref) for vec in clusters.values() for ref in enrolled.values()
+            )
+            parte += f" (mejor score {mejor:.2f} < {threshold:.2f})"
+        partes.append(parte)
+    console.print(" · ".join(partes))
+    if speakers is None and n > 5:
+        # ponytail: 5 sale de conversaciones reales, no de una medición; el fallo típico
+        # de pyannote en automático es "encontrar" voces de más en audio ruidoso. Techo:
+        # si llega una grabación con más de 5 hablantes reales, sube el número.
+        console.print(
+            f"[yellow]{n} hablantes detectados en automático; si sabes cuántos son, "
+            "fija el número con --speakers N[/yellow]"
+        )
     return diarization.apply_names(labeled, name_map)
 
 
