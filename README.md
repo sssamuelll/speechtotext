@@ -1,11 +1,20 @@
 # speechtotext
 
-Toolkit de voz a texto con dos superficies independientes:
+Librería y CLI de voz a texto **100% local**: transcripción con
+[`faster-whisper`](https://github.com/SYSTRAN/faster-whisper), calidad de audio,
+diarización e identificación de hablantes, y evaluación. Sin APIs externas, sin
+coste por uso.
 
-- **CLI offline** (`speechtotext`) — transcripción local con [`faster-whisper`](https://github.com/SYSTRAN/faster-whisper). Sin APIs externas, sin coste por uso.
-- **Servicio HTTP** (`speechtotext.api`) — endpoint FastAPI de evaluación de pronunciación contra un texto de referencia, respaldado por [Azure AI Speech Pronunciation Assessment](https://learn.microsoft.com/azure/ai-services/speech-service/how-to-pronunciation-assessment).
+## Alcance y gobernanza
 
-Ambas comparten utilidades en `speechtotext.core` (transcoding ffmpeg, serializadores de subtítulos).
+- Lo **genérico** (audio, ASR, hablantes, evaluación) entra aquí; lo **específico
+  de una app** se queda en la app consumidora.
+- Los consumidores fijan la dependencia a un **tag o SHA**
+  (`speechtotext @ git+https://github.com/sssamuelll/speechtotext@v0.4.0`),
+  nunca a `@main` flotante. Cambio que un consumidor necesite → PR + merge + tag
+  aquí primero, luego bump del pin allá.
+- El servicio HTTP de evaluación de pronunciación (FastAPI + Azure) vivió aquí
+  hasta la `0.3.x`; hoy vive adaptado dentro de su único consumidor (klara).
 
 ---
 
@@ -24,9 +33,6 @@ pip install -e .
 
 # CLI + diarización e identificación de hablantes (pyannote + torch, ~2 GB)
 pip install -e ".[diarize]"
-
-# CLI + servicio HTTP de pronunciación (FastAPI + Azure SDK)
-pip install -e ".[api]"
 ```
 
 ---
@@ -158,120 +164,11 @@ siguientes sobre ese mismo archivo son instantáneas. El índice se guarda en
 
 ---
 
-## API: evaluación de pronunciación
-
-### Variables de entorno
-
-| Variable | Default | Descripción |
-|---|---|---|
-| `AZURE_SPEECH_KEY` | _(requerida)_ | Clave del recurso Azure Speech. |
-| `AZURE_SPEECH_REGION` | `westeurope` | Región del recurso (debe coincidir con la del portal). |
-| `CORS_ORIGINS` | `*` | Orígenes permitidos separados por coma. **Restringir en producción.** |
-
-### Arrancar en local
-
-```bash
-export AZURE_SPEECH_KEY=tu_clave_de_azure
-export AZURE_SPEECH_REGION=westeurope
-uvicorn speechtotext.api.app:app --reload --port 8000
-```
-
-Documentación interactiva en `http://localhost:8000/docs` (OpenAPI).
-
-### `POST /score`
-
-`multipart/form-data`:
-
-| Campo | Tipo | Default | Descripción |
-|---|---|---|---|
-| `audio` | file | — | Audio del usuario en cualquier formato que ffmpeg sepa decodificar (webm/ogg/wav/mp3/m4a). |
-| `reference_text` | string | — | Texto que el usuario debía pronunciar. |
-| `language` | string | `de-DE` | Código BCP-47 (p.ej. `de-DE`, `en-US`, `es-ES`). |
-
-Ejemplo con `curl`:
-
-```bash
-curl -X POST http://localhost:8000/score \
-  -F audio=@user.webm \
-  -F reference_text="Ich hätte gern einen Kaffee, bitte." \
-  -F language=de-DE
-```
-
-Ejemplo desde el frontend (grabando con `MediaRecorder`):
-
-```js
-const fd = new FormData();
-fd.append("audio", audioBlob, "user.webm");
-fd.append("reference_text", "Ich hätte gern einen Kaffee, bitte.");
-fd.append("language", "de-DE");
-
-const res = await fetch("http://localhost:8000/score", {
-  method: "POST",
-  body: fd,
-});
-const { scores, words } = await res.json();
-// scores.accuracy / fluency / completeness / pronunciation (0–100)
-// words[i].phonemes[j].accuracy_score → para resaltar fonemas mal pronunciados
-```
-
-### Forma de la respuesta
-
-```json
-{
-  "recognized_text": "Ich hätte gern einen Kaffee bitte",
-  "reference_text": "Ich hätte gern einen Kaffee, bitte.",
-  "language": "de-DE",
-  "scores": {
-    "accuracy": 87.0,
-    "fluency": 92.0,
-    "completeness": 100.0,
-    "pronunciation": 89.5
-  },
-  "words": [
-    {
-      "word": "hätte",
-      "accuracy_score": 78.0,
-      "error_type": "None",
-      "phonemes": [
-        {"phoneme": "h", "accuracy_score": 95.0},
-        {"phoneme": "ɛ", "accuracy_score": 62.0},
-        {"phoneme": "t", "accuracy_score": 88.0},
-        {"phoneme": "ə", "accuracy_score": 80.0}
-      ]
-    }
-  ]
-}
-```
-
-### Códigos de error
-
-| Status | Significado |
-|---|---|
-| `400` | Audio vacío, sin `reference_text`, o ffmpeg no pudo decodificar el archivo. |
-| `422` | Azure no detectó voz en el audio (recoverable: pide al usuario que repita). |
-| `500` | `AZURE_SPEECH_KEY` no configurada o `ffmpeg` no instalado en el servidor. |
-| `502` | Azure devolvió un error no recuperable. |
-
-### `GET /health`
-
-```json
-{ "status": "ok", "azure_configured": true, "azure_region": "westeurope" }
-```
-
-### Sobre Azure Pronunciation Assessment
-
-- **Idiomas:** `de-DE`, `en-US`, `en-GB`, `es-ES`, `fr-FR`, `it-IT`, `ja-JP`, `zh-CN`, … ([lista completa](https://learn.microsoft.com/azure/ai-services/speech-service/language-support?tabs=stt#pronunciation-assessment)).
-- **Free tier (F0):** 5 horas de audio al mes — suficiente para un MVP con docenas de usuarios activos.
-- **Paid tier (S0):** ~$1 USD por hora de audio. Sin compromiso mínimo.
-- La función `prosody` solo está disponible en `en-US`; el resto de idiomas devuelven `accuracy`, `fluency`, `completeness` y `pronunciation`.
-
----
-
 ## Estructura del paquete
 
 ```
 src/speechtotext/
-├── core/                 lógica compartida CLI ↔ API
+├── core/                 lógica compartida
 │   ├── audio.py          transcode_to_wav() + errores tipados
 │   ├── formats.py        format_timestamp + writers (txt/srt/vtt/json)
 │   └── segments.py       LabeledSegment (segmento con hablante)
@@ -280,27 +177,16 @@ src/speechtotext/
 │   ├── identify.py       coseno + assign_names (nombre por voz)
 │   └── registry.py       registro de voces (enroll/list/get/remove)
 ├── cli/
-│   └── app.py            typer: transcribe / enroll / voices / forget
-└── api/
-    ├── app.py            create_app() — FastAPI + CORS + router
-    ├── config.py         Settings (env vars)
-    ├── schemas.py        modelos pydantic de respuesta
-    ├── azure_client.py   cliente Azure + AzureSpeechError
-    └── routes/
-        ├── health.py     GET /health
-        └── pronunciation.py  POST /score
+│   └── app.py            typer: transcribe / find / enroll / voices / forget
+├── audio/                captura, calidad y gate pre-inferencia
+├── asr/                  backends de transcripción (faster-whisper)
+├── models/               manifiestos y verificación de modelos
+├── confidence/           features y calibración de confianza
+├── evaluation/           corpus, splits, métricas y runner de evaluación
+└── security/             almacenamiento de artefactos privados
 ```
 
 ## Desarrollo
-
-### Añadir un endpoint nuevo
-
-1. Crear `src/speechtotext/api/routes/mi_ruta.py` con `router = APIRouter(...)` y los handlers.
-2. Incluirlo en `src/speechtotext/api/routes/__init__.py`:
-   ```python
-   from speechtotext.api.routes.mi_ruta import router as mi_router
-   api_router.include_router(mi_router)
-   ```
 
 ### Añadir un formato de salida nuevo al CLI
 
