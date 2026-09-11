@@ -3,6 +3,12 @@ from __future__ import annotations
 
 from speechtotext.core.segments import LabeledSegment
 
+# El checkpoint que se carga y, por lo mismo, el espacio vectorial de los embeddings que
+# produce: el registro de voces los archiva y filtra por esta clave, no por dimensión.
+# Un solo literal a propósito — con dos, quien cambie el checkpoint y olvide la clave deja
+# los vectores ya registrados etiquetados con un espacio que dejó de ser el suyo.
+EMBEDDING_MODEL = "pyannote/speaker-diarization-community-1"
+
 
 def _overlap(a0: float, a1: float, b0: float, b1: float) -> float:
     return max(0.0, min(a1, b1) - max(a0, b0))
@@ -94,7 +100,6 @@ def apply_names(
 # archivos de forma fiable en Windows con este stack. ---
 
 _PIPELINE = None
-_PIPELINE_NAME = "pyannote/speaker-diarization-community-1"
 # El 32 con el que corre por defecto no es el default de pyannote (que es 1): sale del
 # config.yaml del checkpoint community-1. A 32 el pico son 2620 MB; a 8, 1369 MB (-48%)
 # por +7% de reloj sobre 180 s, con salida idéntica. En una máquina de escritorio el pico
@@ -132,7 +137,7 @@ def _get_pipeline():
             from pyannote.audio import Pipeline
 
         _PIPELINE = Pipeline.from_pretrained(
-            _PIPELINE_NAME, token=os.environ.get("HF_TOKEN")
+            EMBEDDING_MODEL, token=os.environ.get("HF_TOKEN")
         )
         # Ambos se leen en tiempo de llamada, así que asignarlos aquí basta.
         _PIPELINE.embedding_batch_size = _BATCH

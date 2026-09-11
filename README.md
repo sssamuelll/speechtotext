@@ -106,6 +106,11 @@ speechtotext forget "Samuel"                      # borra una voz
 
 Las voces se guardan en `~/.speechtotext/` (override con `SPEECHTOTEXT_HOME`).
 
+Cada voz queda archivada bajo el modelo que produjo su embedding, y solo se compara
+contra vectores del mismo modelo: el coseno entre dos espacios vectoriales distintos no
+significa nada. Si consumes el registro como librería, `registry.get_embeddings(model)`
+exige ese modelo justamente por eso.
+
 ### Transcribir con hablantes
 
 ```bash

@@ -287,7 +287,7 @@ def test_diarize_marca_sospechoso_igual_que_sin_diarizar(tmp_path, monkeypatch):
             [(0.0, 30.0, "SPEAKER_00")], {"SPEAKER_00": np.array([1.0])}
         ),
     )
-    monkeypatch.setattr(registry, "get_embeddings", lambda: {})
+    monkeypatch.setattr(registry, "get_embeddings", lambda model: {})
 
     sin = _invoke(audio, tmp_path)
     assert sin.exit_code == 0
@@ -313,7 +313,11 @@ def _fake_diarization(monkeypatch, tmp_path, turns, clusters, enrolled):
     monkeypatch.setattr(
         diarization, "diarize", lambda wav, num_speakers=None: (turns, clusters)
     )
-    monkeypatch.setattr(registry, "get_embeddings", lambda: enrolled)
+    monkeypatch.setattr(
+        registry, "get_embeddings",
+        # El espacio vectorial importa: si el CLI pide el de otro modelo, no hay voces.
+        lambda model: enrolled if model == diarization.EMBEDDING_MODEL else {},
+    )
 
 
 def test_reporte_diarizacion_sin_voces_registradas(tmp_path, monkeypatch):
