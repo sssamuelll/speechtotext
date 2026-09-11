@@ -117,7 +117,8 @@ leen ese nombre con el mismo fingerprint; nunca promueven en startup/hot-reload.
 El reporte contiene entorno redacted, un `job_ref` HMAC estable de los inputs
 canonicos y referencias HMAC de
 dataset/split/pipeline/request/modelo, quality thresholds, WER/CER con upper-95
-por bloques de dia/sesion/condicion, conteo de falsos transcripts sobre silencio
+por bootstrap agrupado por sesion (el bloque por dia aplica a latencia, no a
+WER), conteo de falsos transcripts sobre silencio
 sin guardar su texto, latencia interna del motor p50/p95 y upper-95 marcada
 `provisional`, memoria RSS/peak y, cuando se proporciona `--calibrator`, Brier,
 ECE y curva riesgo-cobertura. No contiene audio, transcripts, embeddings,

@@ -1,3 +1,3 @@
-"""Speech-to-text toolkit: CLI offline (faster-whisper) + servicio HTTP de pronunciación (Azure)."""
+"""Voz a texto 100% local: transcripción, calidad de audio, hablantes y evaluación."""
 
-__version__ = "0.3.0"
+__version__ = "0.5.0"
