@@ -61,7 +61,7 @@ def test_get_pipeline_baja_los_batch_sizes(monkeypatch):
 
     pipe = diarization._get_pipeline()
 
-    assert creado == [(diarization._PIPELINE_NAME, os.environ.get("HF_TOKEN"))]
+    assert creado == [(diarization.EMBEDDING_MODEL, os.environ.get("HF_TOKEN"))]
     assert pipe.embedding_batch_size == diarization._BATCH == 8
     assert pipe.segmentation_batch_size == diarization._BATCH == 8
     assert diarization._get_pipeline() is pipe  # sigue siendo singleton

@@ -554,7 +554,7 @@ def _run_diarization(audio, segments, speakers, identify, threshold):
     name_map: dict[str, str] = {}
     enrolled: dict = {}
     if identify:
-        enrolled = registry.get_embeddings()
+        enrolled = registry.get_embeddings(diarization.EMBEDDING_MODEL)
         if enrolled:
             name_map = assign_names(clusters, enrolled, threshold)
 
@@ -714,7 +714,7 @@ def enroll(
     finally:
         wav.unlink(missing_ok=True)
 
-    registry.enroll(name, vec, seconds=seconds, model="pyannote/speaker-diarization-community-1")
+    registry.enroll(name, vec, seconds=seconds, model=diarization.EMBEDDING_MODEL)
     console.print(f"  [green]OK[/green] voz de {name} registrada.")
 
 
@@ -727,9 +727,9 @@ def voices() -> None:
     if not vs:
         console.print("Sin voces registradas. Usa: speechtotext enroll <nombre> <muestra.wav>")
         return
-    table = Table("Nombre", "Segundos", "Registrada")
+    table = Table("Nombre", "Segundos", "Registrada", "Modelo")
     for v in vs:
-        table.add_row(v["name"], str(v.get("seconds", "")), v.get("enrolled_at", ""))
+        table.add_row(v["name"], str(v.get("seconds", "")), v.get("enrolled_at", ""), v["model"])
     console.print(table)
 
 

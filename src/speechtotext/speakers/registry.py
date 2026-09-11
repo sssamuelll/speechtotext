@@ -26,8 +26,26 @@ def _manifest_path() -> Path:
 
 
 def _load_manifest() -> dict:
+    """Carga el manifiesto anidado por modelo: {modelo: {nombre: meta}}.
+
+    Reagrupa transparentemente el formato plano de v0.4 ({nombre: meta}) usando el
+    campo "model" de cada entrada. El discriminador es isinstance(valor, str) sobre
+    "file": en el formato plano entrada["file"] es un str; en el anidado,
+    manifiesto[modelo]["file"] sería el dict de meta de una persona llamada "file"."""
     p = _manifest_path()
-    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    if not p.exists():
+        return {}
+    raw = json.loads(p.read_text(encoding="utf-8"))
+    if not raw:
+        return {}
+    primera = next(iter(raw.values()))
+    if isinstance(primera.get("file"), str):
+        # formato plano v0.4: cada entrada trae su propio modelo
+        nested: dict = {}
+        for name, meta in raw.items():
+            nested.setdefault(meta["model"], {})[name] = meta
+        return nested
+    return raw
 
 
 def _save_manifest(m: dict) -> None:
@@ -41,37 +59,52 @@ def _slug(name: str) -> str:
 
 
 def enroll(name: str, embedding: np.ndarray, *, seconds: float, model: str) -> None:
-    fname = f"{_slug(name)}.npy"
-    np.save(_voices_dir() / fname, np.asarray(embedding, dtype=np.float32))
+    # Ruta relativa a voices/, con "/" fijo (no os.sep) para que el manifiesto sea
+    # portable entre plataformas.
+    rel = f"{_slug(model)}/{_slug(name)}.npy"
+    dest = _voices_dir() / rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    np.save(dest, np.asarray(embedding, dtype=np.float32))
     m = _load_manifest()
-    m[name] = {
-        "file": fname,
+    m.setdefault(model, {})[name] = {
+        "file": rel,
         "seconds": round(float(seconds), 1),
-        "model": model,
         "enrolled_at": datetime.now().isoformat(timespec="seconds"),
     }
     _save_manifest(m)
 
 
-def list_voices() -> list[dict]:
-    return [{"name": k, **v} for k, v in sorted(_load_manifest().items())]
+def list_voices(model: str | None = None) -> list[dict]:
+    m = _load_manifest()
+    modelos = [model] if model is not None else list(m)
+    rows = [
+        {"name": name, "model": mod, **meta}
+        for mod in modelos
+        for name, meta in m.get(mod, {}).items()
+    ]
+    return sorted(rows, key=lambda r: r["name"])
 
 
-def get_embeddings() -> dict[str, np.ndarray]:
+def get_embeddings(model: str) -> dict[str, np.ndarray]:
     d = _voices_dir()
     out: dict[str, np.ndarray] = {}
-    for name, meta in _load_manifest().items():
+    for name, meta in _load_manifest().get(model, {}).items():
         path = d / meta["file"]
         if path.exists():
             out[name] = np.load(path)
     return out
 
 
-def remove(name: str) -> bool:
+def remove(name: str, *, model: str | None = None) -> bool:
     m = _load_manifest()
-    if name not in m:
-        return False
-    (_voices_dir() / m[name]["file"]).unlink(missing_ok=True)
-    del m[name]
-    _save_manifest(m)
-    return True
+    modelos = [model] if model is not None else list(m)
+    borrado = False
+    for mod in modelos:
+        voces = m.get(mod, {})
+        if name in voces:
+            (_voices_dir() / voces[name]["file"]).unlink(missing_ok=True)
+            del voces[name]
+            borrado = True
+    if borrado:
+        _save_manifest(m)
+    return borrado
