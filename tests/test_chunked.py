@@ -467,3 +467,67 @@ def test_run_chunked_clampa_jobs_bajo_whispercpp(tmp_path, monkeypatch):
         log=lambda m: None, engine=chunked.engines.ENGINE_WHISPERCPP,
     )
     assert max_workers_visto == [1]  # jobs=4 pedido, 1 efectivo: serializacion estructural
+
+
+# --- relleno de la última ventana (medido 2026-09-11) ---------------------------------
+# Whisper rellena la última ventana del trozo a 30 s con ceros y puede emitir un segmento
+# sobre el relleno ("Gracias por ver el video." en 598.6-628.6 sobre un trozo que acababa
+# en 598.7). Ese segmento cae ENCIMA del trozo siguiente.
+
+def test_clip_to_end_descarta_relleno_y_recorta_sobresalientes():
+    segs = [
+        TimedSegment(601.0, 602.0, " hola"),
+        # sobresale 0.4 s: se recorta, y la palabra que cruza el borde también
+        TimedSegment(1190.0, 1200.4, " cierra la frase",
+                     [TimedWord(1190.0, 1195.0, " cierra"), TimedWord(1195.0, 1200.4, " la frase")]),
+        # 0.1 s de audio y 29.9 s de relleno: alucinación, fuera
+        TimedSegment(1199.9, 1229.9, " Gracias por ver el video.",
+                     [TimedWord(1199.9, 1229.9, " Gracias")]),
+    ]
+    out = chunked.clip_to_end(segs, 1200.0)
+    assert [(s.start, s.end, s.text) for s in out] == [
+        (601.0, 602.0, " hola"), (1190.0, 1200.0, " cierra la frase"),
+    ]
+    assert [(w.start, w.end) for w in out[1].words] == [(1190.0, 1195.0), (1195.0, 1200.0)]
+
+
+def test_clip_to_end_palabras_enteras_en_el_relleno_dejan_words_none():
+    seg = TimedSegment(1195.0, 1201.0, " x", [TimedWord(1200.5, 1201.0, " x")])
+    out = chunked.clip_to_end([seg], 1200.0)
+    assert out[0].end == 1200.0 and out[0].words is None
+
+
+def test_transcribe_chunk_recorta_al_largo_real_del_trozo(tmp_path, monkeypatch):
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    audio = tmp_path / "a.mp3"
+    audio.write_bytes(b"12345")
+    monkeypatch.setattr(chunked.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stderr=b""))
+    local = [
+        SimpleNamespace(start=1.0, end=2.0, text=" hola", words=None),
+        SimpleNamespace(start=599.9, end=629.9, text=" Gracias por ver el video.", words=None),
+    ]
+    model = lambda: SimpleNamespace(transcribe=lambda wav, **k: (iter(local), SimpleNamespace(language="es")))
+
+    segs, _, _ = chunked.transcribe_chunk(audio, 600.0, 1200.0, _opts(), model, "large-v3")
+    assert [(s.start, s.end) for s in segs] == [(601.0, 602.0)]
+    # el checkpoint tampoco lo guarda
+    p = chunked.chunk_path(audio, _opts(), "large-v3", 600.0, 1200.0)
+    assert len(json.loads(p.read_text())["segments"]) == 1
+
+
+def test_transcribe_chunk_recorta_tambien_un_checkpoint_viejo(tmp_path, monkeypatch):
+    """Un checkpoint escrito antes del recorte puede traer el fantasma; se limpia al leer,
+    sin invalidar la caché de nadie."""
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    audio = tmp_path / "a.mp3"
+    audio.write_bytes(b"12345")
+    p = chunked.chunk_path(audio, _opts(), "large-v3", 600.0, 1200.0)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"language": "es", "segments": [
+        chunked.seg_to_dict(TimedSegment(601.0, 602.0, " hola")),
+        chunked.seg_to_dict(TimedSegment(1199.9, 1229.9, " Gracias por ver el video.")),
+    ]}), encoding="utf-8")
+
+    segs, cached, _ = chunked.transcribe_chunk(audio, 600.0, 1200.0, _opts(), lambda: None, "large-v3")
+    assert cached is True
+    assert [(s.start, s.end) for s in segs] == [(601.0, 602.0)]
