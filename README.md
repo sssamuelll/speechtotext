@@ -93,27 +93,27 @@ speechtotext transcribe entrevista.m4a -o transcripciones/ --device cuda
 | `--identify / --no-identify` | `--identify` | Poner nombre a las voces registradas con `enroll`. |
 | `--threshold` | `0.5` | Umbral de coincidencia de voz (coseno, 0–1). |
 
-### Guía rápida de modelos
+### Qué modelo
 
-| Modelo | RAM/VRAM | Velocidad CPU | Calidad |
-|---|---|---|---|
-| `tiny` | ~1 GB | muy rápida | baja, solo pruebas |
-| `small` | ~2 GB | buena | sweet spot CPU |
-| `medium` | ~5 GB | lenta en CPU | muy buena |
-| `large-v3` | ~10 GB | muy lenta en CPU | máxima |
+`large-v3` en int8 corre en CPU a ~1,3× tiempo real con unos 3,5 GB de RAM y fue
+el único que no perdió nada en [lo medido](#lo-medido); `small` va cinco veces
+más rápido y cambia lo que se dijo. `tiny` y `base` son para probar el
+pipeline, no para leer el resultado. En tu máquina, [`bench`](#elegir-configuración-bench).
 
 ### Hotwords
 
 ```bash
-speechtotext transcribe reunion.m4a --hotwords "Aurelius,pyannote,diarización"
+speechtotext transcribe clase.mp3 --hotwords "pyannote,diarización"
 speechtotext transcribe clase.mp3 --hotwords-file terminos.txt
 ```
 
 Sesgan el decodificador hacia términos que el modelo no conoce bien: nombres
-propios, jerga, siglas. El efecto se diluye con la cantidad — a partir de 10
-términos o 300 caracteres el CLI avisa, y `faster-whisper` trunca en silencio
-alrededor de los 223 tokens. Una lista corta y específica funciona mejor que un
-glosario entero.
+propios, jerga, siglas. **Medidos, hicieron daño**: con listas de 4–5 términos,
+tres apagones de 28–30 s en dos grabaciones distintas —una ventana entera
+sustituida por una palabra— y ninguna mejora en el término que se quería
+arreglar (ver [lo medido](#lo-medido)). Si los usas, compara contra una corrida
+sin ellos. El CLI avisa a partir de 10 términos o 300 caracteres, y
+`faster-whisper` trunca en silencio alrededor de los 223 tokens.
 
 ### Audio largo
 
@@ -130,6 +130,69 @@ esos invalida el caché en vez de reusar un resultado que no corresponde.
 speechtotext transcribe podcast_3h.mp3 --jobs 6      # más paralelismo
 speechtotext transcribe entrevista.wav --no-chunk    # forzar un solo pase
 ```
+
+Trocear tiene un precio [medido](#lo-medido): en la costura no se pierde nada,
+pero cada trozo después del primero decodifica con las ventanas de 30 s corridas
+y deriva un 2–3 % respecto al pase único. Con VAD, para que el trozo no termine
+en silencio y Whisper no invente una despedida sobre el relleno.
+
+---
+
+## Lo medido
+
+Catorce minutos de una reunión real: dos voces, español de España y de
+Venezuela, un micrófono, jerga técnica. Nueve configuraciones sobre el mismo
+audio. La métrica no es WER: son **25 puntos concretos** que había que poder
+redactar sin volver a la grabación, cada uno con su ventana de tiempo y las
+palabras sin las cuales no se entiende.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/benchmark-dark.svg">
+  <img alt="Velocidad contra errores por mil palabras de seis configuraciones: los large-v3 abajo, los small arriba" src="docs/img/benchmark-light.svg" width="760">
+</picture>
+
+| Configuración | Puntos | Errores / 1000 pal. | Reloj |
+|---|---:|---:|---:|
+| faster-whisper `large-v3`, sin VAD, sin trocear | **25 / 25** | **1,6** | 683 s |
+| faster-whisper `large-v3` + VAD | 25 / 25 | 7,7 | 662 s |
+| whisper.cpp `large-v3` CUDA | **25 / 25** | 6,0 | **109 s** |
+| faster-whisper `large-v3` + hotwords | 24 / 25 | 3,8 | 667 s |
+| faster-whisper `large-v3` troceado, con o sin VAD | 24 / 25 | — | — |
+| faster-whisper `large-v3` troceado + VAD + hotwords | 23 / 25 | — | ≈480 s |
+| faster-whisper `small` | 22 / 25 | 29,1 | 135 s |
+| whisper.cpp `small` CUDA | 21 / 25 | 27,5 | 55 s |
+
+Los errores se cuentan sobre los 66 sitios en que las transcripciones discrepan
+y la respuesta es objetiva —un disparate que no es español, un término, un
+número, una omisión confirmada—; los otros 100 sitios en desacuerdo (*esta/esto*,
+muletillas, comas) quedan fuera a propósito. Las configuraciones troceadas se
+compararon por pares contra su gemela sin trocear, no en esa alineación. Reloj
+de un Ryzen 9 5900X con una GTX 980, corridas en serie, carga del modelo incluida.
+
+Lo que se aprendió:
+
+- **`small` cambia lo que se dijo.** Diecisiete veces más errores que `large-v3`,
+  y no son erratas: *"todo se desordena"* salió como *"entonces ordenas"*. Ahorra
+  nueve minutos y cuesta tres o cuatro de los 25 puntos.
+- **Los hotwords fallan en bloque.** Con 4–5 términos, tres apagones de 28–30 s
+  en dos grabaciones —una ventana entera sustituida por *"listo"*— y ninguna
+  mejora en el término que se quería arreglar. n = 3, sin contraejemplo.
+- **El VAD borra frases cortas sin avisar.** Cuatro omisiones confirmadas y cero
+  huecos declarados: lo que descarta antes de que el modelo lo vea no deja
+  agujero en la línea de tiempo.
+- **Trocear no pierde nada en la costura.** Cuesta un 2–3 % de deriva en cada
+  trozo después del primero, porque las ventanas de 30 s quedan corridas; ahí
+  cayó un punto de 25.
+- **whisper.cpp empata en puntos y pierde en jerga.** Seis veces más rápido en la
+  GTX 980 con 2 GB de VRAM, las mismas 25/25, y *Bézier* mal escrito las diez
+  veces — medido en un solo audio.
+
+Lo que no prueba: una grabación, un dominio, una máquina. La referencia la
+adjudicó quien hizo el benchmark, no un transcriptor humano, y las omisiones se
+confirmaron con otra configuración de Whisper — un error que todo Whisper
+comparta (*"clico la fecha"* por *flecha*, en las nueve) este método no lo ve.
+La grabación es privada y no se publica; el gráfico se regenera con
+`python scripts/benchmark_chart.py`.
 
 ---
 
