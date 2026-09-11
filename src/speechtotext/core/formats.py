@@ -142,6 +142,10 @@ def write_json(segments, info, path: Path, *, engine_info=None, speech_s=None, g
                 "end": round(s.end, 3),
                 "text": s.text.strip(),
                 **({"speaker": _speaker(s)} if speakers else {}),
+                **({"no_speech": s.no_speech} if getattr(s, "no_speech", None) is not None else {}),
+                **({"avg_logprob": s.avg_logprob} if getattr(s, "avg_logprob", None) is not None else {}),
+                **({"compression_ratio": s.compression_ratio}
+                   if getattr(s, "compression_ratio", None) is not None else {}),
                 **({"suspect": True} if is_suspect(s) else {}),
             }
             for i, s in enumerate(seg_list)

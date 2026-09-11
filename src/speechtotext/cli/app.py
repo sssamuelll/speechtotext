@@ -48,7 +48,7 @@ from speechtotext.core.formats import (
     write_vtt,
 )
 from speechtotext.core.postprocess import normalize_hours
-from speechtotext.core.segments import LabeledSegment
+from speechtotext.core.segments import LabeledSegment, native_signals
 
 # En Windows la consola suele ser cp1252 y rich escribe glifos Unicode (spinner
 # Braille, etc.) que revientan al codificar. Forzamos UTF-8 en los streams.
@@ -400,11 +400,16 @@ def transcribe_file(
     # de faster_whisper son inmutables y los writers solo leen start/end/text/speaker.
     # src_dur se propaga: reconstruir sin él apagaría la marca [?] justo en la ruta
     # diarizada que 5.2.3 arregla (is_suspect lo usa de denominador y de gate).
-    segments = [
-        LabeledSegment(s.start, s.end, normalize_hours(s.text), getattr(s, "speaker", None),
-                       src_dur=getattr(s, "src_dur", None))
-        for s in segments
-    ]
+    # native_signals lee los dos dialectos: esta ruta recibe a veces TimedSegment
+    # propio (no_speech) y a veces Segment crudo de faster-whisper (no_speech_prob).
+    uniformed = []
+    for s in segments:
+        no_speech, avg_logprob, compression_ratio = native_signals(s)
+        uniformed.append(LabeledSegment(
+            s.start, s.end, normalize_hours(s.text), getattr(s, "speaker", None),
+            src_dur=getattr(s, "src_dur", None), no_speech=no_speech,
+            avg_logprob=avg_logprob, compression_ratio=compression_ratio))
+    segments = uniformed
 
     # Identidad del motor en el JSON (G2): dos corridas del mismo audio con texto
     # distinto tienen que ser distinguibles también a máquina, no solo en consola.
