@@ -1,6 +1,7 @@
 """Segmento de transcripción con hablante opcional."""
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 
@@ -21,6 +22,16 @@ class LabeledSegment:
     compression_ratio: float | None = None
 
 
+def _finite(value: float | None) -> float | None:
+    """NaN/inf entran como None. Un no finito no es una medida degradada, es la ausencia
+    de medida: dejarlo pasar escribe los tokens NaN/Infinity en el JSON (que json.dumps
+    acepta y el RFC 8259 no, con lo que jq y JSON.parse revientan) y además apaga
+    is_suspect justo donde más hace falta, porque `NaN > 0.6` es False. La otra ruta del
+    repo ya lo rechaza en asr/types.py::_validate_native_signals; aquí se omite, que es
+    la respuesta de G5 y no obliga a nadie a manejar una excepción a mitad del pipe."""
+    return value if value is not None and math.isfinite(value) else None
+
+
 def native_signals(seg) -> tuple[float | None, float | None, float | None]:
     """Lee (no_speech, avg_logprob, compression_ratio) de un Segment, en sus dos
     dialectos: el crudo de faster-whisper (no_speech_prob) y el nuestro (no_speech).
@@ -28,4 +39,5 @@ def native_signals(seg) -> tuple[float | None, float | None, float | None]:
     no_speech = getattr(seg, "no_speech_prob", None)
     if no_speech is None:
         no_speech = getattr(seg, "no_speech", None)
-    return no_speech, getattr(seg, "avg_logprob", None), getattr(seg, "compression_ratio", None)
+    return (_finite(no_speech), _finite(getattr(seg, "avg_logprob", None)),
+            _finite(getattr(seg, "compression_ratio", None)))

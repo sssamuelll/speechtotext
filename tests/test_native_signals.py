@@ -194,3 +194,39 @@ def test_cli_transcribe_lleva_las_senales_al_json(tmp_path, monkeypatch):
     seg = payload["segments"][0]
     assert seg["no_speech"] == 0.75
     assert seg["suspect"] is True
+
+
+# --- valores patológicos: el motor puede emitir basura, el artefacto no ---
+
+
+def test_native_signals_descarta_no_finitos():
+    """NaN/inf no son medidas: entran como None (G5), no como número. Sin esto,
+    json.dumps escribe los tokens NaN/Infinity — JSON inválido por RFC 8259, que
+    Python relee pero jq y JSON.parse rechazan — y encima `NaN > 0.6` es False,
+    así que la señal más rota de todas sería la única que no se marca."""
+    seg = _raw(0.0, 2.0, no_speech_prob=float("nan"),
+               avg_logprob=float("-inf"), compression_ratio=float("inf"))
+    assert native_signals(seg) == (None, None, None)
+
+
+def test_write_json_no_emite_tokens_invalidos(tmp_path):
+    path = tmp_path / "out.json"
+    segs = shift_segments([_raw(0.0, 2.0, no_speech_prob=float("nan"))], 0.0)
+    write_json([LabeledSegment(s.start, s.end, s.text, no_speech=s.no_speech)
+                for s in segs], _info(), path)
+    crudo = path.read_text(encoding="utf-8")
+    assert "NaN" not in crudo and "Infinity" not in crudo
+    json.loads(crudo)  # relee: si hubiera tokens inválidos, el propio repo los toleraría
+
+
+def test_write_json_redondea_las_senales(tmp_path):
+    """float32 de faster-whisper llega como -0.30000001192092896; el resto del payload
+    (start/end/language_probability) ya se redondea, estas no eran la excepción."""
+    path = tmp_path / "out.json"
+    segs = [LabeledSegment(0.0, 2.0, "hola que tal", no_speech=0.1234567,
+                           avg_logprob=-0.30000001192092896, compression_ratio=1.23456789)]
+    write_json(segs, _info(), path)
+    seg = json.loads(path.read_text(encoding="utf-8"))["segments"][0]
+    assert seg["no_speech"] == 0.1235
+    assert seg["avg_logprob"] == -0.3
+    assert seg["compression_ratio"] == 1.2346
