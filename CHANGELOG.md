@@ -19,6 +19,10 @@ Lo marcado como **rompe** exige cambios en el código que consume la librería.
 
 ### Arreglado
 
+- Con `--chunk`, Whisper podía emitir un segmento sobre el relleno de ceros de la
+  última ventana de un trozo (una despedida de YouTube con 30 s de marca falsa) y
+  ese segmento caía encima del trozo siguiente. Ahora se recorta al final real del
+  trozo, también al leer checkpoints viejos que lo traigan.
 - `speechtotext.__version__` decía `0.3.0` desde hace dos tags, y el docstring del
   paquete seguía anunciando un servicio HTTP de pronunciación que se fue en la
   `0.4.0`.

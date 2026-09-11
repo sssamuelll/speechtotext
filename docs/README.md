@@ -31,11 +31,19 @@ Sus specs correspondientes están en [`superpowers/specs/`](superpowers/specs/).
 
 ### Lo que quedó abierto
 
-Dos preguntas del `plan-calidad-transcripcion-2.md` no se cerraron:
+Una pregunta del `plan-calidad-transcripcion-2.md` sigue sin cerrarse:
 
 - **Q6** — los trozos huérfanos en `~/.speechtotext/chunks` no se limpian nunca.
-- **Q8** — cuánta transcripción se pierde en las costuras entre trozos de
-  `plan_chunks`, sin medir.
+
+**Q8** (cuánta transcripción se pierde en las costuras de `plan_chunks`) se midió el
+2026-09-11 sobre 14 minutos de reunión real en español: **cero palabras en la
+costura** — el corte cae en un silencio y las frases de los dos lados llegan
+enteras. El coste del troceado está en otra parte: cada trozo después del primero
+decodifica con las ventanas de 30 s corridas y deriva un 2–3 % respecto al pase
+único. Y sin VAD, el trozo termina en silencio y Whisper alucina sobre el relleno
+de la última ventana — una despedida de YouTube con 30 s de marca falsa que caía
+encima del trozo siguiente; `clip_to_end` en `core/chunked.py` la recorta desde
+entonces.
 
 ## Ajeno a este repo
 

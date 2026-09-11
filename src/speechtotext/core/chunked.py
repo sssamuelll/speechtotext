@@ -61,6 +61,27 @@ def shift_segments(segments, offset: float) -> list[TimedSegment]:
     return out
 
 
+def clip_to_end(segs: list[TimedSegment], end: float) -> list[TimedSegment]:
+    """Whisper rellena la última ventana del trozo a 30 s con ceros y puede emitir un segmento
+    sobre el relleno (medido 2026-09-11: "Gracias por ver el video." en 598.6-628.6 sobre un
+    trozo que acababa en 598.7) — y ese segmento cae ENCIMA del trozo siguiente. Un segmento
+    con más relleno que audio se descarta; uno que apenas sobresale se recorta a `end`, y sus
+    palabras igual. Va en tiempo global y también sobre lo que sale de un checkpoint: los
+    escritos antes de este recorte traen el fantasma, y limpiarlos al leer no invalida la
+    caché de nadie."""
+    out: list[TimedSegment] = []
+    for s in segs:
+        if s.end - end > end - s.start:
+            continue
+        s.end = min(s.end, end)
+        if s.words:
+            s.words = [w for w in s.words if w.start < end] or None
+            for w in s.words or ():
+                w.end = min(w.end, end)
+        out.append(s)
+    return out
+
+
 _SIL_START = re.compile(r"silence_start:\s*([0-9.]+)")
 _SIL_END = re.compile(r"silence_end:\s*([0-9.]+)")
 
@@ -156,7 +177,7 @@ def transcribe_chunk(audio, start, end, opts, get_model, model_name,
     if path.exists():
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            return [seg_from_dict(d) for d in data["segments"]], True, data.get("language")
+            return clip_to_end([seg_from_dict(d) for d in data["segments"]], end), True, data.get("language")
         except (json.JSONDecodeError, KeyError):
             pass  # checkpoint corrupto -> recomputar
 
@@ -170,7 +191,7 @@ def transcribe_chunk(audio, start, end, opts, get_model, model_name,
         ]
         subprocess.run(cmd, check=True, capture_output=True)
         segments_iter, info = get_model().transcribe(tmp, **opts)
-        segs = shift_segments(list(segments_iter), start)
+        segs = clip_to_end(shift_segments(list(segments_iter), start), end)
         lang = getattr(info, "language", None)
     finally:
         try:
