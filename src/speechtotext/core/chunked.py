@@ -21,6 +21,7 @@ from faster_whisper import WhisperModel
 # No es perezoso porque engines.py ya importa faster_whisper perezosamente: es barato.
 from speechtotext.core import engines
 from speechtotext.core.finder import _home
+from speechtotext.core.segments import native_signals
 
 
 @dataclass
@@ -36,6 +37,10 @@ class TimedSegment:
     end: float
     text: str
     words: list[TimedWord] | None = None
+    # Señales nativas de faster-whisper (Fase 2, G5), al final, mismo patrón que words.
+    no_speech: float | None = None
+    avg_logprob: float | None = None
+    compression_ratio: float | None = None
 
 
 def shift_segments(segments, offset: float) -> list[TimedSegment]:
@@ -49,7 +54,10 @@ def shift_segments(segments, offset: float) -> list[TimedSegment]:
             if words
             else None
         )
-        out.append(TimedSegment(s.start + offset, s.end + offset, s.text, tw))
+        no_speech, avg_logprob, compression_ratio = native_signals(s)
+        out.append(TimedSegment(s.start + offset, s.end + offset, s.text, tw,
+                                no_speech=no_speech, avg_logprob=avg_logprob,
+                                compression_ratio=compression_ratio))
     return out
 
 
@@ -120,13 +128,20 @@ def seg_to_dict(seg: TimedSegment) -> dict:
     d = {"start": seg.start, "end": seg.end, "text": seg.text}
     if seg.words is not None:
         d["words"] = [{"start": w.start, "end": w.end, "word": w.word} for w in seg.words]
+    if seg.no_speech is not None:
+        d["no_speech"] = seg.no_speech
+    if seg.avg_logprob is not None:
+        d["avg_logprob"] = seg.avg_logprob
+    if seg.compression_ratio is not None:
+        d["compression_ratio"] = seg.compression_ratio
     return d
 
 
 def seg_from_dict(d: dict) -> TimedSegment:
     words = d.get("words")
     tw = [TimedWord(w["start"], w["end"], w["word"]) for w in words] if words is not None else None
-    return TimedSegment(d["start"], d["end"], d["text"], tw)
+    return TimedSegment(d["start"], d["end"], d["text"], tw, no_speech=d.get("no_speech"),
+                        avg_logprob=d.get("avg_logprob"), compression_ratio=d.get("compression_ratio"))
 
 
 def transcribe_chunk(audio, start, end, opts, get_model, model_name,

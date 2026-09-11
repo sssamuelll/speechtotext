@@ -1,7 +1,7 @@
 """Diarización batch: asignación por solape (pura) + pyannote (perezoso)."""
 from __future__ import annotations
 
-from speechtotext.core.segments import LabeledSegment
+from speechtotext.core.segments import LabeledSegment, native_signals
 
 # El checkpoint que se carga y, por lo mismo, el espacio vectorial de los embeddings que
 # produce: el registro de voces los archiva y filtra por esta clave, no por dimensión.
@@ -38,10 +38,12 @@ def assign_segments(segments, turns: list[tuple[float, float, str]]) -> list[Lab
     saldría como 'Hablante ?' de una sola palabra en medio de un monólogo."""
     out: list[LabeledSegment] = []
     for s in segments:
+        no_speech, avg_logprob, compression_ratio = native_signals(s)
         words = getattr(s, "words", None)
         if not words:
             out.append(LabeledSegment(s.start, s.end, s.text, _best_speaker(s.start, s.end, turns),
-                                      src_dur=s.end - s.start))
+                                      src_dur=s.end - s.start, no_speech=no_speech,
+                                      avg_logprob=avg_logprob, compression_ratio=compression_ratio))
             continue
         run_spk: str | None = None
         run_words: list[str] = []
@@ -49,7 +51,8 @@ def assign_segments(segments, turns: list[tuple[float, float, str]]) -> list[Lab
         # Los N runs de un mismo segmento heredan el mismo src_dur (la extensión del
         # segmento que el ASR emitió): es la aproximación correcta —vienen de la misma
         # ventana de decodificación— y sin ella el gate de is_suspect se apaga bajo
-        # --diarize, porque cada run se recomprime a la extensión de sus palabras.
+        # --diarize, porque cada run se recomprime a la extensión de sus palabras. Las
+        # señales nativas viajan igual: mismo origen, misma ventana.
         src_dur = s.end - s.start
         for w in words:
             spk = _best_speaker(w.start, w.end, turns)
@@ -61,13 +64,15 @@ def assign_segments(segments, turns: list[tuple[float, float, str]]) -> list[Lab
                 run_spk = spk  # el run venía sin hablante -> adopta el primero real
             else:
                 out.append(LabeledSegment(run_start, run_end, "".join(run_words), run_spk,
-                                          src_dur=src_dur))
+                                          src_dur=src_dur, no_speech=no_speech,
+                                          avg_logprob=avg_logprob, compression_ratio=compression_ratio))
                 run_words, run_start, run_spk = [], w.start, spk
             run_words.append(w.word)
             run_end = w.end
         if run_words:
             out.append(LabeledSegment(run_start, run_end, "".join(run_words), run_spk,
-                                      src_dur=src_dur))
+                                      src_dur=src_dur, no_speech=no_speech,
+                                      avg_logprob=avg_logprob, compression_ratio=compression_ratio))
     return out
 
 
@@ -88,7 +93,9 @@ def apply_names(
             spk: str | None = None
         else:
             spk = name_map.get(s.speaker) or humanize_speaker(s.speaker)
-        out.append(LabeledSegment(s.start, s.end, s.text, spk, src_dur=s.src_dur))
+        out.append(LabeledSegment(s.start, s.end, s.text, spk, src_dur=s.src_dur,
+                                  no_speech=s.no_speech, avg_logprob=s.avg_logprob,
+                                  compression_ratio=s.compression_ratio))
     return out
 
 

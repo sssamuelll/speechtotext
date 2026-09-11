@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from speechtotext.core.segments import native_signals
+
 VALID_FORMATS: frozenset[str] = frozenset({"txt", "srt", "vtt", "json"})
 
 
@@ -40,6 +42,14 @@ def is_suspect(seg) -> bool:
     if ns is not None and ns > 0.6:          # se enciende sola cuando llegue la Fase 2
         return True
     return dur >= 10.0 and len(seg.text.strip()) / dur < 1.0
+
+
+def _signal_keys(seg) -> dict:
+    """Las señales nativas presentes, listas para el payload. Ausente = clave omitida,
+    mismo patrón que speaker y language_probability: callar dice "no lo sé" sin fabricar."""
+    nombres = ("no_speech", "avg_logprob", "compression_ratio")
+    valores = native_signals(seg)
+    return {n: round(v, 4) for n, v in zip(nombres, valores) if v is not None}
 
 
 def _marked(seg) -> str:
@@ -142,6 +152,9 @@ def write_json(segments, info, path: Path, *, engine_info=None, speech_s=None, g
                 "end": round(s.end, 3),
                 "text": s.text.strip(),
                 **({"speaker": _speaker(s)} if speakers else {}),
+                # Redondeadas como start/end/language_probability: los float32 del motor
+                # llegan como -0.30000001192092896 y ese ruido de precisión no es dato.
+                **_signal_keys(s),
                 **({"suspect": True} if is_suspect(s) else {}),
             }
             for i, s in enumerate(seg_list)
