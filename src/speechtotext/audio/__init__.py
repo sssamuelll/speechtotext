@@ -1,3 +1,4 @@
+from speechtotext.audio.evidence import VoiceEvidence, compute_voice_evidence
 from speechtotext.audio.fingerprint import PipelineProvenance, PipelineStep
 from speechtotext.audio.gate import (
     PreInferenceDecision,
@@ -28,8 +29,10 @@ __all__ = [
     "PipelineProvenance",
     "PipelineStep",
     "SpeechRegion",
+    "VoiceEvidence",
     "apply_fixed_gain",
     "compute_audio_quality",
+    "compute_voice_evidence",
     "decode_audio",
 ]
 
