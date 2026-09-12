@@ -102,9 +102,8 @@ def apply_names(
 # --- Parte con modelos (pyannote 4.x). Imports perezosos a propósito: torch/pyannote
 # pesan y este módulo debe poder importarse en el venv base (sin el extra [diarize])
 # para usar las funciones puras de arriba. El pipeline community-1 devuelve, en una
-# sola pasada, la diarización Y un embedding por hablante. Cargamos el audio en memoria
-# con `wave` (nuestro audio ya es wav 16 kHz mono) porque torchcodec no decodifica
-# archivos de forma fiable en Windows con este stack. ---
+# sola pasada, la diarización Y un embedding por hablante. La transcripción ya trae las
+# muestras en memoria; `enroll` las lee de un wav con `wave`. ---
 
 _PIPELINE = None
 # El 32 con el que corre por defecto no es el default de pyannote (que es 1): sale del
@@ -116,12 +115,12 @@ _PIPELINE = None
 _BATCH = 8
 
 
-def _load_waveform(wav_path) -> dict:
-    """Lee un wav PCM16 a un dict {waveform, sample_rate} para pyannote (evita torchcodec)."""
+def read_wav(wav_path) -> tuple["np.ndarray", int]:
+    """Lee un wav PCM16 a float32 mono en [-1, 1] con su tasa nativa. Es la entrada de
+    `enroll` (una muestra de voz en disco); la transcripción ya trae las muestras."""
     import wave
 
     import numpy as np
-    import torch
 
     with wave.open(str(wav_path)) as w:
         sr = w.getframerate()
@@ -130,7 +129,16 @@ def _load_waveform(wav_path) -> dict:
     data = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
     if ch > 1:
         data = data.reshape(-1, ch).mean(axis=1)
-    return {"waveform": torch.from_numpy(data).unsqueeze(0), "sample_rate": sr}
+    return data, sr
+
+
+def _waveform(samples, sample_rate: int) -> dict:
+    """{waveform, sample_rate} para pyannote, en memoria (evita torchcodec)."""
+    import numpy as np
+    import torch
+
+    data = np.ascontiguousarray(samples, dtype=np.float32)
+    return {"waveform": torch.from_numpy(data).unsqueeze(0), "sample_rate": sample_rate}
 
 
 def _get_pipeline():
@@ -152,8 +160,8 @@ def _get_pipeline():
     return _PIPELINE
 
 
-def diarize(wav_path, num_speakers: int | None = None):
-    """Diariza un wav 16 kHz mono. Devuelve (turns, embeddings).
+def diarize(samples, sample_rate: int, num_speakers: int | None = None):
+    """Diariza muestras float32 mono. Devuelve (turns, embeddings).
 
     turns: list[(start, end, speaker_id)]. embeddings: dict[speaker_id, np.ndarray]
     (un vector por hablante, en el mismo espacio que embed_voice → comparables).
@@ -163,7 +171,7 @@ def diarize(wav_path, num_speakers: int | None = None):
     import numpy as np
 
     pipeline = _get_pipeline()
-    wf = _load_waveform(wav_path)
+    wf = _waveform(samples, sample_rate)
     kwargs = {"num_speakers": num_speakers} if num_speakers else {}
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -182,7 +190,8 @@ def diarize(wav_path, num_speakers: int | None = None):
 
 def embed_voice(wav_path):
     """Embedding de una sola voz (para enroll): fuerza 1 hablante y devuelve su vector."""
-    _, embeddings = diarize(wav_path, num_speakers=1)
+    samples, sample_rate = read_wav(wav_path)
+    _, embeddings = diarize(samples, sample_rate, num_speakers=1)
     if not embeddings:
         raise ValueError(
             "no se pudo extraer un embedding de voz (audio muy corto o sin voz)"
