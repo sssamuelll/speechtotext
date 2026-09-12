@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import sys
 import tempfile
 import urllib.request
 import zipfile
@@ -44,6 +45,19 @@ _MODEL_ALIAS = {"large-v3": "large-v3-q5_0", "small": "small"}
 
 def install_root() -> Path:
     return Path(os.environ["LOCALAPPDATA"]) / "speechtotext" / "whisper-cpp" / ENGINE_PIN["version"]
+
+
+def installed_exe() -> Path | None:
+    """Binario ya presente, sin descargar ni verificar: el pinneado (win32) o `whisper-cli`
+    en el PATH (macOS/Linux: brew o compilado). None si no hay ninguno."""
+    if sys.platform == "win32":
+        try:
+            exe = install_root() / ENGINE_PIN["exe_relpath"]
+        except KeyError:            # LOCALAPPDATA ausente: no hay pinneado posible
+            return None
+        return exe if exe.exists() else None
+    found = shutil.which("whisper-cli")
+    return Path(found) if found else None
 
 
 def _sha256_file(path: Path) -> str:

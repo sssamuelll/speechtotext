@@ -22,12 +22,10 @@ from speechtotext.core.chunked import (
 )
 from speechtotext.core.formats import find_gaps
 from speechtotext.core.postprocess import normalize_hours
+from speechtotext.core.probe import ENGINE_FASTER, ENGINE_WHISPERCPP, ENGINES  # noqa: F401 — reexport
 from speechtotext.core.segments import LabeledSegment
 
 SAMPLE_RATE = 16000
-ENGINE_FASTER = "faster-whisper"
-ENGINE_WHISPERCPP = "whispercpp"
-ENGINES = (ENGINE_FASTER, ENGINE_WHISPERCPP)
 
 Stage = Literal["decode", "load", "transcribe", "diarize"]
 
