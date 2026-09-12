@@ -1,7 +1,7 @@
 """Evidencia de voz por DSP: medidas deterministas de senal, no la opinion de un
 modelo. La pregunta no es «que dijo» sino «habia una fuente de voz humana aqui».
 
-Medido en aurelius (2026-09-11) sobre audio real del telefono: el `no_speech`
+Medido (2026-09-11) sobre audio real del telefono: el `no_speech`
 de whisper salio con el signo al reves (cortaba habla y dejaba pasar inventos);
 la energia en banda de voz separo conversacion de cuarto vacio con 0 % de
 solape intercuartilico.

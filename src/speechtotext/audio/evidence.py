@@ -5,7 +5,7 @@ con nombre propio y literatura detras. Mismo audio, mismos numeros, siempre.
 Devuelve MEDIDAS, no veredictos — el umbral y la decision son de quien conoce
 el contexto (el que llama), no de esta libreria.
 
-Por que existe (aurelius, 2026-09-11, audio real del telefono): el `no_speech`
+Por que existe (medido 2026-09-11 sobre audio real de telefono): el `no_speech`
 de whisper salio con el signo al reves — cortaba habla real y dejaba pasar
 frases inventadas sobre silencio. La energia en banda de voz separo
 conversacion de cuarto vacio con 0 % de solape por ventana.
