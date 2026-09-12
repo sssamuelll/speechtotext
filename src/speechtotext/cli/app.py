@@ -35,10 +35,10 @@ from types import SimpleNamespace
 
 from speechtotext.asr.base import AsrError
 from speechtotext.audio.io import AudioDecodeError
+from speechtotext.core import probe as core_probe
 from speechtotext.core.transcribe import (
     ENGINE_FASTER,
     ENGINE_WHISPERCPP,
-    resolve_route,
     transcribe as core_transcribe,
 )
 from speechtotext.core.formats import (
@@ -130,7 +130,7 @@ def transcribe_file(
     hotwords: Optional[str] = None,
     chunk: Optional[bool] = None,
     jobs: int = 4,
-    engine: str = ENGINE_FASTER,
+    engine: str = "auto",
 ) -> None:
     """Transcribe un archivo (opcionalmente con diarización) y escribe los formatos pedidos.
     Todo el trabajo lo hace core.transcribe; aquí se parsean flags, se pinta y se escribe."""
@@ -145,11 +145,25 @@ def transcribe_file(
     hotwords = (hotwords or "").strip() or None
 
     try:
-        route = resolve_route(engine, device, compute_type, model)
+        maquina = core_probe.machine()
+        route = core_probe.choose_route(maquina, model, engine=engine, device=device,
+                                        compute_type=compute_type)
     except ValueError as e:
         raise typer.BadParameter(str(e))
+    except AsrError as e:
+        # insufficient_resources: el sondeo no cambia el modelo por su cuenta; lo dice y para.
+        console.print(str(e), style="red", markup=False)
+        raise typer.Exit(1)
     if route.reason:
         console.print(f"[yellow]{route.reason}[/yellow]")
+    if route.engine == ENGINE_WHISPERCPP and maquina.whispercpp is None and maquina.platform == "win32":
+        from speechtotext.core.enginepin import ENGINE_PIN
+
+        # 650 MB por urllib sin barra: que al menos se anuncie (spec §5.3, "nunca en silencio").
+        console.print(
+            f"[yellow]whisper.cpp {ENGINE_PIN['version']} no está instalado: se descarga ahora "
+            f"(~{ENGINE_PIN['zip_bytes'] / 1024 ** 2:.0f} MB, una sola vez)[/yellow]"
+        )
     if route.engine == ENGINE_WHISPERCPP and jobs != 1:
         # 4 subprocesos × 1.28 GB contra 4096 MiB: WDDM no revienta, pagina 25x en silencio
         # (medido). El 19.3x de un solo proceso hace innecesario más.
@@ -173,7 +187,7 @@ def transcribe_file(
     terms = tuple(t.strip() for t in hotwords.split(",") if t.strip()) if hotwords else ()
 
     console.print(
-        f"[bold]Modelo[/bold] [cyan]{model}[/cyan] · "
+        f"[bold]Modelo[/bold] [cyan]{model}[/cyan] · [bold]motor[/bold] [cyan]{route.engine}[/cyan] · "
         f"[bold]device[/bold] [cyan]{route.device}[/cyan] · "
         f"[bold]compute[/bold] [cyan]{route.compute_type}[/cyan]"
     )
@@ -195,6 +209,15 @@ def transcribe_file(
 
         def on_progress(p):
             nonlocal avisado
+            if p.stage == "decode" and p.total:
+                dur_min = p.total / 60
+                if route.eta_factor:
+                    eta_min = max(1, round(dur_min * route.eta_factor))
+                    fuente = "estimado" if route.estimated else "medido con bench"
+                    console.print(f"Duración {dur_min:.1f} min · ETA ~{eta_min} min ({fuente})")
+                else:
+                    console.print(f"Duración {dur_min:.1f} min · ETA sin medir para esta ruta")
+                return
             if p.stage == "transcribe" and p.total and p.total > 1:
                 if not avisado:
                     avisado = True
@@ -255,6 +278,8 @@ def transcribe_file(
         idioma = f"Idioma detectado: [bold]{t.language}[/bold]"
         if t.language_probability is not None:
             idioma += f" (prob={t.language_probability:.2f})"
+            if t.language_probability < 0.5:
+                idioma += " — dudoso: fíjalo con -l <código>"
     console.print(
         f"{idioma} · duración {t.duration:.1f}s · "
         f"{len(t.segments)} segmentos · {voz} · motor {route.engine}"
@@ -314,29 +339,36 @@ def transcribe(
         None, "--output", "-o", help="Carpeta o ruta base de salida (por defecto: junto al audio)."
     ),
     language: str = typer.Option(
-        "es",
+        "auto",
         "--language",
         "-l",
-        help="Código ISO-639-1 (es, en, fr, ...). Usa 'auto' para detección automática.",
+        help="'auto' (default) detecta con ≥ 30 s de audio; si la probabilidad sale baja, "
+        "fíjalo con un código ISO-639-1 (es, en, fr, ...).",
     ),
     model: str = typer.Option(
-        "small",
+        "large-v3",
         "--model",
         "-m",
-        help="tiny | base | small | medium | large-v3 | distil-large-v3. "
-        "large-v3 = máxima calidad (puntuación y nombres propios; ~1.1x tiempo real en CPU).",
+        help="tiny | base | small | medium | large-v3 | distil-large-v3. large-v3 = el único "
+        "que no perdió nada en lo medido; small = borrador rápido (5x más veloz, cambia lo "
+        "que se dijo).",
     ),
     formats: str = typer.Option(
         "txt,srt,json", "--formats", "-f", help="Formatos separados por coma (txt, srt, vtt, json)."
     ),
-    device: str = typer.Option("cpu", "--device", "-d", help="cpu | cuda | auto"),
+    device: str = typer.Option(
+        "auto", "--device", "-d",
+        help="auto (sondea la GPU; ver `speechtotext probe`) | cpu | cuda",
+    ),
     compute_type: str = typer.Option(
         "auto",
         "--compute-type",
         help="auto | int8 | int8_float16 | float16 | float32. 'auto' elige int8 en CPU y float16 en GPU.",
     ),
     vad: bool = typer.Option(
-        True, "--vad/--no-vad", help="Filtro VAD para descartar silencios largos."
+        False, "--vad/--no-vad",
+        help="Filtro VAD para descartar silencios largos. Apagado por defecto: medido, "
+        "pierde frases cortas sin avisar.",
     ),
     beam_size: int = typer.Option(5, "--beam-size", min=1, help="Tamaño del beam search."),
     diarize: bool = typer.Option(
@@ -376,9 +408,9 @@ def transcribe(
         4, "--jobs", "-j", help="Trozos en paralelo al trocear (comparten un modelo).",
     ),
     engine: str = typer.Option(
-        ENGINE_FASTER,
+        "auto",
         "--engine",
-        help="faster-whisper (CPU, default) | whispercpp (whisper.cpp CUDA en la GPU).",
+        help="auto (según la máquina; ver `speechtotext probe`) | faster-whisper | whispercpp",
     ),
 ) -> None:
     """Transcribe un archivo de audio localmente con Whisper (sin enviar nada a internet)."""
@@ -427,7 +459,7 @@ def _extract_region(audio, regions, region, output, language, model, formats,
     console.print(f"  [green]Recorte[/green] {clip} ({_fmt(r.start)}–{_fmt(r.end)})")
     transcribe_file(
         clip, base_dir, language, model, formats,
-        "cpu", "auto", True, 5, diarize, speakers, identify, threshold,
+        "auto", "auto", False, 5, diarize, speakers, identify, threshold,
         hotwords=hotwords,
     )
 
@@ -438,9 +470,12 @@ def find(
     query: str = typer.Argument(..., help="Palabras a buscar."),
     extract: bool = typer.Option(False, "--extract", "-e", help="Recortar + transcribir la región."),
     region: int = typer.Option(1, "--region", help="Qué región extraer (1 = la más densa)."),
-    model: str = typer.Option("small", "--model", "-m", help="Modelo para la transcripción en calidad."),
+    model: str = typer.Option(
+        "large-v3", "--model", "-m",
+        help="Modelo para la transcripción del tramo (small = borrador rápido).",
+    ),
     scan_model: str = typer.Option("tiny", "--scan-model", help="Modelo del índice."),
-    language: str = typer.Option("es", "--language", "-l", help="Idioma de la transcripción del tramo."),
+    language: str = typer.Option("auto", "--language", "-l", help="Idioma de la transcripción del tramo."),
     formats: str = typer.Option("txt,srt", "--formats", "-f", help="Formatos de salida del tramo."),
     diarize: bool = typer.Option(False, "--diarize", "-D", help="Diarizar el tramo extraído."),
     speakers: Optional[int] = typer.Option(None, "--speakers", min=1, help="Nº de hablantes (pista)."),
@@ -689,7 +724,7 @@ def bench(
             ]
             configs = [c for c in configs if c not in lentas]
             # Las quick-saltadas van a skipped: una tabla con filas ausentes sin razón
-            # haría que aurelius eligiera sin saber que faltan candidatas.
+            # haría que el consumidor de la tabla eligiera sin saber que faltan candidatas.
             quick_saltadas = [
                 {"engine": c["engine"], "model": c["model"], "reason": "saltada por --quick"}
                 for c in lentas

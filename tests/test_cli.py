@@ -134,9 +134,10 @@ def test_transcribe_still_registered():
 
 def test_resumen_lista_los_huecos(tmp_path, monkeypatch):
     # La corrida del hallazgo: 2206 s de audio, texto en 0-300 y 600-850.
+    # el consejo "prueba --no-vad" solo aplica con VAD puesto; ya no es el default
     segs = [_seg(0.0, 300.0), _seg(600.0, 850.0)]
     audio = _fake_transcribe(monkeypatch, tmp_path, segs, _info(2206.0))
-    result = _invoke(audio, tmp_path)
+    result = _invoke(audio, tmp_path, "--vad")
     assert result.exit_code == 0
     assert "25%" in result.stdout
     assert "2 huecos sin texto: 05:00-10:00 (300 s), 14:10-36:46 (1356 s)" in result.stdout
@@ -369,7 +370,7 @@ def test_reporte_diarizacion_sugiere_speakers_cuando_el_automatico_se_dispara(
 
 
 def test_idioma_forzado_no_reporta_probabilidad(tmp_path, monkeypatch):
-    # -l es es el default: ahí no se detectó nada, se obedeció al usuario.
+    # -l explícito: ahí no se detectó nada, se obedeció al usuario (el default es auto).
     audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0))
     result = _invoke(audio, tmp_path, "-l", "es")
     assert "(forzado)" in result.stdout
@@ -429,7 +430,7 @@ def test_hotwords_con_whispercpp_rechaza_sin_construir(tmp_path, monkeypatch):
     # --prompt es inerte bajo -mc 0 (medido 2026-07-27): rechazo, no degradación.
     calls = []
     audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0), calls=calls)
-    result = _invoke(audio, tmp_path, "--engine", "whispercpp", "--hotwords", "Aurelius")
+    result = _invoke(audio, tmp_path, "--engine", "whispercpp", "--hotwords", "Bézier")
     assert result.exit_code == 2
     assert "--hotwords no tiene efecto" in result.stdout
     assert "faster-whisper" in result.stdout
@@ -456,8 +457,9 @@ def test_compute_type_no_mapeable_con_whispercpp(tmp_path, monkeypatch):
 
 
 def test_aviso_vad_con_whispercpp(tmp_path, monkeypatch):
+    # --vad explícito: el default ya es False, así que sin pedirlo no hay nada que degradar.
     audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0))
-    result = _invoke(audio, tmp_path, "--engine", "whispercpp")
+    result = _invoke(audio, tmp_path, "--engine", "whispercpp", "--vad")
     assert result.exit_code == 0
     assert "no trae VAD" in result.stdout
 
@@ -567,7 +569,7 @@ def test_json_declara_motor_whispercpp_y_device_cuda(tmp_path, monkeypatch):
     payload = json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))
     eng = payload["engine"]
     assert eng == {
-        "name": "whispercpp", "version": "whisper.cpp v1.9.1", "model": "small",
+        "name": "whispercpp", "version": "whisper.cpp v1.9.1", "model": "large-v3",
         "quant": "q5_0", "device": "cuda", "selection": "explicit",
     }
     assert "cuda" in result.stdout  # el header tampoco dice cpu
@@ -730,8 +732,8 @@ def test_whispercpp_avisa_el_remapeo_de_device(tmp_path, monkeypatch):
 
 
 def test_bench_quick_documenta_las_saltadas_en_skipped(tmp_path, monkeypatch):
-    # Una tabla con filas ausentes sin razon haria que aurelius eligiera sin saber
-    # que faltan candidatas: las quick-saltadas van a skipped con su motivo.
+    # Una tabla con filas ausentes sin razon haria que el consumidor de la tabla eligiera
+    # sin saber que faltan candidatas: las quick-saltadas van a skipped con su motivo.
     import json
 
     from speechtotext.core import benchmark
@@ -801,3 +803,98 @@ def test_troceado_anuncia_y_lista_cada_trozo_fuera_de_tty(tmp_path, monkeypatch)
     assert "Troceado (jobs=2)" in salida
     assert "[1/2]" in salida and "[2/2]" in salida
     assert "(nuevo)" in salida
+
+
+# --- defaults del spec §5.2, ETA e idioma dudoso ------------------------------------------
+
+
+def test_defaults_del_cli_son_los_del_spec(tmp_path, monkeypatch):
+    import json
+
+    calls = []
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0), calls=calls)
+    result = _invoke(audio, tmp_path, "-f", "json")
+    assert result.exit_code == 0, result.stdout
+    (_, request), = calls
+    assert (request.language, request.vad, request.beam_size, request.hotwords) == ("auto", False, 5, ())
+    payload = json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))
+    assert payload["engine"]["model"] == "large-v3"
+    assert payload["engine"]["device"] == "cpu"      # conftest: máquina sin GPU
+    assert "Idioma detectado" in result.stdout
+    assert "motor faster-whisper" in _plana(result.stdout)
+
+
+def test_eta_se_imprime_tras_decodificar(tmp_path, monkeypatch):
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(600.0))
+    result = _invoke(audio, tmp_path)
+    assert result.exit_code == 0, result.stdout
+    assert "Duración 10.0 min · ETA ~8 min (estimado)" in _plana(result.stdout)
+
+
+def test_eta_medida_con_bench_no_dice_estimado(tmp_path, monkeypatch):
+    from speechtotext.core import benchmark
+
+    benchmark.write_table({"schema_version": "speechtotext.bench/v1", "results": [
+        {"engine": "faster-whisper", "model": "large-v3", "quant": "int8", "device": "cpu",
+         "x_realtime": 2.0, "error": None, "capabilities": {}, "wer_ref": None}],
+        "skipped": [], "recommendations": []})
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(600.0))
+    result = _invoke(audio, tmp_path)
+    assert "ETA ~5 min (medido con bench)" in _plana(result.stdout)
+
+
+def test_ruta_sin_eta_lo_dice(tmp_path, monkeypatch):
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(60.0))
+    result = _invoke(audio, tmp_path, "-m", "medium")
+    assert "ETA sin medir para esta ruta" in _plana(result.stdout)
+
+
+def test_idioma_dudoso_sugiere_fijarlo(tmp_path, monkeypatch):
+    info = _info(10.0, language="pt", language_probability=0.41)
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], info)
+    result = _invoke(audio, tmp_path)
+    assert "prob=0.41" in result.stdout and "fíjalo con -l" in result.stdout
+    info = _info(10.0, language="pt", language_probability=0.9)
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], info)
+    assert "fíjalo con -l" not in _invoke(audio, tmp_path).stdout
+
+
+def test_modelo_que_no_cabe_en_ram_corta_sin_cambiarlo(tmp_path, monkeypatch):
+    from speechtotext.core import probe
+
+    calls = []
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0), calls=calls)
+    monkeypatch.setattr(probe, "machine", lambda: probe.Machine("win32", 4, 4.0, False, None, None, None))
+    result = _invoke(audio, tmp_path)
+    assert result.exit_code == 1
+    assert "large-v3 necesita ~6 GB" in result.stdout and "-m small" in result.stdout
+    assert calls == []
+
+
+def test_la_ruta_auto_avisa_y_anuncia_la_descarga_de_whispercpp(tmp_path, monkeypatch):
+    import json
+
+    from speechtotext.core import probe
+
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0))
+    monkeypatch.setattr(probe, "machine",
+                        lambda: probe.Machine("win32", 12, 32.0, True, "GTX 980", 3.5, None))
+    result = _invoke(audio, tmp_path, "-f", "json")
+    assert result.exit_code == 0, result.stdout
+    salida = _plana(result.stdout)
+    assert "GPU con 3.5 GB libres: whisper.cpp cuantizado" in salida
+    assert "whisper.cpp v1.9.1 no está instalado: se descarga ahora (~646 MB, una sola vez)" in salida
+    payload = json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))
+    assert (payload["engine"]["name"], payload["engine"]["device"]) == ("whispercpp", "cuda")
+
+
+def test_whispercpp_ya_instalado_no_anuncia_descarga(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from speechtotext.core import probe
+
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0))
+    monkeypatch.setattr(probe, "machine", lambda: probe.Machine(
+        "win32", 12, 32.0, True, "GTX 980", 3.5, Path("C:/x/whisper-cli.exe")))
+    result = _invoke(audio, tmp_path)
+    assert result.exit_code == 0 and "se descarga ahora" not in result.stdout
