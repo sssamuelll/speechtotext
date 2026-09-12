@@ -14,33 +14,26 @@ from speechtotext.core.transcribe import EngineInfo, Route, load_audio, make_bac
 
 # --- ruta ----------------------------------------------------------------------------
 
-def test_ruta_auto_es_faster_whisper_en_cpu_int8():
-    assert resolve_route() == Route("faster-whisper", "cpu", "int8", "")
+def test_resolve_route_sondea_y_delega(monkeypatch):
+    visto = {}
+    monkeypatch.setattr(core.probe, "machine", lambda: "MAQUINA")
+
+    def elegir(m, model, **kw):
+        visto.update(m=m, model=model, **kw)
+        return Route("faster-whisper", "cpu", "int8", "")
+
+    monkeypatch.setattr(core.probe, "choose_route", elegir)
+    assert resolve_route(engine="auto", device="cpu", compute_type="int8", model="small").device == "cpu"
+    assert visto == {"m": "MAQUINA", "model": "small", "engine": "auto", "device": "cpu",
+                     "compute_type": "int8"}
 
 
-def test_ruta_cuda_explicita_usa_float16():
-    assert resolve_route(device="cuda") == Route("faster-whisper", "cuda", "float16", "")
-    assert resolve_route(device="cuda", compute_type="int8").compute_type == "int8"
-
-
-def test_ruta_whispercpp_corre_en_cuda_q5_0_y_lo_avisa():
-    ruta = resolve_route(engine="whispercpp")
-    assert (ruta.engine, ruta.device, ruta.compute_type) == ("whispercpp", "cuda", "q5_0")
-    assert "device=cuda" in ruta.reason
-    assert resolve_route(engine="whispercpp", device="cuda").reason == ""
-
-
-def test_ruta_rechaza_engine_desconocido_y_compute_type_no_mapeable():
-    with pytest.raises(ValueError, match="no existe"):
-        resolve_route(engine="chatgpt")
-    with pytest.raises(ValueError, match="paging WDDM"):
-        resolve_route(engine="whispercpp", compute_type="float16")
-
-
-def test_ruta_rechaza_modelo_no_pinneado_bajo_whispercpp():
-    with pytest.raises(ValueError, match="no está pinneado"):
-        resolve_route(engine="whispercpp", model="medium")
-    assert resolve_route(engine="whispercpp", model="small").engine == "whispercpp"
+def test_ruta_por_defecto_en_la_maquina_de_pruebas_es_cpu_int8():
+    # conftest fija una máquina sin GPU: 'auto' resuelve a faster-whisper en CPU int8.
+    r = resolve_route()
+    assert (r.engine, r.device, r.compute_type, r.reason) == (
+        "faster-whisper", "cpu", "int8", "sin GPU utilizable: CPU")
+    assert r.eta_factor == round(1 / 1.27, 3) and r.estimated is True
 
 
 # --- fabrica -------------------------------------------------------------------------
@@ -184,9 +177,26 @@ def test_progreso_por_callback_y_decodificacion_una_vez(tmp_path, monkeypatch):
     t = core.transcribe(tmp_path / "a.wav", backend=FakeBackend(), chunk=False,
                         on_progress=eventos.append)
     assert llamadas == [tmp_path / "a.wav"]
-    assert [e.stage for e in eventos] == ["decode", "load", "transcribe"]
+    # dos eventos decode: antes (indeterminado) y después, con done = total = duración,
+    # que es lo que el CLI necesita para la ETA
+    assert [e.stage for e in eventos] == ["decode", "decode", "load", "transcribe"]
+    assert (eventos[0].done, eventos[0].total) == (0, None)
+    assert (eventos[1].done, eventos[1].total, eventos[1].detail) == (10.0, 10.0, "a.wav")
     assert eventos[-1].done == 1 and eventos[-1].total == 1 and "(nuevo)" in eventos[-1].detail
     assert t.duration == 10.0
+
+
+def test_acepta_la_ruta_como_str(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "load_audio",
+                        lambda p: _zeros(3.0) if isinstance(p, Path) else pytest.fail("str crudo"))
+    t = core.transcribe(str(tmp_path / "a.wav"), backend=FakeBackend(), chunk=False)
+    assert t.duration == 3.0
+
+
+def test_flags_imposibles_cortan_antes_de_decodificar(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "load_audio", lambda p: pytest.fail("decodificó antes de validar"))
+    with pytest.raises(ValueError, match="no existe"):
+        core.transcribe(tmp_path / "a.wav", engine="chatgpt")
 
 
 def test_hotwords_rechazado_corta_antes_de_cargar_el_modelo():

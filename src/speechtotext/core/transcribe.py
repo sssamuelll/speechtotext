@@ -22,12 +22,13 @@ from speechtotext.core.chunked import (
 )
 from speechtotext.core.formats import find_gaps
 from speechtotext.core.postprocess import normalize_hours
-from speechtotext.core.probe import ENGINE_FASTER, ENGINE_WHISPERCPP, ENGINES  # noqa: F401 — reexport
+from speechtotext.core import probe
+from speechtotext.core.probe import ENGINE_FASTER, ENGINE_WHISPERCPP, ENGINES, Route  # noqa: F401 — reexport
 from speechtotext.core.segments import LabeledSegment
 
 SAMPLE_RATE = 16000
 
-Stage = Literal["decode", "load", "transcribe", "diarize"]
+Stage = Literal["download", "decode", "load", "transcribe", "diarize"]
 
 
 @dataclass(frozen=True)
@@ -41,43 +42,12 @@ class Progress:
 ProgressCallback = Callable[[Progress], None]
 
 
-@dataclass(frozen=True)
-class Route:
-    engine: str
-    device: str
-    compute_type: str
-    reason: str              # una frase para imprimir; vacia si no hay nada que avisar
-
-
 def resolve_route(engine: str = "auto", device: str = "auto", compute_type: str = "auto",
                   model: str = "large-v3") -> Route:
-    """Resuelve engine/device/compute_type explicitos o 'auto'. ponytail: sin sondeo de la
-    maquina todavia — 'auto' es faster-whisper en CPU int8; el sondeo llega en el plan 2b."""
-    engine = ENGINE_FASTER if engine == "auto" else engine
-    if engine not in ENGINES:
-        raise ValueError(f"engine {engine!r} no existe; disponibles: {', '.join(ENGINES)}")
-    if engine == ENGINE_WHISPERCPP:
-        from speechtotext.core.enginepin import _MODEL_ALIAS
-
-        if model not in _MODEL_ALIAS:
-            raise ValueError(
-                f"modelo {model!r} no está pinneado para whispercpp; disponibles: "
-                f"{', '.join(sorted(_MODEL_ALIAS))}"
-            )
-        if compute_type not in ("auto", "q5_0"):
-            raise ValueError(
-                f"compute_type={compute_type!r} no soportado con whispercpp; usa 'auto' o 'q5_0'. "
-                "Motivo: fp16 = 0.53x tiempo real por paging WDDM en la 980 (medido 2026-07-27)."
-            )
-        # El binario pinneado es build CUDA y corre en la GPU SIEMPRE (medido en el smoke).
-        # Etiquetar cpu seria mentir en el header, la llave y el JSON: se declara cuda y
-        # el remapeo se AVISA — pisar un -d cpu en silencio seria la sustitucion callada.
-        reason = "" if device == "cuda" else "whisper.cpp (build CUDA) corre en la GPU; device=cuda"
-        return Route(ENGINE_WHISPERCPP, "cuda", "q5_0", reason)
-    device = "cpu" if device == "auto" else device
-    if compute_type == "auto":
-        compute_type = "int8" if device == "cpu" else "float16"
-    return Route(ENGINE_FASTER, device, compute_type, "")
+    """Sondea la máquina una vez (core.probe) y elige la ruta. ValueError con flags
+    imposibles; AsrError("insufficient_resources") si el modelo no cabe en RAM."""
+    return probe.choose_route(probe.machine(), model, engine=engine, device=device,
+                              compute_type=compute_type)
 
 
 def make_backend(engine: str, model: str, device: str, compute_type: str, jobs: int = 1) -> AsrBackend:
@@ -269,7 +239,7 @@ def _diarize(samples, segments, speakers, identify, threshold):
 
 
 def transcribe(
-    audio: Path | np.ndarray,
+    audio: Path | str | np.ndarray,
     *,
     model: str = "large-v3",
     language: str = "auto",
@@ -290,19 +260,26 @@ def transcribe(
     on_progress: ProgressCallback | None = None,
     cancel: threading.Event | None = None,
 ) -> Transcript:
-    """Archivo (o muestras 16 kHz mono) -> Transcript. El corto y el largo son el mismo
-    camino con n = 1 trozo. Con muestras sin archivo no hay checkpoint ni cortes por
-    silencio (pick_cuts fijo): es la ruta de `find` y de la libreria."""
+    """Archivo (ruta como Path o str, o muestras 16 kHz mono) -> Transcript. El corto y el
+    largo son el mismo camino con n = 1 trozo. Con muestras sin archivo no hay checkpoint
+    ni cortes por silencio (pick_cuts fijo): es la ruta de `find` y de la libreria."""
     emit = on_progress or (lambda p: None)
 
     def check_cancel() -> None:
         if cancel is not None and cancel.is_set():
             raise AsrError("cancelled", True, "transcripción cancelada")
 
-    if isinstance(audio, Path):
+    # La ruta se resuelve ANTES de decodificar: un --engine inexistente o un modelo que no
+    # cabe corta en milisegundos, no tras decodificar una hora de audio.
+    route = resolve_route(engine, device, compute_type, model) if backend is None else None
+
+    if isinstance(audio, (str, Path)):
+        audio = Path(audio)
         emit(Progress("decode", 0, None, audio.name))
         samples = load_audio(audio)
         source: Path | None = audio
+        # Segundo evento con done = total = duración: es lo que el CLI necesita para la ETA.
+        emit(Progress("decode", len(samples) / SAMPLE_RATE, len(samples) / SAMPLE_RATE, audio.name))
     else:
         samples = np.asarray(audio, dtype=np.float32).reshape(-1)
         source = None
@@ -314,7 +291,6 @@ def transcribe(
     else:
         spans = [(0.0, duration)]
 
-    route = resolve_route(engine, device, compute_type, model) if backend is None else None
     engine_id = route.engine if route is not None else backend.backend_id
     # N subprocesos contra una sola GPU paginan en silencio (medido: 2 concurrentes tardan
     # MAS que en serie): whisper.cpp va de uno en uno, estructuralmente.

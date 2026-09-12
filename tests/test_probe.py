@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from speechtotext.asr.base import AsrError
 from speechtotext.core import enginepin, probe
 
 
@@ -122,3 +123,141 @@ def test_installed_exe_fuera_de_win32_busca_en_el_path(monkeypatch):
         lambda name: "/opt/homebrew/bin/whisper-cli" if name == "whisper-cli" else None,
     )
     assert enginepin.installed_exe() == Path("/opt/homebrew/bin/whisper-cli")
+
+
+# --- choose_route: la tabla del spec §5.1 --------------------------------------------
+
+
+def _m(**over):
+    base = dict(platform="win32", cpu_count=12, ram_gb=32.0, cuda=False, gpu_name=None,
+                vram_free_gb=None, whispercpp=None)
+    base.update(over)
+    return probe.Machine(**base)
+
+
+def _ruta(r):
+    return (r.engine, r.device, r.compute_type)
+
+
+def test_sin_gpu_va_a_cpu_int8():
+    r = probe.choose_route(_m(), "large-v3")
+    assert _ruta(r) == ("faster-whisper", "cpu", "int8")
+    assert r.reason == "sin GPU utilizable: CPU"
+
+
+def test_gpu_holgada_va_a_faster_whisper_cuda_float16():
+    r = probe.choose_route(_m(cuda=True, gpu_name="RTX 3060", vram_free_gb=11.2), "large-v3")
+    assert _ruta(r) == ("faster-whisper", "cuda", "float16")
+    assert r.reason == "GPU con 11.2 GB libres"
+
+
+def test_gpu_justa_va_a_whispercpp_si_esta_instalado_o_es_win32():
+    r = probe.choose_route(_m(cuda=True, gpu_name="GTX 980", vram_free_gb=3.5), "large-v3")
+    assert _ruta(r) == ("whispercpp", "cuda", "q5_0")
+    assert r.reason == "GPU con 3.5 GB libres: whisper.cpp cuantizado"
+    # linux con el binario en el PATH: también, etiquetado native
+    r = probe.choose_route(
+        _m(platform="linux", cuda=True, vram_free_gb=3.5, whispercpp=Path("/usr/bin/whisper-cli")),
+        "large-v3",
+    )
+    assert _ruta(r) == ("whispercpp", "native", "q5_0")
+
+
+def test_gpu_justa_sin_binario_fuera_de_win32_cae_a_cpu_y_lo_dice():
+    r = probe.choose_route(_m(platform="linux", cuda=True, vram_free_gb=3.5), "large-v3")
+    assert _ruta(r) == ("faster-whisper", "cpu", "int8")
+    assert r.reason == "GPU con 3.5 GB libres no alcanza para large-v3: CPU"
+
+
+def test_gpu_justa_con_modelo_no_pinneado_cae_a_cpu_y_lo_dice():
+    r = probe.choose_route(_m(cuda=True, vram_free_gb=3.5), "medium")
+    assert _ruta(r) == ("faster-whisper", "cpu", "int8")
+    assert "no alcanza para medium" in r.reason
+
+
+def test_umbrales_exactos():
+    assert probe.choose_route(_m(cuda=True, vram_free_gb=5.0), "large-v3").engine == "faster-whisper"
+    assert probe.choose_route(_m(cuda=True, vram_free_gb=4.99), "large-v3").engine == "whispercpp"
+    assert probe.choose_route(_m(cuda=True, vram_free_gb=2.0), "large-v3").engine == "whispercpp"
+    assert probe.choose_route(_m(cuda=True, vram_free_gb=1.99), "large-v3").device == "cpu"
+
+
+def test_gpu_sin_vram_legible_va_a_cpu():
+    r = probe.choose_route(_m(cuda=True, gpu_name="rara", vram_free_gb=None), "large-v3")
+    assert _ruta(r) == ("faster-whisper", "cpu", "int8") and r.reason == "sin GPU utilizable: CPU"
+
+
+def test_device_explicito_manda_sobre_la_tabla():
+    m = _m(cuda=True, vram_free_gb=3.5)
+    assert _ruta(probe.choose_route(m, "large-v3", device="cpu")) == ("faster-whisper", "cpu", "int8")
+    assert _ruta(probe.choose_route(m, "large-v3", device="cuda")) == ("faster-whisper", "cuda", "float16")
+    assert probe.choose_route(m, "large-v3", device="cuda", compute_type="int8").compute_type == "int8"
+    assert probe.choose_route(m, "large-v3", device="cpu").reason == ""
+
+
+def test_engine_explicito_se_respeta():
+    m = _m(cuda=True, vram_free_gb=11.0)
+    assert _ruta(probe.choose_route(m, "large-v3", engine="faster-whisper")) == ("faster-whisper", "cpu", "int8")
+    r = probe.choose_route(_m(), "large-v3", engine="whispercpp")
+    assert _ruta(r) == ("whispercpp", "cuda", "q5_0")
+    assert r.reason == "whisper.cpp (build CUDA) corre en la GPU; device=cuda"
+    assert probe.choose_route(_m(), "large-v3", engine="whispercpp", device="cuda").reason == ""
+
+
+def test_whispercpp_fuera_de_win32_se_etiqueta_native_y_avisa():
+    r = probe.choose_route(_m(platform="darwin"), "large-v3", engine="whispercpp")
+    assert (r.device, r.eta_factor) == ("native", None)
+    assert "device=native" in r.reason
+    assert probe.choose_route(_m(platform="darwin"), "large-v3", engine="whispercpp",
+                              device="native").reason == ""
+
+
+def test_el_sondeo_nunca_cambia_el_modelo():
+    with pytest.raises(AsrError) as ei:
+        probe.choose_route(_m(ram_gb=4.0), "large-v3")
+    assert ei.value.code == "insufficient_resources" and ei.value.recoverable is False
+    assert "large-v3 necesita ~6 GB" in str(ei.value) and "-m small" in str(ei.value)
+    with pytest.raises(AsrError) as ei:
+        probe.choose_route(_m(ram_gb=2.0), "small")
+    assert "-m small" not in str(ei.value)
+    # sin medida de RAM no se corta nada; un modelo fuera de la tabla tampoco
+    assert probe.choose_route(_m(ram_gb=None), "large-v3").engine == "faster-whisper"
+    assert probe.choose_route(_m(ram_gb=1.0), "tiny").engine == "faster-whisper"
+
+
+def test_flags_imposibles():
+    with pytest.raises(ValueError, match="no existe"):
+        probe.choose_route(_m(), "large-v3", engine="chatgpt")
+    with pytest.raises(ValueError, match="paging WDDM"):
+        probe.choose_route(_m(), "large-v3", engine="whispercpp", compute_type="float16")
+    with pytest.raises(ValueError, match="no está pinneado"):
+        probe.choose_route(_m(), "medium", engine="whispercpp")
+
+
+# --- ETA ---------------------------------------------------------------------------------
+
+def test_eta_de_la_tabla_es_estimada():
+    r = probe.choose_route(_m(), "large-v3")
+    assert (r.eta_factor, r.estimated) == (round(1 / 1.27, 3), True)
+    assert probe.choose_route(_m(), "medium").eta_factor is None
+
+
+def test_eta_de_bench_json_manda_y_no_es_estimada():
+    from speechtotext.core import benchmark
+
+    benchmark.write_table({"schema_version": "speechtotext.bench/v1", "results": [
+        {"engine": "faster-whisper", "model": "large-v3", "quant": "int8", "device": "cpu",
+         "x_realtime": 2.0, "error": None, "capabilities": {}, "wer_ref": None},
+    ], "skipped": [], "recommendations": []})
+    r = probe.choose_route(_m(), "large-v3")
+    assert (r.eta_factor, r.estimated) == (0.5, False)
+    assert probe.choose_route(_m(), "small").estimated is True   # esa ruta no se midió
+
+
+def test_bench_json_corrupto_no_tumba_la_ruta():
+    from speechtotext.core import benchmark
+
+    p = benchmark.bench_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("{no es json", encoding="utf-8")
+    assert probe.choose_route(_m(), "large-v3").estimated is True
