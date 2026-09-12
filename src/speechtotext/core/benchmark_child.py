@@ -12,18 +12,16 @@ from __future__ import annotations
 import json
 import sys
 import time
+from pathlib import Path
 
-# Opts canonicos del benchmark: identicos para toda config, para que los tiempos sean
-# comparables entre motores. Para whispercpp pasan por effective_opts (degradacion ya
-# mergeada, docs/plan-multimotor.md seccion 4).
-CANON_OPTS = {
-    "language": "es",
-    "beam_size": 5,
-    "vad_filter": True,
-    "hotwords": None,
-    "condition_on_previous_text": False,
-    "word_timestamps": False,
-}
+from speechtotext.asr.types import TranscriptionRequest
+from speechtotext.core.transcribe import _apply_caps, load_audio
+
+# Peticion canonica del benchmark: identica para toda config, para que los tiempos sean
+# comparables entre motores. Los CAPS de cada backend la degradan donde toque (whispercpp
+# sin VAD ni palabras), igual que en la ruta real.
+CANON_REQUEST = TranscriptionRequest(language="es", beam_size=5, vad=True, hotwords=(),
+                                     word_timestamps=False)
 
 
 def _peak_ram_mb() -> float:
@@ -72,37 +70,31 @@ def _peak_ram_mb() -> float:
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
 
 
-def run_child(engine_factory, engine: str, model: str, device: str, compute_type: str,
+def run_child(backend_factory, engine: str, model: str, device: str, compute_type: str,
               wav_path: str) -> dict:
     """Carga, transcribe y mide. Separada de main() para testearla con un motor fake.
 
-    Cualquier excepcion -> dict con "error"; jamas propaga.
+    Cualquier excepcion -> dict con "error"; jamas propaga. La decodificacion queda fuera
+    de los dos relojes: load_s es warm(), transcribe_s es solo backend.transcribe.
     """
     try:
-        from speechtotext.core.engines import effective_opts
-
         t0 = time.perf_counter()
-        eng = engine_factory(engine, model, device, compute_type)
+        backend = backend_factory(engine, model, device, compute_type)
+        # OJO whispercpp: warm() solo pinnea/verifica (load_s casi cero); el modelo se carga
+        # dentro del exe en transcribe, y la PRIMERA corrida paga JIT CUDA (~17 s medido
+        # 2026-07-27). El hijo NO calienta: el numero es el de la maquina tal cual.
+        backend.warm()
         load_s = time.perf_counter() - t0
-        # OJO whispercpp: make_engine solo pinnea/verifica (load_s casi cero); el modelo
-        # se carga dentro del exe en transcribe, y la PRIMERA corrida paga JIT CUDA
-        # (~17 s medido 2026-07-27). El hijo NO calienta: el numero es el de la maquina
-        # tal cual, JIT incluido en transcribe_s.
-        opts = effective_opts(engine, dict(CANON_OPTS))
+        samples = load_audio(Path(wav_path))
+        request, _ = _apply_caps(backend, CANON_REQUEST)
         t1 = time.perf_counter()
-        segments, _info = eng.transcribe(wav_path, **opts)
-        n_segments = 0
-        n_chars = 0
-        # faster-whisper devuelve generador perezoso: consumir ES transcribir.
-        for seg in segments:
-            n_segments += 1
-            n_chars += len(seg.text.strip())
+        result = backend.transcribe(samples, request)
         transcribe_s = time.perf_counter() - t1
         return {
             "load_s": round(load_s, 3),
             "transcribe_s": round(transcribe_s, 3),
-            "segments": n_segments,
-            "chars": n_chars,
+            "segments": len(result.segments),
+            "chars": sum(len(s.text.strip()) for s in result.segments),
             "peak_ram_mb": round(_peak_ram_mb(), 1),
             "error": None,
         }
@@ -118,9 +110,9 @@ def main(argv: list[str] | None = None) -> int:
                 f"uso: python -m speechtotext.core.benchmark_child engine model device "
                 f"compute_type wav (recibidos {len(args)} args)"
             )
-        from speechtotext.core.engines import make_engine
+        from speechtotext.core.transcribe import make_backend
 
-        result = run_child(make_engine, *args)
+        result = run_child(make_backend, *args)
     except Exception as exc:  # noqa: BLE001 — hasta el ImportError sale como JSON
         result = {"error": f"{type(exc).__name__}: {exc}"}
     print(json.dumps(result))

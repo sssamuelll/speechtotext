@@ -6,6 +6,8 @@ import json
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 from speechtotext.core import benchmark
 from speechtotext.core.benchmark_child import run_child
 from speechtotext.core.enginepin import ENGINE_PIN
@@ -165,38 +167,67 @@ def test_write_read_roundtrip(monkeypatch, tmp_path):
 # --- benchmark_child.run_child ---------------------------------------------------
 
 
-class _FakeEngine:
-    def __init__(self):
-        self.opts = None
+class _FakeBackend:
+    def __init__(self, engine="faster-whisper"):
+        from speechtotext.asr import Caps
 
-    def transcribe(self, path, **opts):
-        self.opts = opts
-        segs = iter([SimpleNamespace(text=" hola "), SimpleNamespace(text="mundo")])
-        return segs, SimpleNamespace(language="es")
+        self.backend_id = engine
+        self.caps = (Caps("rechazado", "degradado", "degradado") if engine == "whispercpp"
+                     else Caps("honrado", "honrado", "honrado"))
+        self.model_id, self.model_version, self.engine_version = "tiny", "1", "fake"
+        self.quant, self.device = "int8", "cpu"
+        self.request = None
+        self.warmed = 0
+
+    def warm(self):
+        self.warmed += 1
+
+    def transcribe(self, samples, request):
+        from speechtotext.asr.types import (
+            NativeSignals, SegmentNativeSignals, TranscriptionResult, TranscriptionSegment,
+        )
+
+        self.request = request
+        nada = SegmentNativeSignals(None, None, None)
+        return TranscriptionResult(
+            text="hola mundo", language="es", words=(),
+            segments=(TranscriptionSegment(0.0, 1.0, " hola ", (), nada),
+                      TranscriptionSegment(1.0, 2.0, "mundo", (), nada)),
+            backend=self.backend_id, model="tiny", model_version="1", latency_ms=1,
+            native_signals=NativeSignals(None, None, None, None), warnings=(),
+        )
 
 
-def test_run_child_con_motor_fake():
-    eng = _FakeEngine()
+@pytest.fixture
+def _sin_decodificar(monkeypatch):
+    import numpy as np
+
+    from speechtotext.core import benchmark_child
+
+    monkeypatch.setattr(benchmark_child, "load_audio", lambda p: np.zeros(16000, dtype=np.float32))
+
+
+def test_run_child_con_motor_fake(_sin_decodificar):
+    eng = _FakeBackend()
     res = run_child(lambda *a: eng, "faster-whisper", "tiny", "cpu", "int8", "x.wav")
     assert res["error"] is None
     assert res["segments"] == 2 and res["chars"] == 9
     assert res["load_s"] >= 0 and res["transcribe_s"] >= 0
     assert res["peak_ram_mb"] > 0  # el hijo mide SU propio pico, en cualquier OS
-    # opts canonicos del contrato
-    assert eng.opts["language"] == "es" and eng.opts["beam_size"] == 5
-    assert eng.opts["vad_filter"] is True
-    assert eng.opts["condition_on_previous_text"] is False
+    assert eng.warmed == 1
+    # peticion canonica del contrato: identica para todo motor, para que los tiempos comparen
+    assert eng.request.language == "es" and eng.request.beam_size == 5
+    assert eng.request.vad is True and eng.request.word_timestamps is False
 
 
-def test_run_child_whispercpp_opts_efectivos():
-    eng = _FakeEngine()
+def test_run_child_whispercpp_aplica_caps(_sin_decodificar):
+    eng = _FakeBackend("whispercpp")
     res = run_child(lambda *a: eng, "whispercpp", "small", "cuda", "q5_0", "x.wav")
     assert res["error"] is None
-    # bajo whispercpp los opts efectivos apagan vad/word_timestamps (contrato de degradacion)
-    assert eng.opts["vad_filter"] is False and eng.opts["word_timestamps"] is False
+    assert eng.request.vad is False and eng.request.word_timestamps is False
 
 
-def test_run_child_factory_revienta():
+def test_run_child_factory_revienta(_sin_decodificar):
     def factory(*_a):
         raise RuntimeError("sin modelo")
 
