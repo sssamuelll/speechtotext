@@ -13,6 +13,7 @@ class TranscriptionRequest:
     word_timestamps: bool = True
     beam_size: int = 5
     context: str | None = None
+    vad: bool = False
 
     def __post_init__(self) -> None:
         if (
@@ -43,6 +44,8 @@ class TranscriptionRequest:
             or len(self.context) > 4096
         ):
             raise TypeError("context debe ser string no vacio y acotado")
+        if type(self.vad) is not bool:
+            raise TypeError("vad debe ser bool")
 
     @property
     def fingerprint(self) -> str:
@@ -62,6 +65,7 @@ class TranscriptionRequest:
             "context": self.context,
             "hotwords": list(self.hotwords),
             "language": self.language,
+            "vad": self.vad,
             "word_timestamps": self.word_timestamps,
         }
 

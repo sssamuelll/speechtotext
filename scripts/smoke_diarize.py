@@ -9,12 +9,13 @@ import sys
 from pathlib import Path
 
 from speechtotext.core.audio import transcode_to_wav
-from speechtotext.speakers.diarization import diarize
+from speechtotext.speakers.diarization import diarize, read_wav
 
 num_speakers = int(sys.argv[2]) if len(sys.argv) > 2 else None
 wav = transcode_to_wav(Path(sys.argv[1]).read_bytes())
 try:
-    turns, embeddings = diarize(str(wav), num_speakers=num_speakers)
+    samples, rate = read_wav(wav)
+    turns, embeddings = diarize(samples, rate, num_speakers=num_speakers)
 finally:
     wav.unlink(missing_ok=True)
 

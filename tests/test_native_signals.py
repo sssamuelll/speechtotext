@@ -174,15 +174,33 @@ def test_cli_transcribe_lleva_las_senales_al_json(tmp_path, monkeypatch):
     from typer.testing import CliRunner
 
     from speechtotext.cli.app import app
-    from speechtotext.core import chunked
 
     audio = tmp_path / "charla.wav"
     audio.write_bytes(b"RIFF")
     info = _info(duration=60.0)
     segs = [_raw(0.0, 2.0, no_speech_prob=0.75, avg_logprob=-0.3, compression_ratio=1.8)]
-    monkeypatch.setattr(chunked, "probe_duration", lambda p: info.duration)
-    monkeypatch.setattr(chunked, "should_chunk", lambda d, c: True)
-    monkeypatch.setattr(chunked, "run_chunked", lambda *a, **k: (segs, info))
+    from speechtotext.asr import Caps
+    from speechtotext.asr.types import (
+        NativeSignals, SegmentNativeSignals, TranscriptionResult, TranscriptionSegment,
+    )
+    from speechtotext.core import transcribe as core_transcribe
+
+    import numpy as np
+
+    monkeypatch.setattr(core_transcribe, "load_audio", lambda p: np.zeros(60 * 16000, dtype=np.float32))
+    monkeypatch.setattr(core_transcribe, "should_chunk", lambda d, c: False)
+    result = TranscriptionResult(
+        text="hola que tal", language="es", words=(),
+        segments=tuple(TranscriptionSegment(s.start, s.end, s.text, (), SegmentNativeSignals(
+            s.no_speech_prob, s.avg_logprob, s.compression_ratio)) for s in segs),
+        backend="faster-whisper", model="small", model_version="1", latency_ms=1,
+        native_signals=NativeSignals(None, None, None, 1.0), warnings=(),
+    )
+    fake = SimpleNamespace(backend_id="faster-whisper", model_id="small", device="cpu", quant="int8",
+                           model_version="1", engine_version="faster-whisper 1.2.0",
+                           caps=Caps("honrado", "honrado", "honrado"), warm=lambda: None,
+                           transcribe=lambda samples, request: result)
+    monkeypatch.setattr(core_transcribe, "make_backend", lambda *a, **k: fake)
 
     # -o sobre una ruta inexistente y sin separador final es un BASE path, no una carpeta
     # (_resolve_output_base, cli/app.py:70): el JSON sale en out.json, no en out/charla.json.

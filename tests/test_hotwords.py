@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from typer.testing import CliRunner
 
 from speechtotext.cli.app import _load_hotwords_file, _resolve_hotwords, app
-from speechtotext.core import chunked
+import numpy as np
 
 runner = CliRunner()
 
@@ -47,14 +47,28 @@ def test_env_defaults_hf_en_windows():
 
 
 def _fake_transcribe(monkeypatch, tmp_path):
-    """Corta el camino de transcripción justo antes de Whisper: el audio nunca se abre."""
+    """Corta el camino justo antes del motor: el audio nunca se abre."""
+    from speechtotext.asr import Caps
+    from speechtotext.asr.types import (
+        NativeSignals, SegmentNativeSignals, TranscriptionResult, TranscriptionSegment,
+    )
+    from speechtotext.core import transcribe as core_transcribe
+
     audio = tmp_path / "charla.wav"
     audio.write_bytes(b"RIFF")
-    info = SimpleNamespace(duration=10.0, language="es", language_probability=1.0)
-    segs = [SimpleNamespace(start=0.0, end=9.0, text="hola que tal")]
-    monkeypatch.setattr(chunked, "probe_duration", lambda p: info.duration)
-    monkeypatch.setattr(chunked, "should_chunk", lambda d, c: True)
-    monkeypatch.setattr(chunked, "run_chunked", lambda *a, **k: (segs, info))
+    monkeypatch.setattr(core_transcribe, "load_audio", lambda p: np.zeros(160000, dtype=np.float32))
+    monkeypatch.setattr(core_transcribe, "should_chunk", lambda d, c: False)
+    result = TranscriptionResult(
+        text="hola que tal", language="es", words=(),
+        segments=(TranscriptionSegment(0.0, 9.0, "hola que tal", (), SegmentNativeSignals(None, None, None)),),
+        backend="faster-whisper", model="small", model_version="1", latency_ms=1,
+        native_signals=NativeSignals(None, None, None, 1.0), warnings=(),
+    )
+    fake = SimpleNamespace(backend_id="faster-whisper", model_id="small", device="cpu", quant="int8",
+                           model_version="1", engine_version="faster-whisper 1.2.0",
+                           caps=Caps("honrado", "honrado", "honrado"), warm=lambda: None,
+                           transcribe=lambda samples, request: result)
+    monkeypatch.setattr(core_transcribe, "make_backend", lambda *a, **k: fake)
     return audio
 
 

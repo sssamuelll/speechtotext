@@ -18,7 +18,7 @@ trabajo pendiente.
 
 | Documento | Dónde aterrizó |
 |---|---|
-| [`plan-multimotor.md`](plan-multimotor.md) | `--engine faster-whisper\|whispercpp`, en `core/engines.py` y `core/enginepin.py`. |
+| [`plan-multimotor.md`](plan-multimotor.md) | `--engine faster-whisper\|whispercpp`, en `asr/whispercpp.py`, `core/transcribe.py` y `core/enginepin.py`. |
 | [`plan-calidad-transcripcion.md`](plan-calidad-transcripcion.md) | Línea de huecos en consola, mínimos y máximos de los flags, prosa de `--hotwords`. |
 | [`plan-calidad-transcripcion-2.md`](plan-calidad-transcripcion-2.md) | `is_suspect` sobreviviendo a `--diarize`, reporte de calidad de diarización, y las señales nativas en el JSON (su pregunta Q9). |
 | [`benchmark-turboscribe.md`](benchmark-turboscribe.md) | Diagnóstico contra TurboScribe de julio de 2026; su propio backlog quedó resuelto (puntuación, hotwords, alineación palabra→hablante). |

@@ -242,16 +242,16 @@ def test_json_diarization_va_dentro_del_bloque_engine(tmp_path):
 def test_pipeline_whispercpp_fixture_a_write_json(tmp_path):
     """Contrato dual de punta a punta: la fixture real de -ojf pasa por el parser del
     núcleo, se convierte en LabeledSegments (el puente que hoy hace el CLI) y sale por
-    write_json. test_engines.py no cubre este último tramo; aquí vive."""
-    from speechtotext.core.engines import _parse_ojf
+    write_json. test_whispercpp_backend.py no cubre este último tramo; aquí vive."""
+    from speechtotext.asr.whispercpp import parse_ojf
 
     fixture = Path(__file__).parent / "fixtures" / "whispercpp_ojf.json"
-    raw_segments, raw_info = _parse_ojf(json.loads(fixture.read_text(encoding="utf-8")))
+    raw_segments, language = parse_ojf(json.loads(fixture.read_text(encoding="utf-8")))
     segs = [LabeledSegment(s.start, s.end, s.text) for s in raw_segments]
     # el parser no fabrica duration (ley G5); la fabrica el orquestador — aquí, el test
     info = SimpleNamespace(
-        language=raw_info.language,
-        language_probability=raw_info.language_probability,
+        language=language,
+        language_probability=None,
         duration=segs[-1].end,
     )
     p = tmp_path / "o.json"

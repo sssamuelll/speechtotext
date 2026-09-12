@@ -359,7 +359,7 @@ El esquema completo, con qué claves aparecen y cuándo, está en
 ```
 src/speechtotext/
 ├── core/                 el camino de la transcripción
-│   ├── engines.py        multimotor: faster-whisper / whisper.cpp + degradaciones
+│   ├── transcribe.py     archivo → Transcript: ruta, decodificación única, trozos, progreso
 │   ├── enginepin.py      descarga y verificación por SHA-256 del binario y ggml
 │   ├── chunked.py        troceo por silencios, checkpoint y paralelismo
 │   ├── finder.py         índice rápido y búsqueda de regiones (subcomando find)
@@ -380,7 +380,11 @@ src/speechtotext/
 │   ├── level.py          ganancia fija con limitador
 │   ├── fingerprint.py    huella criptográfica de un pipeline de audio
 │   └── types.py          modelos de dominio inmutables
-├── asr/                  contratos provider-neutral de transcripción
+├── asr/                  el contrato de motor y sus dos backends
+│   ├── base.py           AsrBackend, Caps, AsrError
+│   ├── types.py          TranscriptionRequest / TranscriptionResult
+│   ├── faster_whisper.py FasterWhisperBackend
+│   └── whispercpp.py     WhisperCppBackend (subprocess sobre whisper-cli pinneado)
 └── cli/app.py            typer: transcribe / find / enroll / voices / forget / bench
 ```
 

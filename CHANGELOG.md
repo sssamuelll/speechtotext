@@ -9,6 +9,14 @@ Lo marcado como **rompe** exige cambios en el código que consume la librería.
 
 ## Sin publicar
 
+### Añadido
+
+- `core.transcribe.transcribe()`: un archivo (o muestras) entra, un `Transcript` sale, con
+  progreso por callback y cancelación. Una sola decodificación del audio; el archivo corto
+  y el largo recorren el mismo camino. Contrato en [`docs/api.md`](docs/api.md#transcribe).
+- `WhisperCppBackend` implementa el mismo contrato que `FasterWhisperBackend`; el CLI,
+  `bench` y `find` construyen los motores por un solo sitio.
+
 ### Cambiado — rompe
 
 - **Se extrajeron el arnés de evaluación y la cadena de custodia**: `evaluation/`,
@@ -33,6 +41,20 @@ Lo marcado como **rompe** exige cambios en el código que consume la librería.
   Con una ruta, el `model` del resultado pasa a ser el nombre del directorio
   (`Path.name`), no el `model_id` del manifiesto; si el envoltorio necesita
   conservar ese id, sobreescribe la propiedad `model_id` del backend.
+- **`AsrBackend.transcribe` recibe muestras, no un `AudioClip`**: float32 mono a 16 kHz.
+  Quien tenga un clip pasa `clip.view("asr").samples`. El Protocol declara además `caps`,
+  `engine_version`, `quant` y `device`.
+- `TranscriptionRequest` gana `vad: bool = False`; entra al `fingerprint`, así que las
+  huellas de peticiones cambian una vez. `language="auto"` es válido.
+- El texto de `TranscriptionSegment` y `TranscriptionWord` se devuelve crudo (con el
+  espacio inicial del motor); `result.text` sigue recortado.
+- `speakers.diarization.diarize(samples, sample_rate, num_speakers=None)` recibe muestras;
+  `read_wav(path)` las lee de un wav. `embed_voice(wav_path)` no cambia.
+- `core.chunked`: `chunk_path(identity, start, end)`; se van `run_chunked`,
+  `transcribe_chunk` y `probe_duration`. Los checkpoints viejos dejan de coincidir y se
+  recomputan.
+- Se va `core/engines.py`: el adaptador de whisper.cpp es `asr.whispercpp.WhisperCppBackend`
+  y los CAPS viven en cada backend.
 
 ---
 

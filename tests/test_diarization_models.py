@@ -29,7 +29,10 @@ def test_diarize_returns_turns_and_embeddings(tmp_path):
         check=True,
         capture_output=True,
     )
-    turns, embeddings = diarize(str(wav))
+    from speechtotext.speakers.diarization import read_wav
+
+    samples, rate = read_wav(wav)
+    turns, embeddings = diarize(samples, rate)
     assert isinstance(turns, list)
     assert isinstance(embeddings, dict)
 
@@ -66,3 +69,35 @@ def test_get_pipeline_baja_los_batch_sizes(monkeypatch):
     assert pipe.segmentation_batch_size == diarization._BATCH == 8
     assert diarization._get_pipeline() is pipe  # sigue siendo singleton
     assert len(creado) == 1
+
+
+def test_read_wav_promedia_canales_y_normaliza(tmp_path):
+    import wave
+
+    import numpy as np
+
+    from speechtotext.speakers.diarization import read_wav
+
+    izq = np.full(100, 16384, dtype="<i2")
+    der = np.full(100, -16384, dtype="<i2")
+    estereo = np.column_stack([izq, der]).reshape(-1)
+    wav = tmp_path / "st.wav"
+    with wave.open(str(wav), "wb") as w:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(8000)
+        w.writeframes(estereo.tobytes())
+    samples, rate = read_wav(wav)
+    assert rate == 8000 and samples.dtype == np.float32 and samples.shape == (100,)
+    assert float(np.abs(samples).max()) == 0.0  # la media de +0.5 y -0.5
+
+
+def test_waveform_para_pyannote_es_un_tensor_1xN():
+    torch = pytest.importorskip("torch")
+    import numpy as np
+
+    from speechtotext.speakers.diarization import _waveform
+
+    wf = _waveform(np.zeros(160, dtype=np.float32), 16000)
+    assert wf["sample_rate"] == 16000
+    assert isinstance(wf["waveform"], torch.Tensor) and tuple(wf["waveform"].shape) == (1, 160)

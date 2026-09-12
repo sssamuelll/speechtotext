@@ -4,10 +4,13 @@ import hashlib
 import json
 import time
 from dataclasses import dataclass
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
 from typing import Callable
 
-from speechtotext.asr.base import AsrError
+import numpy as np
+
+from speechtotext.asr.base import AsrError, Caps
 from speechtotext.asr.types import (
     NativeSignals,
     SegmentNativeSignals,
@@ -16,7 +19,6 @@ from speechtotext.asr.types import (
     TranscriptionSegment,
     TranscriptionWord,
 )
-from speechtotext.audio.types import AudioClip
 
 
 @dataclass(frozen=True)
@@ -62,6 +64,7 @@ class FasterWhisperConfig:
 
 class FasterWhisperBackend:
     backend_id = "faster-whisper"
+    caps = Caps(hotwords="honrado", vad="honrado", word_timestamps="honrado")
 
     def __init__(
         self,
@@ -106,6 +109,21 @@ class FasterWhisperBackend:
     def model_version(self) -> str:
         return self._model_version
 
+    @property
+    def engine_version(self) -> str:
+        try:
+            return f"faster-whisper {_pkg_version('faster-whisper')}"
+        except PackageNotFoundError:
+            return "faster-whisper"
+
+    @property
+    def quant(self) -> str:
+        return self.config.compute_type
+
+    @property
+    def device(self) -> str:
+        return self.config.device
+
     def warm(self) -> None:
         if self._model is not None:
             return
@@ -125,17 +143,17 @@ class FasterWhisperBackend:
 
     def transcribe(
         self,
-        clip: AudioClip,
+        samples: np.ndarray,
         request: TranscriptionRequest,
     ) -> TranscriptionResult:
         self.warm()
         started = self._clock()
         try:
             raw_segments, info = self._model.transcribe(
-                clip.view("asr").samples,
-                language=request.language,
+                samples,
+                language=None if request.language == "auto" else request.language,
                 beam_size=request.beam_size,
-                vad_filter=False,
+                vad_filter=request.vad,
                 hotwords=", ".join(request.hotwords) or None,
                 initial_prompt=request.context,
                 condition_on_previous_text=False,
@@ -156,7 +174,7 @@ class FasterWhisperBackend:
         for raw in raw_segments:
             words = tuple(
                 TranscriptionWord(
-                    text=word.word.strip(),
+                    text=word.word,
                     start=float(word.start),
                     end=float(word.end),
                     confidence=(
@@ -187,7 +205,7 @@ class FasterWhisperBackend:
             segment = TranscriptionSegment(
                 float(raw.start),
                 float(raw.end),
-                raw.text.strip(),
+                raw.text,
                 words,
                 signals,
             )
@@ -211,8 +229,8 @@ class FasterWhisperBackend:
         warnings: list[str] = []
         if not text:
             warnings.append("empty_transcript")
-        language = str(getattr(info, "language", request.language))
-        if language != request.language:
+        language = str(getattr(info, "language", None) or request.language)
+        if request.language != "auto" and language != request.language:
             warnings.append("language_mismatch")
         return TranscriptionResult(
             text=text,

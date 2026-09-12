@@ -271,23 +271,61 @@ los tipos de `asr/`, lo inválido no llega a existir.
 
 ---
 
-## Capa `asr/`: contratos sin cableado
+## Capa `asr/`: el único contrato de motor
 
-`speechtotext.asr` define una interfaz provider-neutral — `AsrBackend`,
-`TranscriptionRequest`, `TranscriptionResult`, `NativeSignals` y compañía — con
-validación estricta y dataclasses inmutables.
+`speechtotext.asr` define el motor de voz a texto: `AsrBackend`, `Caps`,
+`TranscriptionRequest`, `TranscriptionResult`, `NativeSignals` y compañía, con
+validación estricta y dataclasses inmutables. **Todo camino pasa por aquí**: el CLI,
+`bench`, `find` y `transcribe()` construyen un backend y le hablan igual.
 
-> **Ningún camino del CLI la usa hoy.** `speechtotext transcribe` va directo a
-> `core.engines`. Si la adoptas, estás construyendo sobre una capa paralela, no
-> sobre el camino que ejercita la suite de transcripción.
+```python
+class AsrBackend(Protocol):
+    backend_id: str          # "faster-whisper" | "whispercpp"
+    caps: Caps               # hotwords / vad / word_timestamps -> honrado | degradado | rechazado
+    model_id: str; model_version: str; engine_version: str; quant: str; device: str
+    def warm(self) -> None                                  # carga (una vez); el objeto es la caché
+    def transcribe(self, samples: np.ndarray, request: TranscriptionRequest) -> TranscriptionResult
+```
 
-`FasterWhisperBackend(model, config=None, *, model_version="unpinned")` es su única
-implementación y no se reexporta: se importa desde `speechtotext.asr.faster_whisper`.
-`model` es un nombre (`"large-v3"`, lo resuelve faster-whisper desde HF Hub) o una
-ruta a un directorio CTranslate2 (se carga solo local). No verifica pesos: quien lo
-necesite envuelve el backend con su verificación y pasa la ruta y la revisión.
-Importar `speechtotext.asr` no carga `faster_whisper` — la dependencia pesada
-entra solo si pides el backend.
+Entra **float32 mono a 16 000 Hz** y nada más; quien llama resamplea (`core.transcribe.load_audio`
+lo hace desde cualquier archivo). El texto de segmentos y palabras se devuelve tal como lo
+emite el motor, con su espacio inicial: recortar es de quien presenta.
+
+Dos implementaciones, ninguna reexportada (importar `speechtotext.asr` no carga motores):
+
+- `speechtotext.asr.faster_whisper.FasterWhisperBackend(model, config=None, *, model_version="unpinned")`
+  — `model` es un nombre (lo resuelve faster-whisper desde HF Hub) o una ruta a un
+  directorio CTranslate2 (solo local). Honra hotwords, VAD y palabras.
+- `speechtotext.asr.whispercpp.WhisperCppBackend(model)` — binario y modelo GGML pinneados
+  por SHA-256 (`core/enginepin.py`), CUDA siempre, `q5_0`. Rechaza hotwords (el prompt es
+  inerte bajo `-mc 0`), degrada VAD y palabras, y no emite señales nativas.
+
+`TranscriptionRequest(language="es", hotwords=(), word_timestamps=True, beam_size=5,
+context=None, vad=False)`; `language="auto"` deja detectar. El `fingerprint` incluye `vad`.
+
+---
+
+## `transcribe()`
+
+```python
+from speechtotext.core.transcribe import transcribe, Transcript, Progress, AsrError
+
+t = transcribe(Path("reunion.mp4"), model="large-v3", language="auto", on_progress=print)
+```
+
+Un archivo (o muestras 16 kHz mono) entra, un `Transcript` sale: `segments` (con hablante y
+señales nativas; la marca `suspect` la calcula el escritor JSON con `is_suspect`), `language`,
+`language_probability`, `duration`, `speech_s`,
+`gaps`, `engine`, `request` (la efectiva, tras CAPS), `warnings` y `diarization`. Una sola
+decodificación; el archivo corto y el largo son el mismo camino con n trozos; los trozos
+dejan checkpoint por contenido en `~/.speechtotext/chunks`. El núcleo nunca imprime:
+`on_progress` recibe `Progress(stage, done, total, detail)` con etapas `decode → load →
+transcribe → diarize`; `cancel` es un `threading.Event` que se mira entre trozos.
+
+Errores: `AsrError(code, recoverable, message)` con `code` en `unsupported_option`,
+`out_of_memory`, `backend_failed`, `cancelled`, `diarize_unavailable`, `diarize_failed`;
+`AudioDecodeError` si el archivo no se puede abrir. `backend=` permite reutilizar un
+modelo caliente entre llamadas.
 
 ---
 
