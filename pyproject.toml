@@ -1,7 +1,7 @@
 [project]
 name = "speechtotext"
 version = "0.6.0.dev0"
-description = "Transcripción offline con faster-whisper: audio, ASR, hablantes y evaluación, todo local."
+description = "Transcripción offline con faster-whisper: audio, ASR y hablantes, todo local."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

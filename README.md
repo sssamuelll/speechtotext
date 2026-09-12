@@ -2,12 +2,12 @@
 
 Librería y CLI de voz a texto **100% local**: transcripción con
 [`faster-whisper`](https://github.com/SYSTRAN/faster-whisper), calidad de audio,
-diarización e identificación de hablantes, y evaluación. Sin APIs externas, sin
+diarización e identificación de hablantes. Sin APIs externas, sin
 coste por uso.
 
 ## Alcance y gobernanza
 
-- Lo **genérico** (audio, ASR, hablantes, evaluación) entra aquí; lo **específico
+- Lo **genérico** (audio, ASR, hablantes) entra aquí; lo **específico
   de una app** se queda en la app consumidora.
 - Los consumidores fijan la dependencia a un **tag o SHA**
   (`speechtotext @ git+https://github.com/sssamuelll/speechtotext@v0.5.0`),
@@ -28,9 +28,7 @@ coste por uso.
   - Linux/macOS: `apt install ffmpeg` / `brew install ffmpeg`
   - Windows: descarga desde el sitio oficial y añade `ffmpeg.exe` al PATH
 
-> Transcripción, diarización y búsqueda corren en Linux, macOS y Windows. Los
-> subsistemas de integridad (`models/`, `security/`) y el arnés de evaluación con
-> corpus privado son **solo Windows**: dependen de handles, ACLs y cifrado NTFS.
+> Transcripción, diarización y búsqueda corren en Linux, macOS y Windows.
 
 ## Instalación
 
@@ -40,9 +38,6 @@ pip install -e .
 
 # CLI + diarización e identificación de hablantes (pyannote + torch, ~2 GB)
 pip install -e ".[diarize]"
-
-# Arnés de evaluación y calibración (scikit-learn + scipy)
-pip install -e ".[evaluation]"
 
 # Suite de tests
 pip install -e ".[dev]"
@@ -386,10 +381,6 @@ src/speechtotext/
 │   ├── fingerprint.py    huella criptográfica de un pipeline de audio
 │   └── types.py          modelos de dominio inmutables
 ├── asr/                  contratos provider-neutral de transcripción
-├── models/               manifiestos y verificación de modelos (Windows)
-├── confidence/           features y calibración de confianza
-├── evaluation/           corpus, splits, métricas y runner de evaluación
-├── security/             artefactos privados de runtime (Windows)
 └── cli/app.py            typer: transcribe / find / enroll / voices / forget / bench
 ```
 
@@ -400,7 +391,6 @@ src/speechtotext/
 | Documento | Qué contiene |
 |---|---|
 | [`docs/api.md`](docs/api.md) | Contrato para consumidores: JSON, tipos públicos, garantías. |
-| [`docs/audio-evaluation.md`](docs/audio-evaluation.md) | Runbook del corpus privado, evaluación y calibración. |
 | [`docs/README.md`](docs/README.md) | Índice de `docs/`, con qué está vigente y qué es histórico. |
 | [`CHANGELOG.md`](CHANGELOG.md) | Qué cambió entre tags, y qué rompe. |
 
@@ -409,7 +399,7 @@ src/speechtotext/
 ## Desarrollo
 
 ```bash
-pip install -e ".[dev,evaluation]"
+pip install -e ".[dev]"
 pytest -q
 ```
 

@@ -85,7 +85,7 @@ Marca un segmento para que lo revises, no dictamina que esté mal. Dispara si:
 
 El segundo criterio es una heurística de densidad sin calibrar. Trátalo como una
 sugerencia de revisión; si necesitas una decisión con precisión medida, usa el
-arnés de [evaluación](audio-evaluation.md), no este campo.
+arnés de evaluación de tu consumidor, no este campo.
 
 ---
 
@@ -171,7 +171,7 @@ sintonices: cambiarlas cambia el significado de los números que ya guardaste.
   de 80 MB sobre 20 s, y crece menos de 1.5× al pasar a 120 s.
 
 > El umbral `voice_band_ratio >= 0.4` que aparece en el ejemplo es el que usa
-> aurelius en producción para decidir si hubo voz bajo un texto transcrito. Es un
+> un consumidor en producción para decidir si hubo voz bajo un texto transcrito. Es un
 > valor calibrado contra su micrófono y su caso, no una constante de esta
 > librería. Calibra el tuyo con `scripts/validar_evidencia_de_voz.py`, que compara
 > un tramo de habla real contra uno de cuarto vacío e imprime el solape.
@@ -251,32 +251,6 @@ defecto del CLI es `0.5`.
 
 ---
 
-## Verificación de modelos
-
-`speechtotext.models` prueba que un directorio de pesos está intacto antes de que
-un backend lo cargue. **Solo Windows.**
-
-```python
-from speechtotext.models import load_model_manifest, verify_model_files
-
-manifest = load_model_manifest(ruta, model_root=raiz, expected_fingerprint=huella)
-with verify_model_files(manifest, raiz) as artefacto:
-    ...
-```
-
-Público: `ModelFile`, `ModelManifest`, `VerifiedModelArtifact`, `ModelIntegrityError`,
-`load_model_manifest`, `parse_model_manifest_bytes`, `verify_model_files`.
-
-El manifiesto usa el esquema `speechtotext.model/v1` y exige una `revision`
-inmutable (SHA de git o `sha256:<hex>`). La verificación exige que el árbol sea
-de solo lectura, que el inventario coincida exactamente — ni un archivo de más ni
-de menos — y vuelve a comprobar el inventario después de hashear. Todo fallo
-levanta `ModelIntegrityError`: nunca degrada, nunca continúa con una advertencia.
-
-`VerifiedModelArtifact` es un context manager de un solo uso.
-
----
-
 ## Señales no finitas: dos políticas, a propósito
 
 El mismo trío de señales (`no_speech`, `avg_logprob`, `compression_ratio`) se
@@ -307,25 +281,22 @@ validación estricta y dataclasses inmutables.
 > `core.engines`. Si la adoptas, estás construyendo sobre una capa paralela, no
 > sobre el camino que ejercita la suite de transcripción.
 
-`FasterWhisperBackend` es su única implementación y no se reexporta: se importa
-desde `speechtotext.asr.faster_whisper`. Importar `speechtotext.asr` no carga
-`faster_whisper` — la dependencia pesada entra solo si pides el backend.
+`FasterWhisperBackend(model, config=None, *, model_version="unpinned")` es su única
+implementación y no se reexporta: se importa desde `speechtotext.asr.faster_whisper`.
+`model` es un nombre (`"large-v3"`, lo resuelve faster-whisper desde HF Hub) o una
+ruta a un directorio CTranslate2 (se carga solo local). No verifica pesos: quien lo
+necesite envuelve el backend con su verificación y pasa la ruta y la revisión.
+Importar `speechtotext.asr` no carga `faster_whisper` — la dependencia pesada
+entra solo si pides el backend.
 
 ---
 
 ## Módulos que no son contrato de esta librería
 
-- **`confidence/`** — calibra la probabilidad de que un segmento sea usable, a
-  partir de 13 features. Es infraestructura del arnés de evaluación
-  (`python -m speechtotext.evaluation`), no algo que `speechtotext transcribe`
-  active. No lo busques en la salida del CLI.
-- **`evaluation/`** — corpus privado, métricas y gate de aceptación. Se opera por
-  su CLI; ver [`audio-evaluation.md`](audio-evaluation.md). Solo Windows.
-- **`security/`** — artefactos privados de runtime bajo `%LOCALAPPDATA%`, con ACL
-  de un solo usuario y cifrado NTFS verificados por handle. Dentro de este repo su
-  único llamador es su propio `python -m speechtotext.security promote`; el
-  consumidor real vive en aurelius. Solo Windows, y falla cerrado en sesión
-  elevada a propósito.
 - **`core/`** no tiene `__init__.py` público: se importa por submódulo
   (`from speechtotext.core.formats import write_json`). Lo que uses de ahí es
   interno y puede moverse entre versiones.
+
+Los paquetes `evaluation/`, `security/`, `models/` y `confidence/` que existían
+hasta la `0.5.1` se extrajeron en la `0.6.0`: eran el arnés de evaluación y la
+cadena de custodia de un consumidor, no parte de transcribir audio.
