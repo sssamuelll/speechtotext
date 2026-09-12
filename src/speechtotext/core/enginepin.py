@@ -16,6 +16,8 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+from speechtotext.asr.base import AsrError
+
 # Subir el pin = commit consciente con re-benchmark en la 980 (riesgo PTX 500 sin
 # garantia futura). El zip es autocontenido (DLLs CUDA propias, solo exige driver).
 ENGINE_PIN = {
@@ -113,7 +115,19 @@ def _download_and_extract(root: Path) -> None:
 
 
 def ensure_engine(root: Path | None = None) -> Path:
-    """Path del whisper-cli.exe verificado; descarga y extrae si falta. Fail-closed."""
+    """Path del whisper-cli verificado. win32: el zip pinneado (descarga y extrae si falta,
+    fail-closed por sha256). macOS/Linux: `whisper-cli` del PATH (brew o compilado); sin
+    release oficial para esos sistemas no se descarga ni se compila nada."""
+    if sys.platform != "win32":
+        found = shutil.which("whisper-cli")
+        if not found:
+            raise AsrError(
+                "backend_failed", False,
+                "whisper-cli no está en el PATH. Instálalo: brew install whisper-cpp (macOS) o "
+                "compílalo desde https://github.com/ggml-org/whisper.cpp (Linux); "
+                "o usa --engine faster-whisper",
+            )
+        return Path(found)
     root = Path(root) if root is not None else install_root()
     exe = root / ENGINE_PIN["exe_relpath"]
     if not exe.exists():

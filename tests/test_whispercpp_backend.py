@@ -3,6 +3,7 @@ import itertools
 import json
 import os
 import shutil
+import sys
 import wave
 from pathlib import Path
 from types import SimpleNamespace
@@ -55,7 +56,8 @@ def _samples(seconds=100.0):
     return np.zeros(int(seconds * 16000), dtype=np.float32)
 
 
-def test_contrato_caps_e_identidad():
+def test_contrato_caps_e_identidad(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
     backend = _backend(lambda *a, **k: None)
     assert isinstance(backend, AsrBackend)
     assert backend.backend_id == "whispercpp"
@@ -65,6 +67,16 @@ def test_contrato_caps_e_identidad():
     assert backend.model_id == "large-v3"
     assert backend.model_version == enginepin.MODELS_PIN["large-v3-q5_0"]["sha256"]
     assert backend.engine_version == f"whisper.cpp {enginepin.ENGINE_PIN['version']}"
+
+
+def test_fuera_de_win32_device_native_y_version_sin_pin(monkeypatch):
+    # El binario del PATH decide el dispositivo según su build y no lo dice; etiquetar
+    # cuda en macOS sería mentir en el JSON. Misma etiqueta que core.probe.choose_route.
+    monkeypatch.setattr(sys, "platform", "darwin")
+    backend = _backend(lambda *a, **k: None)
+    assert backend.device == "native"
+    assert backend.engine_version == "whisper.cpp (PATH, sin pin)"
+    assert backend.model_version == enginepin.MODELS_PIN["large-v3-q5_0"]["sha256"]  # el ggml sí va pinneado
 
 
 def test_modelo_no_pinneado_se_rechaza_al_construir():
