@@ -1,9 +1,4 @@
-from speechtotext.asr.base import (
-    AsrBackend,
-    AsrError,
-    CalibratedAsrBackend,
-    VerifiedLocalAsrBackend,
-)
+from speechtotext.asr.base import AsrBackend, AsrError
 from speechtotext.asr.types import (
     NativeSignals,
     SegmentNativeSignals,
@@ -16,8 +11,6 @@ from speechtotext.asr.types import (
 __all__ = [
     "AsrBackend",
     "AsrError",
-    "CalibratedAsrBackend",
-    "VerifiedLocalAsrBackend",
     "NativeSignals",
     "SegmentNativeSignals",
     "TranscriptionRequest",

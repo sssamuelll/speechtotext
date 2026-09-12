@@ -4,6 +4,7 @@ import hashlib
 import json
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 from speechtotext.asr.base import AsrError
@@ -16,10 +17,6 @@ from speechtotext.asr.types import (
     TranscriptionWord,
 )
 from speechtotext.audio.types import AudioClip
-from speechtotext.models.manifest import (
-    ModelIntegrityError,
-    VerifiedModelArtifact,
-)
 
 
 @dataclass(frozen=True)
@@ -68,57 +65,48 @@ class FasterWhisperBackend:
 
     def __init__(
         self,
-        config: FasterWhisperConfig,
-        model_artifact: VerifiedModelArtifact,
+        model: str | Path,
+        config: FasterWhisperConfig | None = None,
         *,
+        model_version: str = "unpinned",
         model_factory: Callable | None = None,
         clock: Callable[[], float] = time.perf_counter,
     ) -> None:
-        if not isinstance(model_artifact, VerifiedModelArtifact):
-            raise TypeError("FasterWhisperBackend exige VerifiedModelArtifact")
-        model_artifact.require_active()
-        manifest = model_artifact.manifest
-        if manifest.format != "ctranslate2":
-            raise ValueError("faster-whisper exige format=ctranslate2")
-        self.config = config
-        self._model_artifact = model_artifact
+        # Un nombre lo resuelve faster-whisper (cache de HF Hub); una ruta es un
+        # directorio CTranslate2 y se carga solo local. Este backend no verifica pesos:
+        # quien lo haga por manifiesto lo envuelve, pasa la ruta verificada y su
+        # revision como model_version.
+        if isinstance(model, Path):
+            self._model_path: Path | None = model
+            self._model_id = model.name
+        elif isinstance(model, str):
+            if not model.strip():
+                raise ValueError("model no puede estar vacio")
+            self._model_path = None
+            self._model_id = model
+        else:
+            raise TypeError("model debe ser un nombre (str) o una ruta (Path)")
+        if not isinstance(model_version, str) or not model_version.strip():
+            raise ValueError("model_version no puede estar vacio")
+        self.config = config if config is not None else FasterWhisperConfig()
+        self._model_version = model_version
         self._model_factory = model_factory
         self._clock = clock
         self._model = None
-
-    @property
-    def model_artifact(self) -> VerifiedModelArtifact:
-        return self._model_artifact
-
-    @property
-    def backend_artifact_kind(self) -> str:
-        return "local_model_manifest"
-
-    @property
-    def backend_artifact_fingerprint(self) -> str:
-        return self.model_artifact.fingerprint
 
     @property
     def config_fingerprint(self) -> str:
         return self.config.fingerprint
 
     @property
-    def manifest(self):
-        return self.model_artifact.manifest
-
-    @property
     def model_id(self) -> str:
-        return self.manifest.model_id
+        return self._model_id
 
     @property
     def model_version(self) -> str:
-        return self.manifest.revision
+        return self._model_version
 
     def warm(self) -> None:
-        try:
-            self.model_artifact.require_active()
-        except ModelIntegrityError as exc:
-            raise AsrError("model_integrity", False, str(exc)) from exc
         if self._model is not None:
             return
         factory = self._model_factory
@@ -127,12 +115,12 @@ class FasterWhisperBackend:
 
             factory = WhisperModel
         self._model = factory(
-            str(self.model_artifact.root),
+            str(self._model_path) if self._model_path is not None else self._model_id,
             device=self.config.device,
             compute_type=self.config.compute_type,
             cpu_threads=self.config.cpu_threads,
             num_workers=self.config.num_workers,
-            local_files_only=True,
+            local_files_only=self._model_path is not None,
         )
 
     def transcribe(
@@ -232,8 +220,8 @@ class FasterWhisperBackend:
             words=tuple(all_words),
             segments=tuple(segments),
             backend=self.backend_id,
-            model=self.manifest.model_id,
-            model_version=self.manifest.revision,
+            model=self._model_id,
+            model_version=self._model_version,
             latency_ms=elapsed_ms,
             native_signals=NativeSignals(
                 no_speech=max(no_speech) if no_speech else None,

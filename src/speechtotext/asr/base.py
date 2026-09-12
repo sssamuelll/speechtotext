@@ -4,7 +4,6 @@ from typing import Protocol, runtime_checkable
 
 from speechtotext.audio.types import AudioClip
 from speechtotext.asr.types import TranscriptionRequest, TranscriptionResult
-from speechtotext.models import VerifiedModelArtifact
 
 
 class AsrError(RuntimeError):
@@ -33,21 +32,3 @@ class AsrBackend(Protocol):
         request: TranscriptionRequest,
     ) -> TranscriptionResult:
         ...
-
-
-@runtime_checkable
-class CalibratedAsrBackend(AsrBackend, Protocol):
-    @property
-    def backend_artifact_kind(self) -> str: ...
-
-    @property
-    def backend_artifact_fingerprint(self) -> str: ...
-
-    @property
-    def config_fingerprint(self) -> str: ...
-
-
-@runtime_checkable
-class VerifiedLocalAsrBackend(CalibratedAsrBackend, Protocol):
-    @property
-    def model_artifact(self) -> VerifiedModelArtifact: ...
