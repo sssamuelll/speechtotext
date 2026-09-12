@@ -9,6 +9,10 @@ Lo marcado como **rompe** exige cambios en el código que consume la librería.
 
 ## Sin publicar
 
+---
+
+## v0.5.1 — 2026-09-12
+
 ### Añadido
 
 - Las señales nativas del motor llegan al JSON: cada segmento puede traer
