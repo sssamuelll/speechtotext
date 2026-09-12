@@ -89,13 +89,17 @@ def index_path(audio: Path, scan_model: str) -> Path:
 
 
 def build_index(audio: Path, scan_model: str) -> list[dict]:
-    from faster_whisper import WhisperModel
+    from speechtotext.asr.faster_whisper import FasterWhisperBackend
+    from speechtotext.asr.types import TranscriptionRequest
+    from speechtotext.core.transcribe import load_audio
 
-    model = WhisperModel(scan_model, device="cpu", compute_type="int8")
-    segments_iter, _info = model.transcribe(str(audio), vad_filter=True)
+    backend = FasterWhisperBackend(scan_model)
+    result = backend.transcribe(
+        load_audio(audio), TranscriptionRequest(language="auto", vad=True, word_timestamps=False),
+    )
     return [
         {"start": round(s.start, 3), "end": round(s.end, 3), "text": s.text.strip()}
-        for s in segments_iter
+        for s in result.segments
     ]
 
 

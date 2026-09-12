@@ -27,28 +27,28 @@ from pathlib import Path
 from typing import Optional
 
 import typer
-from faster_whisper import WhisperModel
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
-from speechtotext.core.engines import (
+from types import SimpleNamespace
+
+from speechtotext.asr.base import AsrError
+from speechtotext.audio.io import AudioDecodeError
+from speechtotext.core.transcribe import (
     ENGINE_FASTER,
     ENGINE_WHISPERCPP,
     ENGINES,
-    make_engine,
-    quant_for,
+    resolve_route,
+    transcribe as core_transcribe,
 )
 from speechtotext.core.formats import (
-    find_gaps,
     parse_formats,
     write_json,
     write_srt,
     write_txt,
     write_vtt,
 )
-from speechtotext.core.postprocess import normalize_hours
-from speechtotext.core.segments import LabeledSegment, native_signals
 
 # En Windows la consola suele ser cp1252 y rich escribe glifos Unicode (spinner
 # Braille, etc.) que revientan al codificar. Forzamos UTF-8 en los streams.
@@ -114,23 +114,6 @@ def _resolve_hotwords(hotwords: Optional[str], hotwords_file: Optional[Path]) ->
     return ", ".join(parts) or None
 
 
-def _transcribe_opts(lang: Optional[str], beam_size: int, vad: bool,
-                     hotwords: Optional[str], word_timestamps: bool = False) -> dict:
-    """Opciones de decodificación de Whisper. condition_on_previous_text=False corta el
-    arrastre de contexto entre ventanas: sin esto el modelo alucina hacia frases comunes
-    (Fase 0, docs/benchmark-turboscribe.md). word_timestamps sólo se pide al diarizar:
-    la asignación palabra→hablante parte los segmentos en el cambio de voz. Aquí aterrizan
-    futuros knobs de tuning."""
-    return {
-        "language": lang,
-        "beam_size": beam_size,
-        "vad_filter": vad,
-        "hotwords": hotwords,
-        "condition_on_previous_text": False,
-        "word_timestamps": word_timestamps,
-    }
-
-
 def transcribe_file(
     audio: Path,
     output: Optional[Path],
@@ -150,7 +133,8 @@ def transcribe_file(
     jobs: int = 4,
     engine: str = ENGINE_FASTER,
 ) -> None:
-    """Transcribe un archivo (opcionalmente con diarización) y escribe los formatos pedidos."""
+    """Transcribe un archivo (opcionalmente con diarización) y escribe los formatos pedidos.
+    Todo el trabajo lo hace core.transcribe; aquí se parsean flags, se pinta y se escribe."""
     try:
         requested = parse_formats(formats)
     except ValueError as e:
@@ -158,286 +142,151 @@ def transcribe_file(
 
     base = _resolve_output_base(audio, output)
     base.parent.mkdir(parents=True, exist_ok=True)
-
-    lang = None if language.lower() == "auto" else language
-    if engine not in ENGINES:
-        raise typer.BadParameter(
-            f"engine {engine!r} no existe; disponibles: {', '.join(ENGINES)}"
-        )
+    language = "auto" if language.lower() == "auto" else language
     hotwords = (hotwords or "").strip() or None
 
-    # Contrato de capacidades (CAPS, plan 2.2): se valida ANTES de construir modelo
-    # alguno y antes del import de chunked. Jamás silencio, jamás sustitución callada.
-    if engine == ENGINE_WHISPERCPP:
-        # El binario pinneado es build CUDA y corre en la GPU SIEMPRE (medido en el
-        # smoke: con -d cpu el exe usa la GPU igual, el adaptador no pasa device).
-        # Etiquetar cpu sería mentir en el header, la llave y el JSON: el device
-        # efectivo es cuda, se declara, y el remapeo se AVISA — pisar un -d cpu
-        # explícito en silencio sería la sustitución callada que el contrato prohíbe.
-        # Un modo CPU real (-ng) es post-ship. typer no distingue default de
-        # explícito, así que el aviso sale siempre que no pidieran cuda.
-        if device != "cuda":
-            console.print(
-                "[yellow]whisper.cpp (build CUDA) corre en la GPU; device=cuda[/yellow]"
-            )
-        device = "cuda"
-        from speechtotext.core.enginepin import _MODEL_ALIAS
-
-        if model not in _MODEL_ALIAS:
-            # Sin pre-validación, ensure_model revienta con RuntimeError crudo a
-            # mitad de corrida; aquí el error llega antes de construir nada.
-            raise typer.BadParameter(
-                f"modelo {model!r} no está pinneado para whispercpp; disponibles: "
-                f"{', '.join(sorted(_MODEL_ALIAS))}"
-            )
-        try:
-            # 'auto' NO resuelve a float16 aquí: fp16 en la 980 pagina bajo WDDM
-            # (0.53x tiempo real, medido). quant_for mapea o rechaza con la medición.
-            compute_type = quant_for(engine, compute_type, device)
-        except ValueError as e:
-            raise typer.BadParameter(str(e))
-        if hotwords:
-            # Rechazo, no degradación: avisar "degradado" sobre un knob inerte
-            # fabricaría un efecto que no ocurrió. Ni modelo ni caché se tocan.
-            console.print(
-                "--hotwords no tiene efecto con whisper.cpp (--prompt es inerte con "
-                "-mc 0, medido 2026-07-27); usa --engine faster-whisper"
-            )
-            raise typer.Exit(2)
-        if vad:
-            console.print("[yellow]whisper.cpp no trae VAD; se transcribe sin filtro[/yellow]")
-            # vad efectivo = False: entra así a opts (misma llave que --no-vad) y
-            # apaga el consejo "prueba --no-vad" del resumen (el motor no tiene VAD).
-            vad = False
-        if diarize:
-            console.print(
-                "[yellow]atribución por segmento (gruesa), sin cortes intra-segmento; "
-                r"la marca \[?] queda activa[/yellow]"
-            )
-        if jobs != 1:
-            # 4 subprocesos × 1.28 GB contra 4096 MiB: WDDM no revienta, pagina 25x
-            # en silencio (medido). El 19.3x de un solo proceso hace innecesario más.
-            # Sin condición de device: bajo whispercpp el device efectivo es cuda siempre.
-            console.print("[yellow]la GPU no paraleliza; jobs=1[/yellow]")
-            jobs = 1
-    elif compute_type == "auto":
-        compute_type = "int8" if device == "cpu" else "float16"
+    try:
+        route = resolve_route(engine, device, compute_type, model)
+    except ValueError as e:
+        raise typer.BadParameter(str(e))
+    if route.reason:
+        console.print(f"[yellow]{route.reason}[/yellow]")
+    if route.engine == ENGINE_WHISPERCPP and jobs != 1:
+        # 4 subprocesos × 1.28 GB contra 4096 MiB: WDDM no revienta, pagina 25x en silencio
+        # (medido). El 19.3x de un solo proceso hace innecesario más.
+        console.print("[yellow]la GPU no paraleliza; jobs=1[/yellow]")
+        jobs = 1
     if hotwords:
         n_terms = len([t for t in hotwords.split(",") if t.strip()])
         # ponytail: se cuentan términos y caracteres, no tokens. El conteo exacto necesita
         # el tokenizer del modelo, que en este punto todavía no está cargado; 223 tokens
-        # son del orden de 600-700 caracteres en español. Techo: si alguien necesita el
-        # número exacto, se cuenta después de construir el modelo.
+        # son del orden de 600-700 caracteres en español.
         console.print(
             f"Hotwords ({n_terms} términos, {len(hotwords)} caracteres): {hotwords}",
-            # markup=False: los términos pueden traer corchetes/acentos que rich malinterpretaría.
             markup=False,
         )
         if n_terms >= 10 or len(hotwords) >= 300:
-            # Techos conservadores, uno por daño verificado: la ablación midió degradación
-            # con 25 términos (con 3 no hubo pérdida, §4 del plan) y la librería trunca
-            # en silencio a los 223 tokens. Se avisa mucho antes de ambos.
             console.print(
                 "[yellow]Lista larga de hotwords: 25 términos degradaron la cobertura "
                 "9 puntos sobre 240 s de audio real (2026-08-03); entran como texto "
                 "previo, no como léxico.[/yellow]"
             )
+    terms = tuple(t.strip() for t in hotwords.split(",") if t.strip()) if hotwords else ()
 
     console.print(
         f"[bold]Modelo[/bold] [cyan]{model}[/cyan] · "
-        f"[bold]device[/bold] [cyan]{device}[/cyan] · "
-        f"[bold]compute[/bold] [cyan]{compute_type}[/cyan]"
+        f"[bold]device[/bold] [cyan]{route.device}[/cyan] · "
+        f"[bold]compute[/bold] [cyan]{route.compute_type}[/cyan]"
     )
-    if engine != ENGINE_FASTER:
-        # El motor no-default se declara en el header (G2); el default queda byte a byte.
+    if route.engine != ENGINE_FASTER:
         from speechtotext.core.enginepin import ENGINE_PIN
 
         console.print(
             f"[bold]Motor[/bold] [cyan]whisper.cpp {ENGINE_PIN['version']}[/cyan] · "
-            f"[cyan]{model} {compute_type}[/cyan] · [cyan]{device}[/cyan]"
+            f"[cyan]{model} {route.compute_type}[/cyan] · [cyan]{route.device}[/cyan]"
         )
-    from speechtotext.core.chunked import run_chunked, should_chunk, probe_duration
 
-    opts = _transcribe_opts(lang, beam_size, vad, hotwords, word_timestamps=diarize)
-    try:
-        if should_chunk(probe_duration(audio), chunk):
-            console.print(f"[bold]Troceado[/bold] (jobs={jobs}) · {model}")
-            segments, info = run_chunked(
-                audio, opts, jobs, model_name=model, device=device,
-                compute_type=compute_type, log=lambda m: console.print(f"  {m}", markup=False),
-                engine=engine,
+    with Progress(
+        SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
+        TimeElapsedColumn(), console=console,
+    ) as progress:
+        task = progress.add_task(f"Transcribiendo {audio.name}", total=None)
+
+        def on_progress(p):
+            if p.stage == "transcribe" and p.total and p.total > 1:
+                progress.update(task, description=f"[{int(p.done)}/{int(p.total)}] {p.detail}",
+                                total=p.total, completed=p.done)
+            else:
+                progress.update(task, description=f"{p.stage} {p.detail}".strip())
+
+        try:
+            t = core_transcribe(
+                audio, model=model, language=language, engine=route.engine,
+                device=route.device, compute_type=route.compute_type, vad=vad,
+                beam_size=beam_size, hotwords=terms, diarize=diarize, speakers=speakers,
+                identify=identify, threshold=threshold, chunk=chunk, jobs=jobs,
+                on_progress=on_progress,
             )
-        elif engine == ENGINE_WHISPERCPP:
-            # whisper-cli es main(char**): el path del usuario jamás viaja en argv.
-            # Se transcodifica a wav 16k mono temporal (ASCII) como hace la ruta troceada.
-            from speechtotext.core.audio import FfmpegMissingError, TranscodeError, transcode_to_wav
-
-            dur = probe_duration(audio)
-            try:
-                wav = transcode_to_wav(audio.read_bytes())
-            except (FfmpegMissingError, TranscodeError) as e:
-                console.print(f"[red]No se pudo procesar el audio:[/red] {e}")
+        except AsrError as e:
+            if e.code == "unsupported_option":
+                console.print(str(e), markup=False)
+                raise typer.Exit(2)
+            if e.code == "out_of_memory":
+                console.print("[red]Se quedó sin memoria al transcribir.[/red]")
+                console.print(f"  {e}", markup=False)
                 raise typer.Exit(1)
-            try:
-                whisper = make_engine(engine, model, device, compute_type)
-                with Progress(
-                    SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
-                    TimeElapsedColumn(), console=console,
-                ) as progress:
-                    task = progress.add_task(f"Transcribiendo {audio.name}", total=None)
-                    segments_iter, info = whisper.transcribe(str(wav), _duration_s=dur, **opts)
-                    segments = list(segments_iter)
-                    progress.update(task, completed=1)
-            finally:
-                wav.unlink(missing_ok=True)
-            # Ley de orquestación: los segmentos pertenecen al motor; info.duration la
-            # fabrica el orquestador (el adaptador no la emite, y :206/:231 la consumen).
-            info.duration = dur
-        else:
-            whisper = WhisperModel(model, device=device, compute_type=compute_type)
-            with Progress(
-                SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
-                TimeElapsedColumn(), console=console,
-            ) as progress:
-                task = progress.add_task(f"Transcribiendo {audio.name}", total=None)
-                segments_iter, info = whisper.transcribe(str(audio), **opts)
-                segments = list(segments_iter)
-                progress.update(task, completed=1)
-    except RuntimeError as e:
-        # El OOM real sube como RuntimeError del allocator ("mkl_malloc: failed to allocate
-        # memory"), y este es el único punto por el que pasan los dos constructores del
-        # camino de transcripción y además la decodificación. Reaccionar al fallo es más
-        # barato y más exacto que sondear la RAM del sistema: nada de psutil ni ctypes.
-        # ponytail: se decide por substring 'alloc', techo conocido; si algún backend
-        # inventa otro texto para el OOM, se propaga crudo — que es la falla correcta.
-        if "alloc" not in str(e).lower():
-            raise
-        console.print("[red]Se quedó sin memoria al transcribir.[/red]")
-        # markup=False: el texto del allocator trae corchetes que rich intentaría parsear.
-        console.print(f"  {e}", markup=False)
-        if engine == ENGINE_WHISPERCPP:
-            # El stderr de CUDA OOM también contiene 'alloc': aconsejar RAM de CPU aquí
-            # sería un falso amigo. El consejo es de VRAM (4 GB en la 980).
-            console.print(
-                "La VRAM de la GPU se agotó. Cierra aplicaciones que usen la GPU, "
-                "prueba un modelo menor o usa [cyan]--engine faster-whisper[/cyan] (CPU)."
-            )
-        else:
-            console.print(
-                "large-v3 pide ~3.5 GB sólo al cargar. Cierra procesos o usa "
-                "[cyan]-m medium[/cyan]. No cubre la muerte nativa de --diarize."
-            )
-        raise typer.Exit(1)
+            if e.code == "diarize_unavailable":
+                console.print(r'[red]Falta el extra de diarización:[/red] pip install -e ".\[diarize]"')
+                raise typer.Exit(1)
+            if e.code == "diarize_failed":
+                console.print(f"[red]La diarización falló:[/red] {e}")
+                console.print(
+                    "Revisa que aceptaste los términos de los modelos pyannote y que HF_TOKEN esté configurado."
+                )
+                raise typer.Exit(1)
+            console.print(str(e), markup=False)
+            raise typer.Exit(1)
+        except AudioDecodeError as e:
+            console.print(f"[red]No se pudo procesar el audio:[/red] {e}")
+            raise typer.Exit(1)
 
-    # La cobertura es la única medida que la herramienta tiene de sí misma: sin ella, `OK`
-    # significa "write_text no lanzó" y una corrida que descartó media conversación se ve
-    # igual que una buena. Se suma ANTES de _run_diarization porque esa partición por
-    # palabras alteraría el conteo. Los segmentos no se solapan y los trozos son contiguos,
-    # así que la suma cruda vale. gaps igual: una sola cantidad, calculada una vez aquí y
-    # pasada al JSON (5.1.3), para que consola y disco no emitan dos números distintos.
-    cov = sum(s.end - s.start for s in segments)
-    # Se calcula SIEMPRE aquí, aunque el probe haya fallado y la consola vaya a callar:
-    # mandarle None a write_json lo hace recalcular sobre los segmentos ya diarizados, que
-    # es el mismo C-13 que este ítem cierra, entrando por la puerta de atrás. Con
-    # duration==0 find_gaps igual devuelve los huecos interiores (el de cola no, porque
-    # duration - cursor sale negativo). Lo que depende de duration es IMPRIMIRLO.
-    gaps = find_gaps(segments, info.duration)
-    if info.duration:
-        ratio = cov / info.duration
-        voz = f"con voz {cov / 60:.1f} de {info.duration / 60:.1f} min ({100 * ratio:.0f}%)"
+    for aviso in t.warnings:
+        # markup=False: "la marca [?]" es texto, no una etiqueta de rich.
+        console.print(aviso, style="yellow", markup=False)
+
+    if t.duration:
+        ratio = t.speech_s / t.duration
+        voz = f"con voz {t.speech_s / 60:.1f} de {t.duration / 60:.1f} min ({100 * ratio:.0f}%)"
     else:
-        # duration==0 es el probe fallido. Reportar 0% sería inventar una medida sobre un
-        # denominador que no existe, y encima se contradice con el conteo de segmentos:
-        # el peor caso posible sería el único que no grita.
         voz = "[yellow]cobertura desconocida (duración no medida)[/yellow]"
-
-    # "Idioma detectado" sobre el flag del propio usuario es una fabricación en el 100% de
-    # las corridas por defecto (-l es): ahí no se midió nada. La probabilidad sólo se
-    # imprime cuando de verdad hubo detección y la ruta la conservó.
-    if lang is not None:
-        idioma = f"Idioma: [bold]{info.language}[/bold] (forzado)"
+    if language != "auto":
+        idioma = f"Idioma: [bold]{t.language}[/bold] (forzado)"
     else:
-        idioma = f"Idioma detectado: [bold]{info.language}[/bold]"
-        if info.language_probability is not None:
-            idioma += f" (prob={info.language_probability:.2f})"
-
-    # El motor resuelto SIEMPRE en el resumen (G2): dos corridas del mismo audio con
-    # texto distinto tienen que ser distinguibles a simple vista.
+        idioma = f"Idioma detectado: [bold]{t.language}[/bold]"
+        if t.language_probability is not None:
+            idioma += f" (prob={t.language_probability:.2f})"
     console.print(
-        f"{idioma} · duración {info.duration:.1f}s · "
-        f"{len(segments)} segmentos · {voz} · motor {engine}"
+        f"{idioma} · duración {t.duration:.1f}s · "
+        f"{len(t.segments)} segmentos · {voz} · motor {route.engine}"
     )
-
-    # La línea de huecos sale incondicional (C-11: el umbral de cobertura se borró, no se
-    # recalibró): es un hecho geométrico sobre la línea de tiempo, no depende de cómo el
-    # VAD remapee los timestamps. Sin huecos se dice explícitamente — callar convertiría la
-    # ausencia en una omisión indistinguible de un fallo del instrumento.
-    # duration falsy = probe fallido: sin denominador no hay línea de tiempo sobre la que
-    # afirmar ni los huecos ni su ausencia, así que ahí no se imprime nada de ellos.
-    if info.duration:
-        if gaps:
-            # ponytail: se listan los primeros 5 huecos y luego "y N más (ver el JSON)"; con
-            # 40 huecos la consola se inunda y el artefacto completo ya existe. Techo: si
-            # alguien pide los 40 en consola, sale un --gaps-all.
-            lista = ", ".join(f"{_fmt(a)}-{_fmt(b)} ({b - a:.0f} s)" for a, b in gaps[:5])
-            if len(gaps) > 5:
-                lista += f", y {len(gaps) - 5} más (ver el JSON)"
-            # El consejo sólo aplica a quien tiene el VAD puesto: sugerir --no-vad a quien ya
-            # lo apagó (o a whispercpp, que no trae VAD) es ruido, y ahí la pérdida viene de
-            # otro lado (el modelo no emitió).
-            consejo = " — prueba --no-vad" if vad else ""
-            plural = "hueco" if len(gaps) == 1 else "huecos"
-            console.print(f"{len(gaps)} {plural} sin texto: {lista}{consejo}")
+    if t.duration:
+        if t.gaps:
+            # ponytail: se listan los primeros 5 huecos y luego "y N más (ver el JSON)".
+            lista = ", ".join(f"{_fmt(a)}-{_fmt(b)} ({b - a:.0f} s)" for a, b in t.gaps[:5])
+            if len(t.gaps) > 5:
+                lista += f", y {len(t.gaps) - 5} más (ver el JSON)"
+            # El consejo sólo aplica a quien tiene el VAD puesto de verdad (la petición
+            # efectiva): bajo whispercpp no hay VAD que apagar.
+            consejo = " — prueba --no-vad" if t.request.vad else ""
+            plural = "hueco" if len(t.gaps) == 1 else "huecos"
+            console.print(f"{len(t.gaps)} {plural} sin texto: {lista}{consejo}")
         else:
-            # find_gaps corta en >= 5.0, no en > 5.0: decir "> 5 s" declararía menos de lo
-            # que la herramienta sabe, y este plan trata justo de eso (Q9).
             console.print("sin huecos de 5 s o más")
 
-    if diarize:
-        segments = _run_diarization(audio, segments, speakers, identify, threshold)
+    if t.diarization is not None:
+        d = t.diarization
+        partes = [f"{d.speakers} hablante{'s' if d.speakers != 1 else ''}",
+                  f"{d.unattributed_pct}% sin atribuir"]
+        if d.enrolled:
+            parte = f"{d.identified} de {d.enrolled} voces identificadas"
+            if d.best_score is not None:
+                parte += f" (mejor score {d.best_score:.2f} < {threshold:.2f})"
+            partes.append(parte)
+        console.print(" · ".join(partes))
+        if d.auto and d.speakers > 5:
+            console.print(
+                f"[yellow]{d.speakers} hablantes detectados en automático; si sabes cuántos son, "
+                "fija el número con --speakers N[/yellow]"
+            )
 
-    # Post-proceso textual (horas 8.33->8:33). Uniforma a LabeledSegment: los Segment
-    # de faster_whisper son inmutables y los writers solo leen start/end/text/speaker.
-    # src_dur se propaga: reconstruir sin él apagaría la marca [?] justo en la ruta
-    # diarizada que 5.2.3 arregla (is_suspect lo usa de denominador y de gate).
-    # native_signals lee los dos dialectos: esta ruta recibe a veces TimedSegment
-    # propio (no_speech) y a veces Segment crudo de faster-whisper (no_speech_prob).
-    uniformed = []
-    for s in segments:
-        no_speech, avg_logprob, compression_ratio = native_signals(s)
-        uniformed.append(LabeledSegment(
-            s.start, s.end, normalize_hours(s.text), getattr(s, "speaker", None),
-            src_dur=getattr(s, "src_dur", None), no_speech=no_speech,
-            avg_logprob=avg_logprob, compression_ratio=compression_ratio))
-    segments = uniformed
-
-    # Identidad del motor en el JSON (G2): dos corridas del mismo audio con texto
-    # distinto tienen que ser distinguibles también a máquina, no solo en consola.
-    # 'selection' es constante en v1 (no hay auto); mantener la clave evita otro
-    # cambio de payload el día que exista.
-    if engine == ENGINE_WHISPERCPP:
-        from speechtotext.core.enginepin import ENGINE_PIN
-
-        version = f"whisper.cpp {ENGINE_PIN['version']}"
-    else:
-        from importlib.metadata import version as _pkg_version
-
-        version = f"faster-whisper {_pkg_version('faster-whisper')}"
-    engine_info = {
-        "name": engine, "version": version, "model": model,
-        "quant": compute_type, "device": device, "selection": "explicit",
-    }
-    if diarize:
-        # La atribución gruesa (sin words) y la fina son resultados distintos y el
-        # consumidor del JSON merece saber cuál recibió.
-        engine_info["diarization"] = "segment" if engine == ENGINE_WHISPERCPP else "word"
-
+    info = SimpleNamespace(language=t.language, language_probability=t.language_probability,
+                           duration=t.duration)
     writers: dict[str, tuple[str, callable]] = {
-        "txt": (".txt", lambda p: write_txt(segments, p)),
-        "srt": (".srt", lambda p: write_srt(segments, p)),
-        "vtt": (".vtt", lambda p: write_vtt(segments, p)),
-        "json": (".json", lambda p: write_json(segments, info, p, engine_info=engine_info,
-                                               speech_s=round(cov, 2), gaps=gaps)),
+        "txt": (".txt", lambda p: write_txt(t.segments, p)),
+        "srt": (".srt", lambda p: write_srt(t.segments, p)),
+        "vtt": (".vtt", lambda p: write_vtt(t.segments, p)),
+        "json": (".json", lambda p: write_json(t.segments, info, p, engine_info=t.engine.to_dict(),
+                                               speech_s=t.speech_s, gaps=t.gaps)),
     }
     for fmt in sorted(requested):
         suffix, write_fn = writers[fmt]
@@ -529,68 +378,6 @@ def transcribe(
         hotwords=_resolve_hotwords(hotwords, hotwords_file),
         chunk=chunk, jobs=jobs, engine=engine,
     )
-
-
-def _run_diarization(audio, segments, speakers, identify, threshold):
-    from speechtotext.core.audio import FfmpegMissingError, TranscodeError, transcode_to_wav
-    from speechtotext.speakers import diarization, registry
-    from speechtotext.speakers.identify import assign_names, cosine
-
-    try:
-        wav = transcode_to_wav(audio.read_bytes())
-    except (FfmpegMissingError, TranscodeError) as e:
-        console.print(f"[red]No se pudo procesar el audio:[/red] {e}")
-        raise typer.Exit(1)
-    try:
-        turns, clusters = diarization.diarize(str(wav), num_speakers=speakers)
-    except ImportError:
-        console.print(r'[red]Falta el extra de diarización:[/red] pip install -e ".\[diarize]"')
-        raise typer.Exit(1)
-    except Exception as e:
-        console.print(f"[red]La diarización falló:[/red] {e}")
-        console.print(
-            "Revisa que aceptaste los términos de los modelos pyannote y que HF_TOKEN esté configurado."
-        )
-        raise typer.Exit(1)
-    finally:
-        wav.unlink(missing_ok=True)
-
-    labeled = diarization.assign_segments(segments, turns)
-    name_map: dict[str, str] = {}
-    enrolled: dict = {}
-    if identify:
-        enrolled = registry.get_embeddings(diarization.EMBEDDING_MODEL)
-        if enrolled:
-            name_map = assign_names(clusters, enrolled, threshold)
-
-    # Reporte de calidad de la diarización, con los datos que ya están en memoria (5.2.4).
-    # Sin él la identificación de voz no se puede diagnosticar: assign_names rompe el
-    # bucle en el primer candidato bajo umbral sin registrar el near-miss y el score no
-    # salía por ningún sitio. Cuando nadie alcanza el umbral se imprime el mejor score.
-    n = len(clusters)
-    sin_atribuir = (
-        round(100 * sum(1 for s in labeled if s.speaker is None) / len(labeled))
-        if labeled else 0
-    )
-    partes = [f"{n} hablante{'s' if n != 1 else ''}", f"{sin_atribuir}% sin atribuir"]
-    if enrolled:
-        parte = f"{len(name_map)} de {len(enrolled)} voces identificadas"
-        if not name_map and clusters:
-            mejor = max(
-                cosine(vec, ref) for vec in clusters.values() for ref in enrolled.values()
-            )
-            parte += f" (mejor score {mejor:.2f} < {threshold:.2f})"
-        partes.append(parte)
-    console.print(" · ".join(partes))
-    if speakers is None and n > 5:
-        # ponytail: 5 sale de conversaciones reales, no de una medición; el fallo típico
-        # de pyannote en automático es "encontrar" voces de más en audio ruidoso. Techo:
-        # si llega una grabación con más de 5 hablantes reales, sube el número.
-        console.print(
-            f"[yellow]{n} hablantes detectados en automático; si sabes cuántos son, "
-            "fija el número con --speakers N[/yellow]"
-        )
-    return diarization.apply_names(labeled, name_map)
 
 
 def _extract_region(audio, regions, region, output, language, model, formats,
@@ -773,6 +560,15 @@ def _trim_wav(wav: Path, seconds: float) -> Path:
     return out
 
 
+def _wav_seconds(wav: Path) -> float:
+    """Duración de un wav PCM con la stdlib (el recorte del bench ya es 16 kHz mono)."""
+    import contextlib
+    import wave
+
+    with contextlib.closing(wave.open(str(wav))) as w:
+        return w.getnframes() / float(w.getframerate())
+
+
 def _print_bench(table: dict) -> None:
     """Tabla rich del bench + resumen. Misma vista al medir y con --show."""
     from rich.markup import escape
@@ -856,7 +652,6 @@ def bench(
         return
 
     from speechtotext.core.audio import FfmpegMissingError, TranscodeError, transcode_to_wav
-    from speechtotext.core.chunked import probe_duration
 
     # Misma ruta que whispercpp directo: wav 16k mono temporal, el path del usuario
     # jamás viaja crudo a los motores.
@@ -874,7 +669,7 @@ def bench(
         wav.unlink(missing_ok=True)
     try:
         # duración REAL del recorte (el audio puede durar menos que --seconds).
-        duration_s = probe_duration(clip)
+        duration_s = _wav_seconds(clip)
         configs, _skipped = benchmark.available_configs()
         quick_saltadas = []
         if quick:

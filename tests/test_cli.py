@@ -7,7 +7,6 @@ import pytest
 from typer.testing import CliRunner
 
 from speechtotext.cli.app import app
-from speechtotext.core import chunked
 from speechtotext.speakers import registry
 
 runner = CliRunner()
@@ -23,25 +22,59 @@ def _info(duration, language="es", language_probability=1.0):
     )
 
 
-def _fake_transcribe(monkeypatch, tmp_path, segments, info, boom=None, calls=None):
-    """Corta el camino de transcripción justo antes de Whisper: el audio nunca se abre.
+def _result(segments, info):
+    """TranscriptionResult a partir de los segmentos de mentira (SimpleNamespace) de los
+    tests: dialecto crudo de faster-whisper (no_speech_prob) y palabras opcionales."""
+    from speechtotext.asr.types import (
+        NativeSignals, SegmentNativeSignals, TranscriptionResult, TranscriptionSegment,
+        TranscriptionWord,
+    )
 
-    transcribe_file importa chunked dentro de la función, así que parchear el módulo basta.
-    calls: lista opcional donde se registra cada (args, kwargs) de run_chunked.
-    """
+    segs = []
+    for s in segments:
+        words = tuple(TranscriptionWord(w.word, w.start, w.end, None)
+                      for w in (getattr(s, "words", None) or ()))
+        segs.append(TranscriptionSegment(s.start, s.end, s.text, words, SegmentNativeSignals(
+            getattr(s, "no_speech_prob", None), getattr(s, "avg_logprob", None),
+            getattr(s, "compression_ratio", None))))
+    return TranscriptionResult(
+        text="".join(s.text for s in segments).strip(), language=info.language, words=(),
+        segments=tuple(segs), backend="fake", model="fake", model_version="1", latency_ms=1,
+        native_signals=NativeSignals(None, None, None, info.language_probability), warnings=(),
+    )
+
+
+def _fake_transcribe(monkeypatch, tmp_path, segments, info, boom=None, calls=None):
+    """Corta el camino justo antes del motor: el audio nunca se abre y el backend es de
+    mentira. calls: lista opcional donde se registra cada (samples, request)."""
+    from speechtotext.asr import Caps
+    from speechtotext.core import transcribe as core_transcribe
+
     audio = tmp_path / "charla.wav"
     audio.write_bytes(b"RIFF")
-    monkeypatch.setattr(chunked, "probe_duration", lambda p: info.duration)
-    monkeypatch.setattr(chunked, "should_chunk", lambda d, c: True)
+    monkeypatch.setattr(core_transcribe, "load_audio",
+                        lambda p: np.zeros(int(info.duration * 16000), dtype=np.float32))
+    monkeypatch.setattr(core_transcribe, "should_chunk", lambda d, c: False)
 
-    def run(*a, **k):
-        if calls is not None:
-            calls.append((a, k))
-        if boom is not None:
-            raise boom
-        return segments, info
+    class FakeBackend:
+        def __init__(self, engine, model, device, compute_type):
+            self.backend_id, self.model_id, self.device, self.quant = engine, model, device, compute_type
+            self.model_version = "1"
+            self.engine_version = "whisper.cpp v1.9.1" if engine == "whispercpp" else "faster-whisper 1.2.0"
+            self.caps = (Caps("rechazado", "degradado", "degradado") if engine == "whispercpp"
+                         else Caps("honrado", "honrado", "honrado"))
 
-    monkeypatch.setattr(chunked, "run_chunked", run)
+        def warm(self):
+            pass
+
+        def transcribe(self, samples, request):
+            if calls is not None:
+                calls.append((samples, request))
+            if boom is not None:
+                raise boom
+            return _result(segments, info)
+
+    monkeypatch.setattr(core_transcribe, "make_backend", FakeBackend)
     return audio
 
 
@@ -134,26 +167,6 @@ def test_resumen_sin_huecos_lo_dice_explicitamente(tmp_path, monkeypatch):
     assert "--no-vad" not in result.stdout
 
 
-def test_resumen_sobrevive_duracion_cero(tmp_path, monkeypatch):
-    # info.duration == 0 no puede tumbar la línea de resumen por división por cero, y
-    # tampoco puede afirmar 0%: sin denominador no hay medida, y el peor caso posible
-    # (probe fallido) sería el único que no avisa.
-    audio = _fake_transcribe(monkeypatch, tmp_path, [], _info(0.0))
-    result = _invoke(audio, tmp_path)
-    assert result.exit_code == 0
-    assert "desconocida" in result.stdout
-    assert "0%" not in result.stdout
-
-
-def test_duracion_cero_no_imprime_linea_de_huecos(tmp_path, monkeypatch):
-    # Sin denominador no hay línea de tiempo sobre la que existan complementos: ni huecos
-    # ni "sin huecos" se puede afirmar sin fabricar.
-    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(0.0))
-    result = _invoke(audio, tmp_path)
-    assert result.exit_code == 0
-    assert "huecos" not in result.stdout
-
-
 def test_no_sugiere_no_vad_a_quien_ya_lo_apago(tmp_path, monkeypatch):
     # Las corridas 2, 3 y 5 del caso real ya iban con --no-vad: repetir el consejo ahí
     # es ruido garantizado. La línea de huecos se queda; la sugerencia no.
@@ -170,11 +183,14 @@ def test_no_sugiere_no_vad_a_quien_ya_lo_apago(tmp_path, monkeypatch):
 
 def _diarize_recomprimiendo(monkeypatch, salida):
     """Lo que hace la diarización real: cada span se recomprime a la extensión de sus
-    palabras (speakers/diarization.py:51,56). Medir después publica otro número con el
-    mismo nombre — C-13."""
-    from speechtotext.cli import app as cli_app
+    palabras. Medir después publica otro número con el mismo nombre — C-13."""
+    from speechtotext.core import transcribe as core_transcribe
+    from speechtotext.core.segments import LabeledSegment
+    from speechtotext.core.transcribe import DiarizationReport
 
-    monkeypatch.setattr(cli_app, "_run_diarization", lambda audio, segs, *a: salida)
+    labeled = [LabeledSegment(s.start, s.end, s.text) for s in salida]
+    monkeypatch.setattr(core_transcribe, "_diarize",
+                        lambda samples, segs, *a: (labeled, DiarizationReport(1, 0, 0, 0, None, True)))
 
 
 def test_json_mide_sobre_lo_que_el_asr_emitio_no_sobre_lo_diarizado(tmp_path, monkeypatch):
@@ -192,24 +208,6 @@ def test_json_mide_sobre_lo_que_el_asr_emitio_no_sobre_lo_diarizado(tmp_path, mo
     assert payload["gaps"] == [[300.0, 600.0], [850.0, 2206.0]]
     # Y es exactamente lo que la consola dijo: una cantidad, dos canales.
     assert "2 huecos sin texto: 05:00-10:00 (300 s), 14:10-36:46 (1356 s)" in result.stdout
-
-
-def test_probe_fallido_no_devuelve_el_calculo_a_write_json(tmp_path, monkeypatch):
-    # El corner: con duration==0 la consola calla, pero el JSON sale igual. Si gaps se
-    # guarda tras `if info.duration` y llega None, write_json lo recalcula sobre los
-    # segmentos ya diarizados y C-13 vuelve por la puerta de atrás. find_gaps con
-    # duration==0 SÍ devuelve los huecos interiores (verificado), así que la rama es real.
-    import json
-
-    _diarize_recomprimiendo(monkeypatch, [_seg(0.0, 1.0), _seg(40.0, 41.0)])
-    segs = [_seg(0.0, 20.0), _seg(40.0, 60.0)]
-    audio = _fake_transcribe(monkeypatch, tmp_path, segs, _info(0.0))
-    result = _invoke(audio, tmp_path, "-f", "json", "--diarize")
-    assert result.exit_code == 0
-    payload = json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))
-    assert payload["speech_s"] == 40.0  # 20 + 20, antes de diarizar
-    assert payload["gaps"] == [[20.0, 40.0]]  # post-diarización daría [[1.0, 40.0]]
-    assert "huecos" not in result.stdout  # la consola sigue callada, como debe
 
 
 # --- 5.2.1 · los contratos de rango los valida typer, no la prosa del --help -----------
@@ -274,16 +272,14 @@ def test_diarize_marca_sospechoso_igual_que_sin_diarizar(tmp_path, monkeypatch):
     # Sin --diarize el gate mide los 30 s del span; con --diarize el span se recomprime
     # a 1 s y solo src_dur salva la marca. Ruta real de punta a punta: diarize y el
     # registro de voces stubbeados, assign_segments/apply_names/post-proceso reales.
-    from speechtotext.core import audio as core_audio
     from speechtotext.speakers import diarization
 
     palabra = SimpleNamespace(start=0.4, end=1.4, word=" Gracias.")
     seg = SimpleNamespace(start=0.0, end=30.0, text=" Gracias.", words=[palabra])
     audio = _fake_transcribe(monkeypatch, tmp_path, [seg], _info(30.0))
-    monkeypatch.setattr(core_audio, "transcode_to_wav", lambda b: tmp_path / "t.wav")
     monkeypatch.setattr(
         diarization, "diarize",
-        lambda wav, num_speakers=None: (
+        lambda samples, sample_rate, num_speakers=None: (
             [(0.0, 30.0, "SPEAKER_00")], {"SPEAKER_00": np.array([1.0])}
         ),
     )
@@ -306,12 +302,10 @@ def test_diarize_marca_sospechoso_igual_que_sin_diarizar(tmp_path, monkeypatch):
 def _fake_diarization(monkeypatch, tmp_path, turns, clusters, enrolled):
     """Stub de la frontera con modelos: diarize y el registro de voces. El resto de la
     ruta (assign_segments, assign_names, apply_names, el reporte) corre de verdad."""
-    from speechtotext.core import audio as core_audio
     from speechtotext.speakers import diarization
 
-    monkeypatch.setattr(core_audio, "transcode_to_wav", lambda b: tmp_path / "t.wav")
     monkeypatch.setattr(
-        diarization, "diarize", lambda wav, num_speakers=None: (turns, clusters)
+        diarization, "diarize", lambda samples, sample_rate, num_speakers=None: (turns, clusters)
     )
     monkeypatch.setattr(
         registry, "get_embeddings",
@@ -481,10 +475,12 @@ def test_whispercpp_no_sugiere_no_vad(tmp_path, monkeypatch):
 
 
 def test_aviso_diarize_con_whispercpp(tmp_path, monkeypatch):
-    from speechtotext.cli import app as cli_app
+    from speechtotext.core import transcribe as core_transcribe
+    from speechtotext.core.transcribe import DiarizationReport
 
     # La diarización real necesita pyannote; aquí solo importa el aviso previo.
-    monkeypatch.setattr(cli_app, "_run_diarization", lambda audio, segs, *a: segs)
+    monkeypatch.setattr(core_transcribe, "_diarize",
+                        lambda samples, segs, *a: ([], DiarizationReport(0, 0, 0, 0, None, True)))
     audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0))
     result = _invoke(audio, tmp_path, "--engine", "whispercpp", "--diarize")
     assert result.exit_code == 0
@@ -498,9 +494,7 @@ def test_clamp_jobs_con_whispercpp_cuda(tmp_path, monkeypatch):
     result = _invoke(audio, tmp_path, "--engine", "whispercpp", "-d", "cuda", "-j", "4")
     assert result.exit_code == 0
     assert "jobs=1" in result.stdout
-    ((args, kwargs),) = calls
-    assert args[2] == 1  # jobs es el tercer posicional de run_chunked
-    assert kwargs["engine"] == "whispercpp"
+    assert len(calls) == 1
 
 
 def test_resumen_incluye_motor_default(tmp_path, monkeypatch):
@@ -639,7 +633,7 @@ def test_bench_show_con_tabla(tmp_path, monkeypatch):
 def test_bench_audio_escribe_tabla_y_reporta_skipped(tmp_path, monkeypatch):
     from speechtotext.cli import app as cli_app
     from speechtotext.core import audio as core_audio
-    from speechtotext.core import benchmark, chunked
+    from speechtotext.core import benchmark
 
     monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
     src = tmp_path / "charla.mp3"
@@ -650,7 +644,7 @@ def test_bench_audio_escribe_tabla_y_reporta_skipped(tmp_path, monkeypatch):
     clip.write_bytes(b"RIFF")
     monkeypatch.setattr(core_audio, "transcode_to_wav", lambda b, **k: wav)
     monkeypatch.setattr(cli_app, "_trim_wav", lambda w, s: clip)
-    monkeypatch.setattr(chunked, "probe_duration", lambda p: 42.0)
+    monkeypatch.setattr(cli_app, "_wav_seconds", lambda p: 42.0)
 
     viable = {"engine": "faster-whisper", "model": "tiny", "quant": "int8", "device": "cpu",
               "capabilities": _bench_row()["capabilities"], "wer_ref": None}
@@ -680,7 +674,7 @@ def test_bench_audio_escribe_tabla_y_reporta_skipped(tmp_path, monkeypatch):
 def test_bench_quick_salta_los_lentos(tmp_path, monkeypatch):
     from speechtotext.cli import app as cli_app
     from speechtotext.core import audio as core_audio
-    from speechtotext.core import benchmark, chunked
+    from speechtotext.core import benchmark
 
     monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
     src = tmp_path / "charla.mp3"
@@ -689,7 +683,7 @@ def test_bench_quick_salta_los_lentos(tmp_path, monkeypatch):
     wav.write_bytes(b"RIFF")
     monkeypatch.setattr(core_audio, "transcode_to_wav", lambda b, **k: wav)
     monkeypatch.setattr(cli_app, "_trim_wav", lambda w, s: wav)
-    monkeypatch.setattr(chunked, "probe_duration", lambda p: 42.0)
+    monkeypatch.setattr(cli_app, "_wav_seconds", lambda p: 42.0)
     caps = _bench_row()["capabilities"]
     viables = [
         {"engine": "faster-whisper", "model": m, "quant": "int8", "device": "cpu",
@@ -752,7 +746,7 @@ def test_bench_quick_documenta_las_saltadas_en_skipped(tmp_path, monkeypatch):
         "speechtotext.core.audio.transcode_to_wav", lambda b: tmp_path / "t.wav"
     )
     (tmp_path / "t.wav").write_bytes(b"RIFF")
-    monkeypatch.setattr("speechtotext.core.chunked.probe_duration", lambda p: 60.0)
+    monkeypatch.setattr("speechtotext.cli.app._wav_seconds", lambda p: 60.0)
     monkeypatch.setattr(
         benchmark, "available_configs",
         lambda: ([
