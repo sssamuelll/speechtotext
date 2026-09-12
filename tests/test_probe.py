@@ -195,9 +195,16 @@ def test_device_explicito_manda_sobre_la_tabla():
     assert probe.choose_route(m, "large-v3", device="cpu").reason == ""
 
 
-def test_engine_explicito_se_respeta():
+def test_engine_explicito_se_respeta_y_el_device_auto_se_sondea():
     m = _m(cuda=True, vram_free_gb=11.0)
-    assert _ruta(probe.choose_route(m, "large-v3", engine="faster-whisper")) == ("faster-whisper", "cpu", "int8")
+    r = probe.choose_route(m, "large-v3", engine="faster-whisper")
+    assert _ruta(r) == ("faster-whisper", "cuda", "float16") and r.reason == "GPU con 11.0 GB libres"
+    r = probe.choose_route(_m(cuda=True, vram_free_gb=3.5), "large-v3", engine="faster-whisper")
+    assert _ruta(r) == ("faster-whisper", "cpu", "int8")
+    assert r.reason == "GPU con 3.5 GB libres no alcanza para faster-whisper en float16: CPU"
+    r = probe.choose_route(_m(), "large-v3", engine="faster-whisper")
+    assert _ruta(r) == ("faster-whisper", "cpu", "int8") and r.reason == "sin GPU utilizable: CPU"
+    assert probe.choose_route(m, "large-v3", engine="faster-whisper", device="cpu").reason == ""
     r = probe.choose_route(_m(), "large-v3", engine="whispercpp")
     assert _ruta(r) == ("whispercpp", "cuda", "q5_0")
     assert r.reason == "whisper.cpp (build CUDA) corre en la GPU; device=cuda"

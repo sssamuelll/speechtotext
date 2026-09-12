@@ -554,7 +554,7 @@ def test_json_declara_motor_faster_whisper(tmp_path, monkeypatch):
     assert eng["version"].startswith("faster-whisper ")
     assert eng["quant"] == "int8"  # la efectiva de auto+cpu
     assert eng["device"] == "cpu"
-    assert eng["selection"] == "explicit"
+    assert eng["selection"] == "auto"  # --engine auto (default): lo eligió el sondeo
     assert "diarization" not in eng  # sin --diarize no se afirma nada
 
 
@@ -820,6 +820,7 @@ def test_defaults_del_cli_son_los_del_spec(tmp_path, monkeypatch):
     payload = json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))
     assert payload["engine"]["model"] == "large-v3"
     assert payload["engine"]["device"] == "cpu"      # conftest: máquina sin GPU
+    assert payload["engine"]["selection"] == "auto"
     assert "Idioma detectado" in result.stdout
     assert "motor faster-whisper" in _plana(result.stdout)
 
@@ -1017,3 +1018,40 @@ def test_models_rm(monkeypatch):
     _models_doble(monkeypatch, boom=FileNotFoundError("small (faster-whisper) no está instalado"))
     result = runner.invoke(app, ["models", "rm", "small"])
     assert result.exit_code == 1 and "no está instalado" in result.stdout
+
+
+# --- I3 · el aviso de jobs=1 solo bajo --engine explícito -----------------------------
+
+
+def test_ruta_auto_a_whispercpp_no_regana_por_jobs(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from speechtotext.core import probe
+
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0))
+    monkeypatch.setattr(probe, "machine", lambda: probe.Machine(
+        "win32", 12, 32.0, True, "GTX 980", 3.5, Path("C:/x/whisper-cli.exe")))
+    result = _invoke(audio, tmp_path)
+    assert result.exit_code == 0, result.stdout
+    assert "paraleliza" not in result.stdout
+
+
+def test_engine_whispercpp_explicito_con_jobs_avisa(tmp_path, monkeypatch):
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0))
+    result = _invoke(audio, tmp_path, "--engine", "whispercpp", "-j", "4")
+    assert result.exit_code == 0, result.stdout
+    assert "la GPU no paraleliza; jobs=1" in result.stdout
+
+
+# --- I4/I5 · una sola sonda, selection fiel a quién eligió el motor -------------------
+
+
+def test_el_cli_sondea_una_sola_vez(tmp_path, monkeypatch):
+    from speechtotext.core import probe
+
+    fija = probe.machine()
+    veces = []
+    monkeypatch.setattr(probe, "machine", lambda: (veces.append(1), fija)[1])
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0))
+    assert _invoke(audio, tmp_path).exit_code == 0
+    assert len(veces) == 1

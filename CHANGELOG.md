@@ -80,6 +80,8 @@ Lo marcado como **rompe** exige cambios en el código que consume la librería.
   (`machine_info()` sigue en `benchmark` como adaptador del schema v1).
 - `WhisperCppBackend.device` es `"native"` y `engine_version` es
   `"whisper.cpp (PATH, sin pin)"` fuera de Windows.
+- `engine.selection` en el JSON vale `"auto"` cuando el motor lo eligió el sondeo (antes
+  siempre `"explicit"`); `transcribe()` acepta `route=` para no sondear dos veces.
 
 ---
 

@@ -17,7 +17,7 @@ ALL_CAPS = ("hotwords", "word_timestamps", "native_signals", "vad")
 
 def _cfg(engine: str, model: str) -> dict:
     return next(
-        c for c in benchmark.candidate_configs()
+        c for c in benchmark.candidate_configs(platform="win32")
         if c["engine"] == engine and c["model"] == model
     )
 
@@ -26,7 +26,7 @@ def _cfg(engine: str, model: str) -> dict:
 
 
 def test_candidate_configs_siete_y_capacidades():
-    configs = benchmark.candidate_configs()
+    configs = benchmark.candidate_configs(platform="win32")
     assert len(configs) == 7
     fw = [c for c in configs if c["engine"] == "faster-whisper"]
     assert [c["model"] for c in fw] == ["tiny", "base", "small", "medium", "large-v3"]
@@ -39,12 +39,19 @@ def test_candidate_configs_siete_y_capacidades():
 
 
 def test_candidate_configs_wer_ref():
-    wer = {(c["engine"], c["model"]): c["wer_ref"] for c in benchmark.candidate_configs()}
+    wer = {(c["engine"], c["model"]): c["wer_ref"] for c in benchmark.candidate_configs(platform="win32")}
     assert wer[("faster-whisper", "small")] == 0.419
     assert wer[("faster-whisper", "large-v3")] == 0.355
     assert wer[("whispercpp", "large-v3")] == 0.355
     assert wer[("faster-whisper", "tiny")] is None
     assert wer[("whispercpp", "small")] is None
+
+
+def test_candidate_configs_fuera_de_win32_etiqueta_native():
+    wc = [c for c in benchmark.candidate_configs(platform="darwin") if c["engine"] == "whispercpp"]
+    assert wc and all(c["device"] == "native" for c in wc)
+    assert all(c["device"] == "cpu" for c in benchmark.candidate_configs(platform="darwin")
+               if c["engine"] == "faster-whisper")
 
 
 # --- available_configs -----------------------------------------------------------
@@ -76,6 +83,14 @@ def test_available_configs_con_gpu_y_binario_mide_las_siete(monkeypatch):
                         lambda: _maquina(cuda=True, vram_free_gb=3.5, whispercpp=Path("C:/x/whisper-cli.exe")))
     viables, skipped = benchmark.available_configs()
     assert len(viables) == 7 and skipped == []
+
+
+def test_available_configs_fuera_de_win32_no_exige_nvidia(monkeypatch):
+    monkeypatch.setattr(probe, "machine", lambda: _maquina(
+        platform="darwin", whispercpp=Path("/opt/homebrew/bin/whisper-cli")))
+    viables, skipped = benchmark.available_configs()
+    assert skipped == []
+    assert [c["device"] for c in viables if c["engine"] == "whispercpp"] == ["native", "native"]
 
 
 def test_machine_info_es_la_forma_del_schema_v1(monkeypatch):

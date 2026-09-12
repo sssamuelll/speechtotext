@@ -138,6 +138,16 @@ def eta_factor(engine: str, device: str, compute_type: str, model: str) -> tuple
     return ETA_FACTORS.get((engine, device, compute_type, model)), True
 
 
+def _fw_device(m: Machine) -> tuple[str, str]:
+    """(device, razón) para faster-whisper cuando el usuario dejó device='auto'."""
+    free = m.vram_free_gb if m.cuda else None
+    if free is not None and free >= VRAM_FW_GB:
+        return "cuda", f"GPU con {free:.1f} GB libres"
+    if free is not None:
+        return "cpu", f"GPU con {free:.1f} GB libres no alcanza para faster-whisper en float16: CPU"
+    return "cpu", "sin GPU utilizable: CPU"
+
+
 def _auto(m: Machine, model: str, device: str) -> tuple[str, str, str]:
     """La tabla del spec §5.1 para engine='auto'. Un device explícito manda (whisper.cpp
     solo sabe GPU): con -d cpu o -d cuda el motor es faster-whisper. Devuelve
@@ -174,6 +184,9 @@ def choose_route(m: Machine, model: str, *, engine: str = "auto", device: str = 
     reason = ""
     if engine == "auto":
         engine, device, reason = _auto(m, model, device)
+    elif engine == ENGINE_FASTER and device == "auto":
+        # Motor explícito, device libre: el sondeo lo rellena y lo dice (spec §5.1).
+        device, reason = _fw_device(m)
     if engine == ENGINE_WHISPERCPP:
         from speechtotext.core.enginepin import _MODEL_ALIAS
 

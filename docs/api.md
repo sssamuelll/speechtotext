@@ -57,7 +57,7 @@ valor; ninguna aparece en `null`.
 | `speech_s` | `float` | Siempre. Suma de la duración de los segmentos con voz. |
 | `gaps` | `[[float, float], …]` | Siempre. Huecos sin voz de 5 s o más, como pares `[inicio, fin]`. |
 | `speakers` | `[str, …]` | Solo si la corrida produjo hablantes. |
-| `engine` | `object` | Solo si el CLI lo informa. Incluye `diarization: "segment"` o `"word"` cuando se usó `--diarize`. |
+| `engine` | `object` | Solo si el CLI lo informa. Incluye `diarization: "segment"` o `"word"` cuando se usó `--diarize`. `selection` es `"auto"` si el motor lo eligió el sondeo (`--engine auto`) y `"explicit"` si lo pidió el usuario. |
 | `segments` | `[object, …]` | Siempre. |
 
 ### Cada segmento
@@ -328,7 +328,8 @@ Errores: `AsrError(code, recoverable, message)` con `code` en `unsupported_optio
 `out_of_memory`, `insufficient_resources`, `backend_failed`, `cancelled`, `diarize_unavailable`, `diarize_failed`;
 `AudioDecodeError` si el archivo no se puede abrir. Los avisos del motor (p. ej. `empty_transcript`)
 llegan a `warnings` como `"<motor>: <aviso>"`. `backend=` permite reutilizar un
-modelo caliente entre llamadas.
+modelo caliente entre llamadas. `route=` recibe una `Route` ya resuelta (el CLI sondea,
+imprime la razón y la pasa: la máquina se mira una sola vez).
 
 ---
 

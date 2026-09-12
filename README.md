@@ -203,7 +203,7 @@ muestra lo mismo que ve el CLI — y elige:
 | La máquina | Ruta |
 |---|---|
 | GPU NVIDIA con ≥ 5 GB de VRAM libres | `faster-whisper` · `cuda` · `float16` |
-| GPU NVIDIA con 2–5 GB libres y whisper.cpp instalado (o Windows, donde se descarga pinneado) | `whispercpp` · `cuda` · `q5_0` |
+| GPU NVIDIA con 2–5 GB libres, whisper.cpp instalado (o Windows, donde se descarga pinneado) y modelo `large-v3` o `small` | `whispercpp` · `cuda` · `q5_0` |
 | Lo demás | `faster-whisper` · `cpu` · `int8` |
 
 Lo que pidas explícito (`--engine`, `-d`) se respeta; el sondeo solo rellena lo que falta

@@ -166,8 +166,11 @@ def transcribe_file(
         )
     if route.engine == ENGINE_WHISPERCPP and jobs != 1:
         # 4 subprocesos × 1.28 GB contra 4096 MiB: WDDM no revienta, pagina 25x en silencio
-        # (medido). El 19.3x de un solo proceso hace innecesario más.
-        console.print("[yellow]la GPU no paraleliza; jobs=1[/yellow]")
+        # (medido). El núcleo ya serializa whisper.cpp; aquí solo se corrige la etiqueta
+        # "Troceado (jobs=N)" y se avisa ÚNICAMENTE a quien pidió el motor a mano: bajo
+        # --engine auto el usuario no tocó nada y el aviso sería ruido.
+        if engine == ENGINE_WHISPERCPP:
+            console.print("[yellow]la GPU no paraleliza; jobs=1[/yellow]")
         jobs = 1
     if hotwords:
         n_terms = len([t for t in hotwords.split(",") if t.strip()])
@@ -234,8 +237,8 @@ def transcribe_file(
 
         try:
             t = core_transcribe(
-                audio, model=model, language=language, engine=route.engine,
-                device=route.device, compute_type=route.compute_type, vad=vad,
+                audio, model=model, language=language, engine=engine,
+                device=device, compute_type=compute_type, route=route, vad=vad,
                 beam_size=beam_size, hotwords=terms, diarize=diarize, speakers=speakers,
                 identify=identify, threshold=threshold, chunk=chunk, jobs=jobs,
                 on_progress=on_progress,
@@ -363,7 +366,8 @@ def transcribe(
     compute_type: str = typer.Option(
         "auto",
         "--compute-type",
-        help="auto | int8 | int8_float16 | float16 | float32. 'auto' elige int8 en CPU y float16 en GPU.",
+        help="auto | int8 | int8_float16 | float16 | float32. 'auto' elige int8 en CPU, float16 "
+        "en GPU y q5_0 bajo whisper.cpp (donde solo valen auto y q5_0).",
     ),
     vad: bool = typer.Option(
         False, "--vad/--no-vad",
@@ -769,18 +773,20 @@ def _gb(n: int) -> str:
 def probe() -> None:
     """Sondea esta máquina y muestra la ruta que elegiría `transcribe` (pégalo en un issue)."""
     m = core_probe.machine()
-    console.print(f"platform   {m.platform}")
-    console.print(f"cpu_count  {m.cpu_count}")
-    console.print(f"ram_gb     {m.ram_gb if m.ram_gb is not None else 'sin medir'}")
-    console.print(f"cuda       {m.cuda}")
-    console.print(f"gpu        {m.gpu_name or '-'}")
-    console.print(f"vram_free  {f'{m.vram_free_gb} GB' if m.vram_free_gb is not None else '-'}")
-    console.print(f"whispercpp {m.whispercpp or 'no instalado'}")
+    console.print(f"platform   {m.platform}", markup=False, soft_wrap=True)
+    console.print(f"cpu_count  {m.cpu_count}", markup=False, soft_wrap=True)
+    console.print(f"ram_gb     {m.ram_gb if m.ram_gb is not None else 'sin medir'}",
+                 markup=False, soft_wrap=True)
+    console.print(f"cuda       {m.cuda}", markup=False, soft_wrap=True)
+    console.print(f"gpu        {m.gpu_name or '-'}", markup=False, soft_wrap=True)
+    console.print(f"vram_free  {f'{m.vram_free_gb} GB' if m.vram_free_gb is not None else '-'}",
+                 markup=False, soft_wrap=True)
+    console.print(f"whispercpp {m.whispercpp or 'no instalado'}", markup=False, soft_wrap=True)
     for model in ("large-v3", "small"):
         try:
             r = core_probe.choose_route(m, model)
         except AsrError as e:
-            console.print(f"{model:9} {e}", markup=False)
+            console.print(f"{model:9} {e}", markup=False, soft_wrap=True)
             continue
         if r.eta_factor:
             eta = f"~{1 / r.eta_factor:.1f}x tiempo real{' (estimado)' if r.estimated else ' (bench)'}"
@@ -788,7 +794,7 @@ def probe() -> None:
             eta = "sin medir"
         console.print(
             f"{model:9} {r.engine} · {r.device} · {r.compute_type} · {eta} · {r.reason or 'sin avisos'}",
-            markup=False,
+            markup=False, soft_wrap=True,
         )
 
 

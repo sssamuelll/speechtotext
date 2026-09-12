@@ -69,10 +69,16 @@ def _config(engine: str, model: str, quant: str, device: str) -> dict:
     }
 
 
-def candidate_configs() -> list[dict]:
-    """Las 7 candidatas fijas; available_configs las filtra por maquina."""
+def _wcpp_device(platform: str) -> str:
+    # Misma etiqueta que core.probe.choose_route y WhisperCppBackend.device: cuda es el
+    # build pinneado de win32; fuera, el whisper-cli del PATH decide y se etiqueta native.
+    return "cuda" if platform == "win32" else "native"
+
+
+def candidate_configs(platform: str = sys.platform) -> list[dict]:
+    """Las 7 candidatas fijas; available_configs las filtra por máquina."""
     configs = [_config("faster-whisper", m, "int8", "cpu") for m in _FW_MODELS]
-    configs += [_config("whispercpp", m, "q5_0", "cuda") for m in _WCPP_MODELS]
+    configs += [_config("whispercpp", m, "q5_0", _wcpp_device(platform)) for m in _WCPP_MODELS]
     return configs
 
 
@@ -81,13 +87,15 @@ def available_configs() -> tuple[list[dict], list[dict]]:
     m = probe.machine()
     if m.whispercpp is None:
         wcpp_reason = "whisper-cli ausente (ni pinneado ni en el PATH)"
-    elif not m.cuda:
+    elif m.platform == "win32" and not m.cuda:
+        # El build pinneado es CUDA: sin nvidia-smi no corre. Fuera de win32 el binario
+        # del PATH decide (Metal/CUDA/CPU) y basta con que exista.
         wcpp_reason = "nvidia-smi no responde (sin GPU NVIDIA utilizable)"
     else:
         wcpp_reason = None
     viables: list[dict] = []
     skipped: list[dict] = []
-    for cfg in candidate_configs():
+    for cfg in candidate_configs(m.platform):
         if cfg["engine"] == "whispercpp" and wcpp_reason:
             skipped.append({"engine": cfg["engine"], "model": cfg["model"], "reason": wcpp_reason})
         else:

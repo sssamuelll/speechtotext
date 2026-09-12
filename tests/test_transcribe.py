@@ -428,6 +428,25 @@ def test_los_avisos_de_caps_van_antes_que_los_del_motor():
     assert "no trae VAD" in t.warnings[0] and t.warnings[-1] == "whispercpp: empty_transcript"
 
 
+def test_route_dada_no_vuelve_a_sondear_y_marca_selection(monkeypatch):
+    monkeypatch.setattr(core.probe, "machine", lambda: pytest.fail("sondeó dos veces"))
+    visto = []
+    monkeypatch.setattr(core, "make_backend", lambda *a, **k: (visto.append(a), FakeBackend())[1])
+    ruta = Route("faster-whisper", "cpu", "int8", "")
+    t = core.transcribe(_zeros(5.0), route=ruta, chunk=False)                      # engine default: auto
+    assert visto[0][:4] == ("faster-whisper", "large-v3", "cpu", "int8")
+    assert t.engine.selection == "auto"
+    t = core.transcribe(_zeros(5.0), route=ruta, engine="faster-whisper", chunk=False)
+    assert t.engine.selection == "explicit"
+
+
+def test_selection_auto_solo_cuando_el_sondeo_eligio(monkeypatch):
+    monkeypatch.setattr(core, "make_backend", lambda *a, **k: FakeBackend())
+    assert core.transcribe(_zeros(5.0), chunk=False).engine.selection == "auto"
+    assert core.transcribe(_zeros(5.0), engine="faster-whisper", chunk=False).engine.selection == "explicit"
+    assert core.transcribe(_zeros(5.0), backend=FakeBackend(), chunk=False).engine.selection == "explicit"
+
+
 def test_cancelacion_a_mitad_del_pool_no_lanza_mas_trozos(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "load_audio", lambda p: _zeros(1800.0))
     monkeypatch.setattr(core, "plan_chunks",

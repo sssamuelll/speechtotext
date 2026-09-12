@@ -257,12 +257,16 @@ def transcribe(
     chunk: bool | None = None,
     jobs: int = 4,
     backend: AsrBackend | None = None,
+    route: Route | None = None,
     on_progress: ProgressCallback | None = None,
     cancel: threading.Event | None = None,
 ) -> Transcript:
     """Archivo (ruta como Path o str, o muestras 16 kHz mono) -> Transcript. El corto y el
     largo son el mismo camino con n = 1 trozo. Con muestras sin archivo no hay checkpoint
-    ni cortes por silencio (pick_cuts fijo): es la ruta de `find` y de la libreria."""
+    ni cortes por silencio (pick_cuts fijo): es la ruta de `find` y de la libreria.
+
+    `route`: una Route ya resuelta (el CLI sondea, imprime y la pasa); `engine="auto"`
+    marca `engine.selection="auto"`."""
     emit = on_progress or (lambda p: None)
 
     def check_cancel() -> None:
@@ -270,8 +274,12 @@ def transcribe(
             raise AsrError("cancelled", True, "transcripción cancelada")
 
     # La ruta se resuelve ANTES de decodificar: un --engine inexistente o un modelo que no
-    # cabe corta en milisegundos, no tras decodificar una hora de audio.
-    route = resolve_route(engine, device, compute_type, model) if backend is None else None
+    # cabe corta en milisegundos, no tras decodificar una hora de audio. Quien ya sondeó
+    # (el CLI) la pasa en `route` y la máquina se mira una sola vez.
+    if backend is not None:
+        route = None
+    elif route is None:
+        route = resolve_route(engine, device, compute_type, model)
 
     if isinstance(audio, (str, Path)):
         audio = Path(audio)
@@ -380,6 +388,7 @@ def transcribe(
 
     engine_info = EngineInfo(
         backend.backend_id, backend.engine_version, backend.model_id, backend.quant, backend.device,
+        selection="auto" if route is not None and engine == "auto" else "explicit",
         diarization=("word" if eff.word_timestamps else "segment") if diarize else None,
     )
     return Transcript(final, lang_out, prob, duration, speech_s, gaps, engine_info, eff,
