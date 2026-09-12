@@ -284,6 +284,7 @@ def test_muestras_sin_archivo_trocean_sin_checkpoint(tmp_path, monkeypatch):
 
 
 def test_primer_fallo_cancela_los_pendientes_y_nombra_el_trozo(tmp_path, monkeypatch):
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
     monkeypatch.setattr(core, "load_audio", lambda p: _zeros(1200.0))
     monkeypatch.setattr(core, "plan_chunks", lambda path, dur: [(0.0, 600.0), (600.0, 1200.0)])
     audio = tmp_path / "a.wav"
