@@ -898,3 +898,122 @@ def test_whispercpp_ya_instalado_no_anuncia_descarga(tmp_path, monkeypatch):
         "win32", 12, 32.0, True, "GTX 980", 3.5, Path("C:/x/whisper-cli.exe")))
     result = _invoke(audio, tmp_path)
     assert result.exit_code == 0 and "se descarga ahora" not in result.stdout
+
+
+# --- probe y models ------------------------------------------------------------------------
+
+
+def test_probe_imprime_maquina_y_rutas(monkeypatch):
+    from speechtotext.core import probe
+
+    monkeypatch.setattr(probe, "machine",
+                        lambda: probe.Machine("win32", 12, 31.9, True, "GTX 980", 3.46, None))
+    result = runner.invoke(app, ["probe"])
+    assert result.exit_code == 0, result.stdout
+    salida = _plana(result.stdout)
+    # _plana colapsa cualquier corrida de espacios a uno solo (" ".join(texto.split())): el
+    # alineado de columnas del comando real usa varios espacios, pero aquí solo sobrevive uno.
+    assert "platform win32" in salida and "ram_gb 31.9" in salida
+    assert "gpu GTX 980" in salida and "vram_free 3.46 GB" in salida
+    assert "whispercpp no instalado" in salida
+    assert ("large-v3 whispercpp · cuda · q5_0 · ~8.0x tiempo real (estimado) · "
+            "GPU con 3.5 GB libres: whisper.cpp cuantizado") in salida
+    assert "small whispercpp · cuda · q5_0 · ~15.6x tiempo real (estimado)" in salida
+
+
+def test_probe_dice_cuando_el_modelo_no_cabe(monkeypatch):
+    from speechtotext.core import probe
+
+    monkeypatch.setattr(probe, "machine", lambda: probe.Machine("linux", 4, 4.0, False, None, None, None))
+    result = runner.invoke(app, ["probe"])
+    assert result.exit_code == 0, result.stdout
+    salida = _plana(result.stdout)
+    assert "large-v3 large-v3 necesita ~6 GB" in salida
+    assert "small faster-whisper · cpu · int8 · ~6.4x tiempo real (estimado) · sin GPU utilizable: CPU" in salida
+    assert "ram_gb 4.0" in salida
+
+
+def test_probe_sin_medidas_no_inventa(monkeypatch):
+    from speechtotext.core import probe
+
+    monkeypatch.setattr(probe, "machine", lambda: probe.Machine("darwin", 8, None, False, None, None, None))
+    salida = _plana(runner.invoke(app, ["probe"]).stdout)
+    assert "ram_gb sin medir" in salida and "vram_free -" in salida and "gpu -" in salida
+
+
+def _models_doble(monkeypatch, instalados=(), size=None, boom=None):
+    from pathlib import Path
+
+    from speechtotext.core import models
+
+    visto = {}
+    monkeypatch.setattr(models, "installed",
+                        lambda engine=None: [m for m in instalados if engine in (None, m.engine)])
+    monkeypatch.setattr(models, "remote_size", lambda engine, name: size)
+
+    def ensure(engine, name, on_progress=None):
+        if boom:
+            raise boom
+        visto["ensure"] = (engine, name)
+        return Path("C:/hf/snap")
+
+    def remove(engine, name):
+        if boom:
+            raise boom
+        visto["remove"] = (engine, name)
+
+    monkeypatch.setattr(models, "ensure", ensure)
+    monkeypatch.setattr(models, "remove", remove)
+    return visto
+
+
+def test_models_lista_vacia_sugiere_pull(monkeypatch):
+    _models_doble(monkeypatch)
+    result = runner.invoke(app, ["models"])
+    assert result.exit_code == 0, result.stdout
+    assert "models pull large-v3" in _plana(result.stdout)
+
+
+def test_models_lista_tabla(monkeypatch, tmp_path):
+    from speechtotext.core.models import ModelInfo
+
+    _models_doble(monkeypatch, [
+        ModelInfo("faster-whisper", "large-v3", tmp_path / "x", 3_090_839_273, False),
+        ModelInfo("whispercpp", "small", tmp_path / "y.bin", 487_601_967, True),
+    ])
+    result = runner.invoke(app, ["models"])
+    assert result.exit_code == 0, result.stdout
+    salida = _plana(result.stdout)
+    assert "large-v3" in salida and "2.9 GB" in salida and "465 MB" in salida and "sí" in salida
+    assert "Datos en" in salida
+
+
+def test_models_pull_anuncia_tamano_y_baja(monkeypatch):
+    visto = _models_doble(monkeypatch, size=3_090_839_273)
+    result = runner.invoke(app, ["models", "pull", "large-v3"])
+    assert result.exit_code == 0, result.stdout
+    assert "Descargando large-v3 (faster-whisper, ~2.9 GB)" in _plana(result.stdout)
+    assert visto["ensure"] == ("faster-whisper", "large-v3")
+    result = runner.invoke(app, ["models", "pull", "small", "--engine", "whispercpp"])
+    assert result.exit_code == 0 and visto["ensure"] == ("whispercpp", "small")
+
+
+def test_models_pull_sin_tamano_no_inventa(monkeypatch):
+    _models_doble(monkeypatch, size=None)
+    result = runner.invoke(app, ["models", "pull", "small"])
+    assert "Descargando small (faster-whisper)..." in _plana(result.stdout)
+
+
+def test_models_pull_fallo_de_descarga_sale_1(monkeypatch):
+    _models_doble(monkeypatch, boom=RuntimeError("sha256 de ggml-small.bin no cuadra con el pin"))
+    result = runner.invoke(app, ["models", "pull", "small", "--engine", "whispercpp"])
+    assert result.exit_code == 1 and "sha256" in result.stdout
+
+
+def test_models_rm(monkeypatch):
+    visto = _models_doble(monkeypatch)
+    result = runner.invoke(app, ["models", "rm", "small"])
+    assert result.exit_code == 0 and visto["remove"] == ("faster-whisper", "small")
+    _models_doble(monkeypatch, boom=FileNotFoundError("small (faster-whisper) no está instalado"))
+    result = runner.invoke(app, ["models", "rm", "small"])
+    assert result.exit_code == 1 and "no está instalado" in result.stdout

@@ -761,5 +761,97 @@ def bench(
     _print_bench(table)
 
 
+def _gb(n: int) -> str:
+    return f"{n / 1024 ** 3:.1f} GB" if n >= 1024 ** 3 else f"{n / 1024 ** 2:.0f} MB"
+
+
+@app.command()
+def probe() -> None:
+    """Sondea esta máquina y muestra la ruta que elegiría `transcribe` (pégalo en un issue)."""
+    m = core_probe.machine()
+    console.print(f"platform   {m.platform}")
+    console.print(f"cpu_count  {m.cpu_count}")
+    console.print(f"ram_gb     {m.ram_gb if m.ram_gb is not None else 'sin medir'}")
+    console.print(f"cuda       {m.cuda}")
+    console.print(f"gpu        {m.gpu_name or '-'}")
+    console.print(f"vram_free  {f'{m.vram_free_gb} GB' if m.vram_free_gb is not None else '-'}")
+    console.print(f"whispercpp {m.whispercpp or 'no instalado'}")
+    for model in ("large-v3", "small"):
+        try:
+            r = core_probe.choose_route(m, model)
+        except AsrError as e:
+            console.print(f"{model:9} {e}", markup=False)
+            continue
+        if r.eta_factor:
+            eta = f"~{1 / r.eta_factor:.1f}x tiempo real{' (estimado)' if r.estimated else ' (bench)'}"
+        else:
+            eta = "sin medir"
+        console.print(
+            f"{model:9} {r.engine} · {r.device} · {r.compute_type} · {eta} · {r.reason or 'sin avisos'}",
+            markup=False,
+        )
+
+
+models_app = typer.Typer(help="Modelos locales: listar, bajar (pull) y borrar (rm).")
+app.add_typer(models_app, name="models")
+
+
+@models_app.callback(invoke_without_command=True)
+def models_list(ctx: typer.Context) -> None:
+    """Lista los modelos instalados (faster-whisper en la caché de HF, whisper.cpp en data_dir)."""
+    if ctx.invoked_subcommand is not None:
+        return
+    from speechtotext.core import models
+
+    rows = models.installed()
+    if not rows:
+        console.print("No hay modelos instalados. Baja uno: [cyan]speechtotext models pull large-v3[/cyan]")
+        return
+    t = Table("motor", "modelo", "tamaño", "verificado", "ruta")
+    for mi in rows:
+        t.add_row(mi.engine, mi.name, _gb(mi.size_bytes), "sí" if mi.verified else "-", str(mi.path))
+    Console(width=140).print(t)
+    console.print(f"Datos en {models.data_dir()}", markup=False)
+
+
+@models_app.command("pull")
+def models_pull(
+    name: str = typer.Argument(..., help="tiny | base | small | medium | large-v3 | distil-large-v3"),
+    engine: str = typer.Option(ENGINE_FASTER, "--engine", help="faster-whisper | whispercpp"),
+) -> None:
+    """Descarga un modelo. Anuncia el tamaño antes; la barra la pinta huggingface_hub."""
+    from speechtotext.core import models
+
+    try:
+        size = models.remote_size(engine, name)
+    except ValueError as e:
+        raise typer.BadParameter(str(e))
+    console.print(f"Descargando {name} ({engine}{', ~' + _gb(size) if size else ''})...", markup=False)
+    try:
+        path = models.ensure(engine, name)
+    except Exception as e:   # frontera del CLI: sha que no cuadra, sin red... se imprime y sale 1
+        console.print(str(e), style="red", markup=False)
+        raise typer.Exit(1)
+    console.print(f"  [green]OK[/green] {path}")
+
+
+@models_app.command("rm")
+def models_rm(
+    name: str = typer.Argument(..., help="Nombre del modelo (ver `speechtotext models`)."),
+    engine: str = typer.Option(ENGINE_FASTER, "--engine", help="faster-whisper | whispercpp"),
+) -> None:
+    """Borra un modelo local."""
+    from speechtotext.core import models
+
+    try:
+        models.remove(engine, name)
+    except ValueError as e:
+        raise typer.BadParameter(str(e))
+    except FileNotFoundError as e:
+        console.print(str(e), style="red", markup=False)
+        raise typer.Exit(1)
+    console.print(f"  [green]Borrado[/green] {name} ({engine})")
+
+
 if __name__ == "__main__":
     app()
