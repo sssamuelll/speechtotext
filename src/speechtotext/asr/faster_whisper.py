@@ -245,8 +245,5 @@ class FasterWhisperBackend:
                     else None
                 ),
             ),
-            confidence_target="segment_usable",
-            calibrated_confidence=None,
-            calibrator_version=None,
             warnings=tuple(warnings),
         )

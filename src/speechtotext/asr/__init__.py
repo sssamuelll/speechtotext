@@ -5,7 +5,6 @@ from speechtotext.asr.base import (
     VerifiedLocalAsrBackend,
 )
 from speechtotext.asr.types import (
-    ConfidenceTarget,
     NativeSignals,
     SegmentNativeSignals,
     TranscriptionRequest,
@@ -19,7 +18,6 @@ __all__ = [
     "AsrError",
     "CalibratedAsrBackend",
     "VerifiedLocalAsrBackend",
-    "ConfidenceTarget",
     "NativeSignals",
     "SegmentNativeSignals",
     "TranscriptionRequest",
