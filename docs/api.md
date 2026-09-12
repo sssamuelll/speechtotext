@@ -263,8 +263,8 @@ trata distinto según por dónde entre, y la diferencia es deliberada:
 
 A mitad del pipe, "esta señal no existe" ya es una respuesta correcta, y obligar a
 cada llamador a atrapar una excepción por eso no compra nada. Dentro de un
-`TranscriptionResult` o de un artefacto de calibración, en cambio, un no-finito es
-corrupción de datos y debe abortar.
+`TranscriptionResult`, en cambio, un no-finito es corrupción de datos y debe
+abortar.
 
 Consecuencia práctica: en el JSON del CLI, *ausente* y *inválido* se ven igual; en
 los tipos de `asr/`, lo inválido no llega a existir.

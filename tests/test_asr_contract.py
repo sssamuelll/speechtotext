@@ -32,7 +32,7 @@ def test_asr_publico_no_importa_faster_whisper():
     assert proc.returncode == 0
 
 
-def test_resultado_conserva_senales_palabras_y_target():
+def test_resultado_conserva_senales_y_palabras():
     word = TranscriptionWord("hola", 0.1, 0.4, 0.92)
     segment = TranscriptionSegment(
         0.1,

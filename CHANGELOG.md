@@ -30,6 +30,9 @@ Lo marcado como **rompe** exige cambios en el código que consume la librería.
   `FasterWhisperBackend` con la verificación propia pasando `model=artefacto.root`
   y `model_version=artefacto.manifest.revision`; convertir cada artefacto a
   `ModelRef(manifest.model_id, artefacto.fingerprint)` antes de derivar proveniencia.
+  Con una ruta, el `model` del resultado pasa a ser el nombre del directorio
+  (`Path.name`), no el `model_id` del manifiesto; si el envoltorio necesita
+  conservar ese id, sobreescribe la propiedad `model_id` del backend.
 
 ---
 
