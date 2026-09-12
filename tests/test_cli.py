@@ -57,7 +57,7 @@ def _fake_transcribe(monkeypatch, tmp_path, segments, info, boom=None, calls=Non
     monkeypatch.setattr(core_transcribe, "should_chunk", lambda d, c: False)
 
     class FakeBackend:
-        def __init__(self, engine, model, device, compute_type):
+        def __init__(self, engine, model, device, compute_type, jobs=1):
             self.backend_id, self.model_id, self.device, self.quant = engine, model, device, compute_type
             self.model_version = "1"
             self.engine_version = "whisper.cpp v1.9.1" if engine == "whispercpp" else "faster-whisper 1.2.0"
@@ -195,7 +195,7 @@ def _diarize_recomprimiendo(monkeypatch, salida):
 
 def test_json_mide_sobre_lo_que_el_asr_emitio_no_sobre_lo_diarizado(tmp_path, monkeypatch):
     # El cableado que arregla C-13. Sin este test la regresión pasa en verde: basta con
-    # mover `cov = sum(...)` debajo de _run_diarization y los otros 604 siguen pasando.
+    # mover `cov = sum(...)` debajo de _diarize y los otros 604 siguen pasando.
     import json
 
     _diarize_recomprimiendo(monkeypatch, [_seg(0.0, 1.0), _seg(600.0, 601.0)])
@@ -433,7 +433,7 @@ def test_hotwords_con_whispercpp_rechaza_sin_construir(tmp_path, monkeypatch):
     assert result.exit_code == 2
     assert "--hotwords no tiene efecto" in result.stdout
     assert "faster-whisper" in result.stdout
-    assert calls == []  # jamás llegó a run_chunked: ni modelo ni caché
+    assert calls == []  # jamás llegó a el backend: ni modelo ni caché
 
 
 def test_engine_invalido_falla(tmp_path, monkeypatch):
@@ -582,7 +582,7 @@ def test_whispercpp_rechaza_modelo_no_pinneado(tmp_path, monkeypatch):
     assert result.exit_code == 2
     assert "no está pinneado" in result.stderr
     assert "large-v3" in result.stderr and "small" in result.stderr
-    assert calls == []  # run_chunked jamas se llamo
+    assert calls == []  # el backend jamas se llamo
 
 
 # --- bench · tabla de configs medidas (núcleo SIEMPRE stubbeado, jamás motores) ------
@@ -786,3 +786,18 @@ def test_bench_ffmpeg_roto_sale_con_mensaje(tmp_path, monkeypatch):
     result = runner.invoke(app, ["bench", str(audio)])
     assert result.exit_code == 1
     assert "No se pudo recortar" in result.stdout
+
+
+def test_troceado_anuncia_y_lista_cada_trozo_fuera_de_tty(tmp_path, monkeypatch):
+    from speechtotext.core import transcribe as core_transcribe
+
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(1.0, 2.0)], _info(1200.0))
+    monkeypatch.setattr(core_transcribe, "should_chunk", lambda d, c: True)
+    monkeypatch.setattr(core_transcribe, "plan_chunks", lambda path, dur: [(0.0, 600.0), (600.0, 1200.0)])
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    result = _invoke(audio, tmp_path, "-j", "2")
+    assert result.exit_code == 0, result.stdout
+    salida = _plana(result.stdout)
+    assert "Troceado (jobs=2)" in salida
+    assert "[1/2]" in salida and "[2/2]" in salida
+    assert "(nuevo)" in salida

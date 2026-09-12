@@ -109,9 +109,6 @@ def test_seg_roundtrip_sin_palabras():
     assert seg_from_dict(seg_to_dict(seg)) == seg
 
 
-import json
-
-
 def test_should_chunk_auto_por_umbral():
     assert should_chunk(CHUNK_THRESHOLD + 1, None) is True
     assert should_chunk(CHUNK_THRESHOLD - 1, None) is False

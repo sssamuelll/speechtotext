@@ -17,7 +17,7 @@ from typing import Callable
 
 import numpy as np
 
-from speechtotext.asr.base import Caps
+from speechtotext.asr.base import AsrError, Caps
 from speechtotext.asr.types import (
     NativeSignals,
     SegmentNativeSignals,
@@ -109,6 +109,11 @@ class WhisperCppBackend:
             self._model_path = enginepin.ensure_model(self._model)
 
     def transcribe(self, samples: np.ndarray, request: TranscriptionRequest) -> TranscriptionResult:
+        if request.hotwords:
+            # No degradacion: avisar sobre un knob inerte fabricaria un efecto que no ocurrio.
+            raise AsrError("unsupported_option", False,
+                           "--hotwords no tiene efecto con whispercpp (--prompt es inerte con "
+                           "-mc 0, medido 2026-07-27); usa --engine faster-whisper")
         self.warm()
         started = self._clock()
         fd, wav = tempfile.mkstemp(suffix=".wav")

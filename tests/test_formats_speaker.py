@@ -242,7 +242,7 @@ def test_json_diarization_va_dentro_del_bloque_engine(tmp_path):
 def test_pipeline_whispercpp_fixture_a_write_json(tmp_path):
     """Contrato dual de punta a punta: la fixture real de -ojf pasa por el parser del
     núcleo, se convierte en LabeledSegments (el puente que hoy hace el CLI) y sale por
-    write_json. test_engines.py no cubre este último tramo; aquí vive."""
+    write_json. test_whispercpp_backend.py no cubre este último tramo; aquí vive."""
     from speechtotext.asr.whispercpp import parse_ojf
 
     fixture = Path(__file__).parent / "fixtures" / "whispercpp_ojf.json"

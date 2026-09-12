@@ -38,7 +38,6 @@ from speechtotext.audio.io import AudioDecodeError
 from speechtotext.core.transcribe import (
     ENGINE_FASTER,
     ENGINE_WHISPERCPP,
-    ENGINES,
     resolve_route,
     transcribe as core_transcribe,
 )
@@ -192,10 +191,21 @@ def transcribe_file(
     ) as progress:
         task = progress.add_task(f"Transcribiendo {audio.name}", total=None)
 
+        avisado = False
+
         def on_progress(p):
+            nonlocal avisado
             if p.stage == "transcribe" and p.total and p.total > 1:
-                progress.update(task, description=f"[{int(p.done)}/{int(p.total)}] {p.detail}",
-                                total=p.total, completed=p.done)
+                if not avisado:
+                    avisado = True
+                    console.print(f"[bold]Troceado[/bold] (jobs={jobs}) · {model}")
+                linea = f"[{int(p.done)}/{int(p.total)}] {p.detail}"
+                if console.is_terminal:
+                    progress.update(task, description=linea, total=p.total, completed=p.done)
+                else:
+                    # Redirigido a archivo, Live no refresca: una linea por trozo o la corrida
+                    # de horas queda muda (spec 2026-07-08, "el log mudo al redirigir").
+                    console.print(f"  {linea}", markup=False)
             else:
                 progress.update(task, description=f"{p.stage} {p.detail}".strip())
 

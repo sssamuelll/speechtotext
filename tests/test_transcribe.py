@@ -54,6 +54,16 @@ def test_make_backend_construye_el_tipo_y_la_config():
     assert isinstance(wc, WhisperCppBackend)
 
 
+def test_make_backend_reparte_hilos_al_trocear():
+    import os
+
+    solo = make_backend("faster-whisper", "large-v3", "cpu", "int8")
+    assert (solo.config.cpu_threads, solo.config.num_workers) == (0, 1)
+    cuatro = make_backend("faster-whisper", "large-v3", "cpu", "int8", jobs=4)
+    assert cuatro.config.num_workers == 4
+    assert cuatro.config.cpu_threads == max(1, (os.cpu_count() or 1) // 4)
+
+
 # --- decodificacion ------------------------------------------------------------------
 
 def _wav(path: Path, seconds: float, rate: int = 8000) -> Path:
@@ -110,8 +120,10 @@ class FakeBackend:
     """Motor de mentira: devuelve los segmentos dados (tiempos LOCALES al trozo)."""
 
     def __init__(self, segments=((1.0, 2.0, " hola"),), *, language="es", probability=0.9,
-                 boom=None, backend_id="faster-whisper", caps=Caps("honrado", "honrado", "honrado")):
+                 boom=None, wrap=False, backend_id="faster-whisper",
+                 caps=Caps("honrado", "honrado", "honrado")):
         self.segments, self.language, self.probability, self.boom = segments, language, probability, boom
+        self.wrap = wrap
         self.backend_id, self.caps = backend_id, caps
         self.quant = "q5_0" if backend_id == "whispercpp" else "int8"
         self.device = "cuda" if backend_id == "whispercpp" else "cpu"
@@ -124,6 +136,8 @@ class FakeBackend:
     def transcribe(self, samples, request):
         self.calls.append((len(samples), request))
         if self.boom is not None:
+            if self.wrap:
+                raise AsrError("backend_failed", True, str(self.boom))
             raise self.boom
         segs = tuple(
             TranscriptionSegment(s, e, t, (TranscriptionWord(t, s, e, None),) if request.word_timestamps else (),
@@ -224,6 +238,24 @@ def test_backend_dado_no_construye_otro(monkeypatch):
     core.transcribe(_zeros(5.0), backend=FakeBackend(), chunk=False)
 
 
+def test_el_nucleo_clampa_jobs_para_whispercpp_y_los_reparte_para_faster(tmp_path, monkeypatch):
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    monkeypatch.setattr(core, "load_audio", lambda p: _zeros(1300.0))
+    visto = []
+
+    def fabrica(engine, model, device, compute_type, jobs=1):
+        visto.append((engine, jobs))
+        return FakeBackend(backend_id=engine, caps=Caps("rechazado", "degradado", "degradado")
+                           if engine == "whispercpp" else Caps("honrado", "honrado", "honrado"))
+
+    monkeypatch.setattr(core, "make_backend", fabrica)
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"RIFF")
+    core.transcribe(audio, engine="whispercpp", model="small", chunk=True, jobs=4)   # 3 trozos fijos
+    core.transcribe(audio, engine="faster-whisper", chunk=True, jobs=4)
+    assert visto == [("whispercpp", 1), ("faster-whisper", 3)]
+
+
 def test_varios_trozos_reensamblan_en_orden_con_tiempos_globales(tmp_path, monkeypatch):
     monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
     audio = tmp_path / "largo.wav"
@@ -292,6 +324,32 @@ def test_primer_fallo_cancela_los_pendientes_y_nombra_el_trozo(tmp_path, monkeyp
     with pytest.raises(AsrError) as ei:
         core.transcribe(audio, backend=FakeBackend(boom=RuntimeError("cable")), chunk=True, jobs=1)
     assert ei.value.code == "backend_failed" and "fallo en el trozo 1/2" in str(ei.value)
+
+
+def test_oom_envuelto_por_el_backend_real_tambien_se_traduce():
+    boom = RuntimeError("mkl_malloc: failed to allocate memory")
+    with pytest.raises(AsrError) as ei:
+        core.transcribe(_zeros(5.0), chunk=False, backend=FakeBackend(boom=boom, wrap=True))
+    assert ei.value.code == "out_of_memory" and "-m medium" in str(ei.value)
+
+
+def test_fallo_envuelto_en_varios_trozos_nombra_el_trozo(tmp_path, monkeypatch):
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    monkeypatch.setattr(core, "load_audio", lambda p: _zeros(1200.0))
+    monkeypatch.setattr(core, "plan_chunks", lambda path, dur: [(0.0, 600.0), (600.0, 1200.0)])
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"RIFF")
+    with pytest.raises(AsrError) as ei:
+        core.transcribe(audio, backend=FakeBackend(boom=RuntimeError("cable"), wrap=True), chunk=True, jobs=1)
+    assert ei.value.code == "backend_failed" and "fallo en el trozo 1/2" in str(ei.value)
+
+
+def test_cancelacion_envuelta_no_se_reetiqueta():
+    parar = threading.Event()
+    parar.set()
+    with pytest.raises(AsrError) as ei:
+        core.transcribe(_zeros(5.0), backend=FakeBackend(), cancel=parar, chunk=False)
+    assert ei.value.code == "cancelled"
 
 
 def test_diariza_sobre_las_mismas_muestras_y_mide_antes(monkeypatch):

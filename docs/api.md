@@ -313,8 +313,9 @@ from speechtotext.core.transcribe import transcribe, Transcript, Progress, AsrEr
 t = transcribe(Path("reunion.mp4"), model="large-v3", language="auto", on_progress=print)
 ```
 
-Un archivo (o muestras 16 kHz mono) entra, un `Transcript` sale: `segments` (con hablante,
-`suspect` y señales nativas), `language`, `language_probability`, `duration`, `speech_s`,
+Un archivo (o muestras 16 kHz mono) entra, un `Transcript` sale: `segments` (con hablante y
+señales nativas; la marca `suspect` la calcula el escritor JSON con `is_suspect`), `language`,
+`language_probability`, `duration`, `speech_s`,
 `gaps`, `engine`, `request` (la efectiva, tras CAPS), `warnings` y `diarization`. Una sola
 decodificación; el archivo corto y el largo son el mismo camino con n trozos; los trozos
 dejan checkpoint por contenido en `~/.speechtotext/chunks`. El núcleo nunca imprime:

@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Literal
 
@@ -82,13 +82,22 @@ def resolve_route(engine: str = "auto", device: str = "auto", compute_type: str 
     return Route(ENGINE_FASTER, device, compute_type, "")
 
 
-def make_backend(engine: str, model: str, device: str, compute_type: str) -> AsrBackend:
+def make_backend(engine: str, model: str, device: str, compute_type: str, jobs: int = 1) -> AsrBackend:
     """Los DOS motores se construyen aqui y solo aqui. Imports perezosos: no pagar
     faster_whisper si el motor es whisper.cpp, ni el pin si es faster-whisper."""
     if engine == ENGINE_FASTER:
+        import os
+
         from speechtotext.asr.faster_whisper import FasterWhisperBackend, FasterWhisperConfig
 
-        return FasterWhisperBackend(model, FasterWhisperConfig(device=device, compute_type=compute_type))
+        cfg = FasterWhisperConfig(
+            device=device, compute_type=compute_type,
+            # Al trocear, N trozos en paralelo comparten un modelo: CT2 necesita N replicas
+            # (num_workers) y los hilos se reparten. Con jobs=1, cpu_threads=0 deja decidir a CT2.
+            cpu_threads=max(1, (os.cpu_count() or 1) // jobs) if jobs > 1 else 0,
+            num_workers=jobs,
+        )
+        return FasterWhisperBackend(model, cfg)
     if engine == ENGINE_WHISPERCPP:
         from speechtotext.asr.whispercpp import WhisperCppBackend
 
@@ -292,10 +301,6 @@ def transcribe(
         if cancel is not None and cancel.is_set():
             raise AsrError("cancelled", True, "transcripción cancelada")
 
-    if backend is None:
-        route = resolve_route(engine, device, compute_type, model)
-        backend = make_backend(route.engine, model, route.device, route.compute_type)
-
     if isinstance(audio, Path):
         emit(Progress("decode", 0, None, audio.name))
         samples = load_audio(audio)
@@ -304,6 +309,20 @@ def transcribe(
         samples = np.asarray(audio, dtype=np.float32).reshape(-1)
         source = None
     duration = len(samples) / SAMPLE_RATE
+
+    chunking = should_chunk(duration, chunk)
+    if chunking:
+        spans = plan_chunks(source, duration) if source is not None else pick_cuts([], duration)
+    else:
+        spans = [(0.0, duration)]
+
+    route = resolve_route(engine, device, compute_type, model) if backend is None else None
+    engine_id = route.engine if route is not None else backend.backend_id
+    # N subprocesos contra una sola GPU paginan en silencio (medido: 2 concurrentes tardan
+    # MAS que en serie): whisper.cpp va de uno en uno, estructuralmente.
+    workers = 1 if engine_id == ENGINE_WHISPERCPP else max(1, min(jobs, len(spans)))
+    if backend is None:
+        backend = make_backend(route.engine, model, route.device, route.compute_type, jobs=workers)
 
     # word_timestamps solo se piden al diarizar (la asignacion palabra->hablante parte los
     # segmentos en el cambio de voz) o si el llamador los quiere; cuestan.
@@ -316,16 +335,11 @@ def transcribe(
     try:
         backend.warm()
     except RuntimeError as exc:
-        raise _oom(exc, backend.backend_id) from exc
+        translated = _oom(exc, backend.backend_id)
+        if translated is exc:
+            raise
+        raise translated from exc
 
-    chunking = should_chunk(duration, chunk)
-    if chunking:
-        spans = plan_chunks(source, duration) if source is not None else pick_cuts([], duration)
-    else:
-        spans = [(0.0, duration)]
-    # N subprocesos contra una sola GPU paginan en silencio (medido: 2 concurrentes tardan
-    # MAS que en serie): whisper.cpp va de uno en uno, estructuralmente.
-    workers = 1 if backend.backend_id == ENGINE_WHISPERCPP else max(1, min(jobs, len(spans)))
     # Checkpoints solo al trocear (como hoy): un pase unico no deja nada en disco.
     identity = _identity(source, backend, eff) if (source is not None and chunking) else None
 
@@ -340,14 +354,13 @@ def transcribe(
             s, e = spans[i]
             try:
                 results[i], cached, langs[i], probs[i] = fut.result()
-            except AsrError:
-                pool.shutdown(wait=False, cancel_futures=True)
-                raise
-            except RuntimeError as exc:
+            except RuntimeError as exc:   # AsrError tambien es RuntimeError
                 # Al primer fallo se cancela lo pendiente: con motor roto y fallos LENTOS
                 # (paging, timeout) drenar 17 trozos serian horas.
                 pool.shutdown(wait=False, cancel_futures=True)
-                translated = _oom(exc, backend.backend_id)
+                if isinstance(exc, AsrError) and exc.code != "backend_failed":
+                    raise                                   # cancelled, unsupported_option: tal cual
+                translated = _oom(exc, backend.backend_id)  # el mensaje envuelto conserva el texto del allocator
                 if translated is not exc:
                     raise translated from exc
                 if len(spans) == 1:

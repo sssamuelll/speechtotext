@@ -168,6 +168,15 @@ def test_parser_filtra_segmentos_de_texto_vacio():
     assert lang == "es"
 
 
+def test_hotwords_se_rechazan_antes_de_correr():
+    from speechtotext.asr import AsrError
+
+    backend = _backend(lambda *a, **k: pytest.fail("no debe correr"))
+    with pytest.raises(AsrError) as ei:
+        backend.transcribe(_samples(1.0), TranscriptionRequest(hotwords=("Bézier",)))
+    assert ei.value.code == "unsupported_option"
+
+
 def test_base_temporal_no_ascii_falla_antes_de_correr(monkeypatch, tmp_path):
     base = tmp_path / "salida-ñ"
 
