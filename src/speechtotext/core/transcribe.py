@@ -190,8 +190,8 @@ def _identity(path: Path, backend: AsrBackend, request: TranscriptionRequest) ->
 
 
 def _run_span(backend, samples, request, start, end, identity, cancel):
-    """(segmentos globales, desde_cache, idioma, probabilidad). El checkpoint viejo puede
-    traer un fantasma sobre el relleno: clip_to_end tambien al leer."""
+    """(segmentos globales, desde_cache, idioma, probabilidad, avisos del motor). El
+    checkpoint viejo puede traer un fantasma sobre el relleno: clip_to_end tambien al leer."""
     if cancel is not None and cancel.is_set():
         raise AsrError("cancelled", True, "transcripción cancelada")
     path = chunk_path(identity, start, end) if identity is not None else None
@@ -199,7 +199,7 @@ def _run_span(backend, samples, request, start, end, identity, cancel):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             segs = clip_to_end([seg_from_dict(d) for d in data["segments"]], end)
-            return segs, True, data.get("language"), None
+            return segs, True, data.get("language"), None, ()
         except (json.JSONDecodeError, KeyError):
             pass  # checkpoint corrupto -> recomputar
     a, b = int(start * SAMPLE_RATE), int(end * SAMPLE_RATE)
@@ -209,7 +209,7 @@ def _run_span(backend, samples, request, start, end, identity, cancel):
         path.write_text(json.dumps({"language": result.language,
                                     "segments": [seg_to_dict(s) for s in segs]},
                                    ensure_ascii=False), encoding="utf-8")
-    return segs, False, result.language, result.native_signals.language_probability
+    return segs, False, result.language, result.native_signals.language_probability, result.warnings
 
 
 def _diarize(samples, segments, speakers, identify, threshold):
@@ -320,6 +320,7 @@ def transcribe(
     results: list = [None] * len(spans)
     langs: list = [None] * len(spans)
     probs: list = [None] * len(spans)
+    extra: list[str] = []   # avisos del motor (p. ej. empty_transcript), sin repetir entre trozos
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futs = {pool.submit(_run_span, backend, samples, eff, s, e, identity, cancel): i
                 for i, (s, e) in enumerate(spans)}
@@ -327,7 +328,7 @@ def transcribe(
             i = futs[fut]
             s, e = spans[i]
             try:
-                results[i], cached, langs[i], probs[i] = fut.result()
+                results[i], cached, langs[i], probs[i], span_warnings = fut.result()
             except RuntimeError as exc:   # AsrError tambien es RuntimeError
                 # Al primer fallo se cancela lo pendiente: con motor roto y fallos LENTOS
                 # (paging, timeout) drenar 17 trozos serian horas.
@@ -342,6 +343,10 @@ def transcribe(
                 raise AsrError("backend_failed", True,
                                f"motor {backend.backend_id} fallo en el trozo {i + 1}/{len(spans)} "
                                f"({_mmss(s)}-{_mmss(e)}): {exc}") from exc
+            for w in span_warnings:
+                aviso = f"{backend.backend_id}: {w}"
+                if aviso not in extra:
+                    extra.append(aviso)
             span = e - s
             cov = 100 * sum(x.end - x.start for x in results[i]) / span if span > 0 else 0.0
             emit(Progress("transcribe", done, len(spans),
@@ -378,4 +383,4 @@ def transcribe(
         diarization=("word" if eff.word_timestamps else "segment") if diarize else None,
     )
     return Transcript(final, lang_out, prob, duration, speech_s, gaps, engine_info, eff,
-                      warnings, report)
+                      warnings + tuple(extra), report)

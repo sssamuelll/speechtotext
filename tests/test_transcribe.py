@@ -394,3 +394,55 @@ def test_diarizacion_sin_extra_es_un_error_con_codigo(monkeypatch):
     with pytest.raises(AsrError) as ei:
         core.transcribe(_zeros(5.0), backend=FakeBackend(), diarize=True, chunk=False)
     assert ei.value.code == "diarize_unavailable" and "[diarize]" in str(ei.value)
+
+
+# --- avisos del motor y cancelación a mitad del pool ------------------------------------
+
+def test_los_avisos_del_motor_llegan_al_transcript_sin_repetirse(tmp_path, monkeypatch):
+    from dataclasses import replace as dc_replace
+
+    class Avisa(FakeBackend):
+        def transcribe(self, samples, request):
+            return dc_replace(super().transcribe(samples, request), warnings=("empty_transcript",))
+
+    t = core.transcribe(_zeros(5.0), backend=Avisa(), chunk=False)
+    assert t.warnings == ("faster-whisper: empty_transcript",)
+
+    monkeypatch.setattr(core, "load_audio", lambda p: _zeros(1200.0))
+    monkeypatch.setattr(core, "plan_chunks", lambda path, dur: [(0.0, 600.0), (600.0, 1200.0)])
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"RIFF")
+    t = core.transcribe(audio, backend=Avisa(), chunk=True, jobs=1)
+    assert t.warnings == ("faster-whisper: empty_transcript",)   # dos trozos, un aviso
+
+
+def test_los_avisos_de_caps_van_antes_que_los_del_motor():
+    from dataclasses import replace as dc_replace
+
+    class Avisa(FakeBackend):
+        def transcribe(self, samples, request):
+            return dc_replace(super().transcribe(samples, request), warnings=("empty_transcript",))
+
+    backend = Avisa(backend_id="whispercpp", caps=Caps("rechazado", "degradado", "degradado"))
+    t = core.transcribe(_zeros(5.0), backend=backend, vad=True, chunk=False)
+    assert "no trae VAD" in t.warnings[0] and t.warnings[-1] == "whispercpp: empty_transcript"
+
+
+def test_cancelacion_a_mitad_del_pool_no_lanza_mas_trozos(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "load_audio", lambda p: _zeros(1800.0))
+    monkeypatch.setattr(core, "plan_chunks",
+                        lambda path, dur: [(0.0, 600.0), (600.0, 1200.0), (1200.0, 1800.0)])
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"RIFF")
+    parar = threading.Event()
+
+    class Cancelador(FakeBackend):
+        def transcribe(self, samples, request):
+            parar.set()          # el primer trozo pide parar desde dentro
+            return super().transcribe(samples, request)
+
+    backend = Cancelador()
+    with pytest.raises(AsrError) as ei:
+        core.transcribe(audio, backend=backend, cancel=parar, chunk=True, jobs=1)
+    assert ei.value.code == "cancelled"
+    assert len(backend.calls) == 1     # los trozos 2 y 3 jamás llegaron al motor
