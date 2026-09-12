@@ -1,4 +1,4 @@
-from speechtotext.asr.base import AsrBackend, AsrError
+from speechtotext.asr.base import AsrBackend, AsrError, Cap, Caps
 from speechtotext.asr.types import (
     NativeSignals,
     SegmentNativeSignals,
@@ -11,6 +11,8 @@ from speechtotext.asr.types import (
 __all__ = [
     "AsrBackend",
     "AsrError",
+    "Cap",
+    "Caps",
     "NativeSignals",
     "SegmentNativeSignals",
     "TranscriptionRequest",

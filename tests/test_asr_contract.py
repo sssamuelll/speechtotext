@@ -152,3 +152,19 @@ def test_resultado_no_tiene_campos_de_calibracion():
         "text", "language", "words", "segments", "backend", "model",
         "model_version", "latency_ms", "native_signals", "warnings",
     }
+
+
+def test_request_valida_vad_como_bool_y_lo_lleva_al_fingerprint():
+    from speechtotext.asr.types import TranscriptionRequest
+
+    assert TranscriptionRequest().vad is False
+    assert TranscriptionRequest(vad=True).to_dict()["vad"] is True
+    assert TranscriptionRequest(vad=True).fingerprint != TranscriptionRequest().fingerprint
+    with pytest.raises(TypeError, match="vad"):
+        TranscriptionRequest(vad=1)
+
+
+def test_request_admite_auto_como_idioma():
+    from speechtotext.asr.types import TranscriptionRequest
+
+    assert TranscriptionRequest(language="auto").language == "auto"

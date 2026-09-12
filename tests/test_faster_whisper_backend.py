@@ -3,11 +3,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from speechtotext.asr import AsrBackend, TranscriptionRequest
+from speechtotext.asr import AsrBackend, Caps, TranscriptionRequest
 from speechtotext.asr.faster_whisper import FasterWhisperBackend, FasterWhisperConfig
-from speechtotext.audio import (
-    AudioClip, AudioQualityReport, AudioView, AudioViews, PipelineStep,
-)
 
 _INFO = SimpleNamespace(language="es", language_probability=0.98)
 
@@ -31,15 +28,8 @@ def _backend(model, segments, info, calls, **kwargs):
     )
 
 
-def _clip():
-    view = AudioView.capture(
-        np.zeros(16000, dtype=np.float32), 16000,
-        step=PipelineStep("test-source", "1", {}),
-    )
-    quality = AudioQualityReport(
-        1000, 800, -25.0, -25.0, -6.0, 0.0, -45.0, 20.0, 0.0, 0.0, 0, 0, (),
-    )
-    return AudioClip(1.0, 2.0, "mic", (), quality, AudioViews(view, view, view))
+def _samples(seconds: float = 1.0) -> np.ndarray:
+    return np.zeros(int(seconds * 16000), dtype=np.float32)
 
 
 def test_backend_extrae_palabras_senales_y_opciones():
@@ -55,11 +45,16 @@ def test_backend_extrae_palabras_senales_y_opciones():
     assert isinstance(backend, AsrBackend)
     assert backend.model_id == "large-v3"
     assert backend.model_version == "unpinned"
+    samples = _samples()
     result = backend.transcribe(
-        _clip(),
+        samples,
         TranscriptionRequest(language="es", hotwords=("Bézier",), context="reunión"),
     )
     assert result.text == "hola mundo"
+    assert result.segments[0].text == " hola"          # crudo: el espacio inicial es del motor
+    assert result.words[0].text == " hola"
+    assert calls["audio"] is samples
+    assert calls["kwargs"]["vad_filter"] is False
     assert result.model == "large-v3"
     assert result.model_version == "unpinned"
     assert result.words[0].confidence == pytest.approx(0.91)
@@ -95,7 +90,7 @@ def test_model_version_es_del_llamador():
     revision = "0123456789abcdef0123456789abcdef01234567"
     backend = _backend("large-v3", [], _INFO, {}, model_version=revision)
     assert backend.model_version == revision
-    assert backend.transcribe(_clip(), TranscriptionRequest()).model_version == revision
+    assert backend.transcribe(_samples(), TranscriptionRequest()).model_version == revision
 
 
 def test_warm_carga_una_sola_vez():
@@ -108,14 +103,14 @@ def test_warm_carga_una_sola_vez():
     backend = FasterWhisperBackend("small", model_factory=factory)
     backend.warm()
     backend.warm()
-    backend.transcribe(_clip(), TranscriptionRequest())
+    backend.transcribe(_samples(), TranscriptionRequest())
     assert calls["n"] == 1
     assert backend.config == FasterWhisperConfig()
 
 
 def test_backend_vacio_no_inventa_senales():
     info = SimpleNamespace(language="es", language_probability=0.8)
-    result = _backend("small", [], info, {}).transcribe(_clip(), TranscriptionRequest())
+    result = _backend("small", [], info, {}).transcribe(_samples(), TranscriptionRequest())
     assert result.text == ""
     assert result.native_signals.no_speech is None
     assert result.native_signals.avg_logprob is None
@@ -138,3 +133,20 @@ def test_config_fingerprint_liga_todos_los_parametros_efectivos():
     assert base.fingerprint != FasterWhisperConfig(cpu_threads=2).fingerprint
     with pytest.raises(ValueError, match="cpu_threads"):
         FasterWhisperConfig(cpu_threads=True)
+
+
+def test_backend_declara_caps_y_version_del_motor():
+    backend = _backend("large-v3", [], _INFO, {})
+    assert isinstance(backend, AsrBackend)
+    assert backend.caps == Caps("honrado", "honrado", "honrado")
+    assert backend.engine_version.startswith("faster-whisper")
+    assert (backend.quant, backend.device) == ("int8", "cpu")
+
+
+def test_vad_y_auto_viajan_al_motor():
+    calls = {}
+    _backend("large-v3", [], _INFO, calls).transcribe(
+        _samples(), TranscriptionRequest(language="auto", vad=True),
+    )
+    assert calls["kwargs"]["vad_filter"] is True
+    assert calls["kwargs"]["language"] is None

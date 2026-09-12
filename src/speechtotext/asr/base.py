@@ -1,9 +1,23 @@
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from dataclasses import dataclass
+from typing import Literal, Protocol, runtime_checkable
 
-from speechtotext.audio.types import AudioClip
+import numpy as np
+
 from speechtotext.asr.types import TranscriptionRequest, TranscriptionResult
+
+# Contrato de capacidades por motor. Regla madre: degradar con aviso cuando el resultado
+# sigue siendo lo pedido con menos precision; rechazar cuando el knob seria inerte;
+# jamas silencio ni sustitucion.
+Cap = Literal["honrado", "degradado", "rechazado"]
+
+
+@dataclass(frozen=True)
+class Caps:
+    hotwords: Cap
+    vad: Cap
+    word_timestamps: Cap
 
 
 class AsrError(RuntimeError):
@@ -15,7 +29,11 @@ class AsrError(RuntimeError):
 
 @runtime_checkable
 class AsrBackend(Protocol):
+    """Un motor de voz a texto. Entra float32 mono a 16 kHz; nada mas. Quien llama
+    resamplea. El objeto es la cache del modelo: warm() carga una vez."""
+
     backend_id: str
+    caps: Caps
 
     @property
     def model_id(self) -> str: ...
@@ -23,12 +41,21 @@ class AsrBackend(Protocol):
     @property
     def model_version(self) -> str: ...
 
+    @property
+    def engine_version(self) -> str: ...
+
+    @property
+    def quant(self) -> str: ...
+
+    @property
+    def device(self) -> str: ...
+
     def warm(self) -> None:
         ...
 
     def transcribe(
         self,
-        clip: AudioClip,
+        samples: np.ndarray,
         request: TranscriptionRequest,
     ) -> TranscriptionResult:
         ...
