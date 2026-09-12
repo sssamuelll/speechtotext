@@ -9,6 +9,31 @@ Lo marcado como **rompe** exige cambios en el código que consume la librería.
 
 ## Sin publicar
 
+### Cambiado — rompe
+
+- **Se extrajeron el arnés de evaluación y la cadena de custodia**: `evaluation/`,
+  `security/`, `models/`, `confidence/`, `statistics.py` y el extra `[evaluation]`.
+  Viven en su único consumidor, como pasó con `api/` en la `0.4.0`. Esta librería
+  queda en lo que es: audio → texto, con o sin hablantes, y las medidas sobre la
+  señal.
+- `FasterWhisperBackend(model, config=None, *, model_version="unpinned")` recibe
+  un nombre o una ruta, no un `VerifiedModelArtifact`. Los Protocols
+  `CalibratedAsrBackend` y `VerifiedLocalAsrBackend` se fueron con la verificación.
+- `TranscriptionResult` ya no trae `confidence_target`, `calibrated_confidence` ni
+  `calibrator_version`, y `ConfidenceTarget` desaparece. Quien calibre envuelve el
+  resultado.
+- `PipelineProvenance` recibe `ModelRef(model_id, fingerprint)` en `models=`, no
+  artefactos verificados. Las huellas no cambian: el payload solo guardaba
+  `model_fingerprints`.
+
+  Migración: importar lo extraído desde su nuevo paquete; envolver
+  `FasterWhisperBackend` con la verificación propia pasando `model=artefacto.root`
+  y `model_version=artefacto.manifest.revision`; convertir cada artefacto a
+  `ModelRef(manifest.model_id, artefacto.fingerprint)` antes de derivar proveniencia.
+  Con una ruta, el `model` del resultado pasa a ser el nombre del directorio
+  (`Path.name`), no el `model_id` del manifiesto; si el envoltorio necesita
+  conservar ese id, sobreescribe la propiedad `model_id` del backend.
+
 ---
 
 ## v0.5.1 — 2026-09-12

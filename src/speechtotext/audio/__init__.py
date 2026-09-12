@@ -1,5 +1,5 @@
 from speechtotext.audio.evidence import VoiceEvidence, compute_voice_evidence
-from speechtotext.audio.fingerprint import PipelineProvenance, PipelineStep
+from speechtotext.audio.fingerprint import ModelRef, PipelineProvenance, PipelineStep
 from speechtotext.audio.gate import (
     PreInferenceDecision,
     QualityReason,
@@ -26,6 +26,7 @@ __all__ = [
     "AudioViewName",
     "AudioViews",
     "GainResult",
+    "ModelRef",
     "PipelineProvenance",
     "PipelineStep",
     "SpeechRegion",

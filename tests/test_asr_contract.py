@@ -32,7 +32,7 @@ def test_asr_publico_no_importa_faster_whisper():
     assert proc.returncode == 0
 
 
-def test_resultado_conserva_senales_palabras_y_target():
+def test_resultado_conserva_senales_y_palabras():
     word = TranscriptionWord("hola", 0.1, 0.4, 0.92)
     segment = TranscriptionSegment(
         0.1,
@@ -51,32 +51,9 @@ def test_resultado_conserva_senales_palabras_y_target():
         model_version="rev1",
         latency_ms=120,
         native_signals=NativeSignals(0.02, -0.15, 1.1, 0.99),
-        confidence_target="segment_usable",
-        calibrated_confidence=None,
-        calibrator_version=None,
         warnings=(),
     )
     assert result.segments[0].native_signals.no_speech == pytest.approx(0.02)
-    assert result.confidence_target == "segment_usable"
-
-
-def test_resultado_rechaza_confianza_sin_version():
-    with pytest.raises(ValueError, match="calibrator_version"):
-        TranscriptionResult(
-            text="hola",
-            language="es",
-            words=(),
-            segments=(),
-            backend="fake",
-            model="fake",
-            model_version="1",
-            latency_ms=1,
-            native_signals=NativeSignals(None, None, None, None),
-            confidence_target="segment_usable",
-            calibrated_confidence=0.9,
-            calibrator_version=None,
-            warnings=(),
-        )
 
 
 def test_asr_error_expone_codigo_y_recuperabilidad():
@@ -125,9 +102,6 @@ def test_resultado_exige_identidad_lenguaje_y_latencia_entera():
         model_version="1",
         latency_ms=1,
         native_signals=NativeSignals(None, None, None, None),
-        confidence_target="segment_usable",
-        calibrated_confidence=None,
-        calibrator_version=None,
         warnings=(),
     )
     for field in ("language", "backend", "model", "model_version"):
@@ -148,13 +122,10 @@ def test_tipos_asr_rechazan_coerciones_y_contenedores_mutables():
         model_version="1",
         latency_ms=1,
         native_signals=NativeSignals(None, None, None, None),
-        confidence_target="segment_usable",
-        calibrated_confidence=None,
-        calibrator_version=None,
         warnings=(),
     )
     with pytest.raises(TypeError, match="hotwords"):
-        TranscriptionRequest(hotwords="Aurelius")
+        TranscriptionRequest(hotwords="Bézier")
     with pytest.raises(TypeError, match="beam_size"):
         TranscriptionRequest(beam_size=True)
     with pytest.raises(TypeError, match="word_timestamps"):
@@ -169,3 +140,15 @@ def test_tipos_asr_rechazan_coerciones_y_contenedores_mutables():
         )
     with pytest.raises(TypeError, match="warnings"):
         TranscriptionResult(**{**base, "warnings": ["mutable"]})
+
+
+def test_resultado_no_tiene_campos_de_calibracion():
+    from dataclasses import fields
+
+    from speechtotext.asr.types import TranscriptionResult
+
+    names = {field.name for field in fields(TranscriptionResult)}
+    assert names == {
+        "text", "language", "words", "segments", "backend", "model",
+        "model_version", "latency_ms", "native_signals", "warnings",
+    }

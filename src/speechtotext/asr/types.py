@@ -4,9 +4,6 @@ import hashlib
 import json
 import math
 from dataclasses import dataclass
-from typing import Literal
-
-ConfidenceTarget = Literal["segment_usable"]
 
 
 @dataclass(frozen=True)
@@ -202,9 +199,6 @@ class TranscriptionResult:
     model_version: str
     latency_ms: int
     native_signals: NativeSignals
-    confidence_target: ConfidenceTarget
-    calibrated_confidence: float | None
-    calibrator_version: str | None
     warnings: tuple[str, ...]
 
     def __post_init__(self) -> None:
@@ -228,8 +222,6 @@ class TranscriptionResult:
             raise ValueError("latency_ms debe ser entero no negativo")
         if not isinstance(self.native_signals, NativeSignals):
             raise TypeError("native_signals invalido")
-        if self.confidence_target != "segment_usable":
-            raise ValueError("confidence_target incompatible")
         if not isinstance(self.words, tuple) or any(
             not isinstance(word, TranscriptionWord) for word in self.words
         ):
@@ -247,22 +239,3 @@ class TranscriptionResult:
             or len(set(self.warnings)) != len(self.warnings)
         ):
             raise TypeError("warnings debe ser tuple de strings unicos")
-        if self.calibrated_confidence is not None:
-            if (
-                isinstance(self.calibrated_confidence, bool)
-                or not isinstance(self.calibrated_confidence, (int, float))
-                or not math.isfinite(self.calibrated_confidence)
-                or not 0.0 <= self.calibrated_confidence <= 1.0
-            ):
-                raise ValueError("calibrated_confidence debe estar entre 0 y 1")
-            if (
-                not isinstance(self.calibrator_version, str)
-                or len(self.calibrator_version) != 64
-                or any(
-                    char not in "0123456789abcdef"
-                    for char in self.calibrator_version
-                )
-            ):
-                raise ValueError("calibrator_version es obligatorio con confianza")
-        if self.calibrated_confidence is None and self.calibrator_version is not None:
-            raise ValueError("calibrator_version exige calibrated_confidence")

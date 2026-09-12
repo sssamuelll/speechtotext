@@ -2,8 +2,8 @@
 
 Fail-closed: sha que no cuadra = RuntimeError con causa, JAMAS fallback silencioso a
 otro motor. La verificacion es por instalacion (marcador .verified junto al artefacto),
-no por corrida. La tabla pinneada en codigo ES el manifest: la cadena
-VerifiedModelArtifact (DACL+lease) es incompatible con el cache HF y no se reutiliza.
+no por corrida. La tabla pinneada en codigo ES el manifest: una cadena de custodia por manifiesto
+verificado (DACL+lease) es incompatible con el cache HF y no se reutiliza.
 """
 from __future__ import annotations
 
