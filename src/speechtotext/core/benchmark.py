@@ -1,7 +1,7 @@
 """Benchmark de configs ASR viables en ESTA maquina -> tabla bench.json.
 
 Schema "speechtotext.bench/v1": una fila por config con tiempos, picos de memoria,
-capacidades y WER de referencia, para que aurelius (via MCP) elija config segun lo
+capacidades y WER de referencia, para que quien consuma la tabla elija config según lo
 que necesite (rapidez, calidad, hotwords...). Cada config se mide en un subproceso
 hijo dedicado (benchmark_child): un proceso que ya cargo un modelo contamina el
 pico de RAM del siguiente.
@@ -10,11 +10,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import platform
 import subprocess
 import sys
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
+
+from speechtotext.asr.faster_whisper import FasterWhisperBackend
+from speechtotext.asr.whispercpp import WhisperCppBackend
+from speechtotext.core import probe
 
 # Se reutiliza el _home privado de finder: misma frontera core/, mismo dueño, y el
 # bench vive al lado del index bajo SPEECHTOTEXT_HOME. Duplicarlo seria un segundo
@@ -23,11 +28,18 @@ from speechtotext.core.finder import _home
 
 SCHEMA_VERSION = "speechtotext.bench/v1"
 
-# Contrato de degradacion ya mergeado (docs/plan-multimotor.md seccion 4): whispercpp
-# no honra hotwords/word_timestamps/vad ni emite señales nativas.
+
+def _caps(backend_cls, native_signals: bool) -> dict:
+    """La tabla de capacidades sale del Caps del backend: un solo punto de verdad.
+    native_signals no es un knob de Caps (no se pide, se emite): literal aquí, medido."""
+    c = backend_cls.caps
+    return {"hotwords": c.hotwords == "honrado", "word_timestamps": c.word_timestamps == "honrado",
+            "native_signals": native_signals, "vad": c.vad == "honrado"}
+
+
 _CAPS = {
-    "faster-whisper": {"hotwords": True, "word_timestamps": True, "native_signals": True, "vad": True},
-    "whispercpp": {"hotwords": False, "word_timestamps": False, "native_signals": False, "vad": False},
+    "faster-whisper": _caps(FasterWhisperBackend, True),
+    "whispercpp": _caps(WhisperCppBackend, False),
 }
 
 # WER medido 2026-07-27 contra la referencia curada (sesion multimotor); estatico
@@ -64,38 +76,12 @@ def candidate_configs() -> list[dict]:
     return configs
 
 
-def _nvidia_smi(query: str, timeout_s: float = 10) -> str | None:
-    """Una consulta a nvidia-smi; None si no hay GPU NVIDIA o el comando no responde."""
-    try:
-        proc = subprocess.run(
-            ["nvidia-smi", f"--query-gpu={query}", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=timeout_s,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if proc.returncode != 0:
-        return None
-    return proc.stdout.strip() or None
-
-
-def _pinned_exe() -> Path | None:
-    """Path del whisper-cli.exe pinneado SIN descargarlo ni reventar fuera de win32."""
-    from speechtotext.core import enginepin
-
-    try:
-        return enginepin.install_root() / enginepin.ENGINE_PIN["exe_relpath"]
-    except KeyError:
-        # LOCALAPPDATA ausente (no-win32): no hay exe pinneado posible. Guardas de
-        # entorno jamas dependen del entorno del que protegen.
-        return None
-
-
 def available_configs() -> tuple[list[dict], list[dict]]:
-    """(viables, skipped): filtra whispercpp si falta el exe pinneado o nvidia-smi calla."""
-    exe = _pinned_exe()
-    if exe is None or not exe.exists():
-        wcpp_reason = f"whisper-cli.exe pinneado ausente ({exe})"
-    elif _nvidia_smi("name") is None:
+    """(viables, skipped): whispercpp solo con binario instalado y GPU NVIDIA que responda."""
+    m = probe.machine()
+    if m.whispercpp is None:
+        wcpp_reason = "whisper-cli ausente (ni pinneado ni en el PATH)"
+    elif not m.cuda:
         wcpp_reason = "nvidia-smi no responde (sin GPU NVIDIA utilizable)"
     else:
         wcpp_reason = None
@@ -109,46 +95,14 @@ def available_configs() -> tuple[list[dict], list[dict]]:
     return viables, skipped
 
 
-def _ram_gb() -> float | None:
-    if sys.platform != "win32":
-        # ponytail: el bench corre en esta maquina win32; leer /proc/meminfo si migra.
-        return None
-    import ctypes
-    from ctypes import wintypes  # solo tras comprobar win32 (regla de la casa)
-
-    class MEMORYSTATUSEX(ctypes.Structure):
-        _fields_ = [
-            ("dwLength", wintypes.DWORD),
-            ("dwMemoryLoad", wintypes.DWORD),
-            ("ullTotalPhys", ctypes.c_uint64),
-            ("ullAvailPhys", ctypes.c_uint64),
-            ("ullTotalPageFile", ctypes.c_uint64),
-            ("ullAvailPageFile", ctypes.c_uint64),
-            ("ullTotalVirtual", ctypes.c_uint64),
-            ("ullAvailVirtual", ctypes.c_uint64),
-            ("ullAvailExtendedVirtual", ctypes.c_uint64),
-        ]
-
-    kernel32 = ctypes.WinDLL("kernel32")
-    # argtypes/restype explicitos: sin ellos ctypes trunca punteros en x64.
-    kernel32.GlobalMemoryStatusEx.restype = wintypes.BOOL
-    kernel32.GlobalMemoryStatusEx.argtypes = [ctypes.POINTER(MEMORYSTATUSEX)]
-    stat = MEMORYSTATUSEX()
-    stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
-    if not kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
-        return None
-    return round(stat.ullTotalPhys / (1024 ** 3), 2)
-
-
 def machine_info() -> dict:
-    import os
-    import platform
-
+    """La forma del schema v1; los datos los pone probe.machine()."""
+    m = probe.machine()
     return {
         "cpu": platform.processor() or platform.machine(),
-        "logical_cores": os.cpu_count(),
-        "ram_gb": _ram_gb(),
-        "gpu": _nvidia_smi("name"),
+        "logical_cores": m.cpu_count,
+        "ram_gb": m.ram_gb,
+        "gpu": m.gpu_name,
     }
 
 
@@ -167,7 +121,7 @@ class _VramPoller:
 
     def _loop(self):
         while not self._stop.is_set():
-            raw = _nvidia_smi("memory.used", timeout_s=2)
+            raw = probe.nvidia_smi("memory.used", timeout_s=2)
             if raw is not None:
                 try:
                     mb = float(raw.splitlines()[0])
@@ -262,14 +216,14 @@ def _sha1(path) -> str:
 # requisitos duros (capacidades/engine) y un criterio; la eleccion sale de lo MEDIDO,
 # asi cambia sola si cambia la maquina (GPU nueva, exe ausente, config que revienta).
 #
-# El requisito engine=faster-whisper en conversacion/dictado no es capricho: aurelius
-# mantiene el motor CARGADO en su proceso y transcribe frase a frase; whispercpp es un
-# subprocess que carga el modelo en cada invocacion — pagar la carga por frase lo
+# El requisito engine=faster-whisper en conversacion/dictado no es capricho: un asistente
+# por voz mantiene el motor CARGADO en su proceso y transcribe frase a frase; whispercpp
+# es un subprocess que carga el modelo en cada invocacion — pagar la carga por frase lo
 # descarta por arquitectura, no por velocidad.
 USE_CASES = (
     {
         "caso": "conversacion_en_vivo",
-        "que": "Aurelius conversando por voz: motor residente, una frase corta cada vez",
+        "que": "Conversación por voz: motor residente, una frase corta cada vez",
         "requisitos": {"engine": "faster-whisper"},
         "criterio": "mas_rapido",
     },
@@ -293,7 +247,8 @@ USE_CASES = (
     },
     {
         "caso": "audio_con_nombres_propios",
-        "que": "Audio lleno de nombres/jerga que el modelo no conoce (--hotwords)",
+        "que": ("Audio lleno de nombres/jerga: --hotwords existe, pero medidos produjeron apagones "
+                "en bloque (n=3, 2026-09-11); compara contra una corrida sin ellos"),
         "requisitos": {"hotwords": True},
         "criterio": "mejor_calidad",
     },
