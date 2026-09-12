@@ -29,19 +29,24 @@ def test_engine_pin_literal():
     assert ENGINE_PIN["zip_sha256"] == "106a2030eff8998e4ef320fe72e263a78449e9040386ee27c41ea80b001b601b"
     assert ENGINE_PIN["exe_relpath"] == "Release/whisper-cli.exe"
     assert ENGINE_PIN["exe_sha256"] == "789fddb0f05c0c28043b3c4f3bcf15a0ae839df24292c60f90c4edb8d02a5ab5"
+    assert ENGINE_PIN["zip_bytes"] == 677_887_125
 
 
 def test_models_pin_literal():
     lv3 = MODELS_PIN["large-v3-q5_0"]
     assert (lv3["repo"], lv3["filename"]) == ("ggerganov/whisper.cpp", "ggml-large-v3-q5_0.bin")
     assert lv3["sha256"] == "d75795ecff3f83b5faa89d1900604ad8c780abd5739fae406de19f23ecd98ad1"
+    assert MODELS_PIN["large-v3-q5_0"]["size_bytes"] == 1_081_140_203
     small = MODELS_PIN["small"]
     assert (small["repo"], small["filename"]) == ("ggerganov/whisper.cpp", "ggml-small.bin")
     assert small["sha256"] == "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"
+    assert small["size_bytes"] == 487_601_967
 
 
-def test_install_root_bajo_localappdata(monkeypatch, tmp_path):
+def test_install_root_win32_sin_home_cae_en_localappdata(monkeypatch, tmp_path):
+    monkeypatch.delenv("SPEECHTOTEXT_HOME", raising=False)
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(sys, "platform", "win32")
     assert install_root() == tmp_path / "speechtotext" / "whisper-cpp" / "v1.9.1"
 
 

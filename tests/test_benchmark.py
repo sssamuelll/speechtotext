@@ -59,6 +59,11 @@ def test_available_configs_exe_ausente(monkeypatch, tmp_path):
 
 
 def test_available_configs_nvidia_smi_falla(monkeypatch, tmp_path):
+    # install_root() ahora cuelga de data_dir(): SPEECHTOTEXT_HOME (puesto por el conftest
+    # autouse) manda sobre LOCALAPPDATA, así que hay que quitarlo para ejercitar la caída a
+    # LOCALAPPDATA que este test necesita (mismo patrón que
+    # test_install_root_win32_sin_home_cae_en_localappdata en test_enginepin.py).
+    monkeypatch.delenv("SPEECHTOTEXT_HOME", raising=False)
     exe = tmp_path / "speechtotext" / "whisper-cpp" / ENGINE_PIN["version"] / "Release" / "whisper-cli.exe"
     exe.parent.mkdir(parents=True)
     exe.write_bytes(b"fake exe")
