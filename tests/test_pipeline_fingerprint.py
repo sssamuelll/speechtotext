@@ -5,9 +5,7 @@ import math
 import pytest
 from hypothesis import given, strategies as st
 
-from speechtotext.audio.fingerprint import PipelineProvenance, PipelineStep
-from speechtotext.models.filesystem import FakeModelFilesystem
-from speechtotext.models.manifest import load_model_manifest, verify_model_files
+from speechtotext.audio.fingerprint import ModelRef, PipelineProvenance, PipelineStep
 
 
 def test_fingerprint_es_determinista_ante_orden_de_claves():
@@ -110,15 +108,16 @@ def test_pipeline_rechaza_sample_rate_no_entero_positivo(sample_rate):
         )
 
 
-def test_pipeline_rechaza_objeto_que_solo_imita_un_modelo_verificado():
-    class FakeVerifiedModel:
+def test_pipeline_rechaza_modelo_que_no_es_model_ref():
+    class Impostor:
+        model_id = "denoise"
         fingerprint = "0" * 64
 
-    with pytest.raises(TypeError, match="VerifiedModelArtifact"):
+    with pytest.raises(TypeError, match="ModelRef"):
         PipelineProvenance.capture(
             sample_rate=16000,
             step=PipelineStep("denoise", "1", {}),
-            models=(FakeVerifiedModel(),),
+            models=(Impostor(),),
         )
 
 
@@ -177,46 +176,20 @@ def test_pipeline_provenance_no_tiene_constructor_publico():
         )
 
 
-def _verified_model(tmp_path):
-    model_fs = FakeModelFilesystem(root_read_only=True)
-    (tmp_path / "model.bin").write_bytes(b"weights")
-    data = {
-        "schema_version": "speechtotext.model/v1",
-        "model_id": "denoise-small",
-        "source": "https://example.invalid/denoise-small",
-        "revision_kind": "git_commit",
-        "revision": "0123456789abcdef0123456789abcdef01234567",
-        "license": "MIT",
-        "format": "onnx",
-        "sample_rate": 16000,
-        "preprocessing": {"mono": True},
-        "files": [{"path": "model.bin", "sha256": hashlib.sha256(b"weights").hexdigest()}],
-    }
-    manifest_path = tmp_path / "manifest.json"
-    manifest_path.write_text(json.dumps(data), encoding="utf-8")
-    expected_fingerprint = hashlib.sha256(
-        json.dumps(
-            data, ensure_ascii=True, allow_nan=False, separators=(",", ":"), sort_keys=True
-        ).encode("utf-8")
-    ).hexdigest()
-    manifest = load_model_manifest(
-        manifest_path,
-        model_root=tmp_path,
-        expected_fingerprint=expected_fingerprint,
-        filesystem=model_fs,
+def test_model_ref_exige_id_y_fingerprint_hex_de_64():
+    with pytest.raises(ValueError, match="fingerprint"):
+        ModelRef("denoise", "abc")
+    with pytest.raises(ValueError, match="fingerprint"):
+        ModelRef("denoise", "G" * 64)
+    with pytest.raises(ValueError, match="model_id"):
+        ModelRef("  ", "0" * 64)
+
+
+def test_modelo_referenciado_cambia_el_fingerprint():
+    step = PipelineStep("denoise", "1", {})
+    without_model = PipelineProvenance.capture(sample_rate=16000, step=step)
+    with_model = PipelineProvenance.capture(
+        sample_rate=16000, step=step, models=(ModelRef("denoise-small", "a" * 64),),
     )
-    return verify_model_files(manifest, tmp_path, filesystem=model_fs)
-
-
-def test_modelo_verificado_de_denoise_cambia_el_fingerprint(tmp_path):
-    with _verified_model(tmp_path) as artifact:
-        without_model = PipelineProvenance.capture(
-            sample_rate=16000,
-            step=PipelineStep("denoise", "1", {}),
-        )
-        with_model = PipelineProvenance.capture(
-            sample_rate=16000,
-            step=PipelineStep("denoise", "1", {}),
-            models=(artifact,),
-        )
-        assert with_model.fingerprint != without_model.fingerprint
+    assert with_model.fingerprint != without_model.fingerprint
+    assert with_model.model_fingerprints == ("a" * 64,)

@@ -8,8 +8,6 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Sequence
 
-from speechtotext.models.manifest import VerifiedModelArtifact
-
 _PROVENANCE_FACTORY_TOKEN = object()
 
 
@@ -74,6 +72,29 @@ class PipelineStep:
         return data
 
 
+@dataclass(frozen=True)
+class ModelRef:
+    """Un modelo que participó en el pipeline, reducido a lo que la huella necesita.
+
+    Quien tenga un artefacto verificado lo convierte aquí; la proveniencia no sabe de
+    manifiestos ni de sistemas de archivos, y así la huella se puede calcular en
+    cualquier sistema con un modelo bajado de donde sea.
+    """
+
+    model_id: str
+    fingerprint: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.model_id, str) or not self.model_id.strip():
+            raise ValueError("model_id no puede estar vacio")
+        if (
+            not isinstance(self.fingerprint, str)
+            or len(self.fingerprint) != 64
+            or any(char not in "0123456789abcdef" for char in self.fingerprint)
+        ):
+            raise ValueError("fingerprint debe ser sha256 en hex minusculas de 64")
+
+
 @dataclass(frozen=True, init=False)
 class PipelineProvenance:
     sample_rate: int
@@ -88,7 +109,7 @@ class PipelineProvenance:
         sample_rate: int,
         parent_fingerprint: str | None,
         steps: Sequence[PipelineStep],
-        models: Sequence[VerifiedModelArtifact],
+        models: Sequence[ModelRef],
         thresholds: Mapping[str, object],
         *,
         _factory_token=None,
@@ -103,8 +124,8 @@ class PipelineProvenance:
             raise ValueError("sample_rate debe ser un entero positivo")
         if not isinstance(thresholds, Mapping):
             raise ValueError("thresholds debe ser un mapping JSON")
-        if any(not isinstance(model, VerifiedModelArtifact) for model in model_values):
-            raise TypeError("models exige VerifiedModelArtifact")
+        if any(not isinstance(model, ModelRef) for model in model_values):
+            raise TypeError("models exige ModelRef")
         if any(not isinstance(step, PipelineStep) for step in step_values):
             raise TypeError("steps exige PipelineStep")
         instance = object.__new__(cls)
@@ -126,7 +147,7 @@ class PipelineProvenance:
         *,
         sample_rate: int,
         step: PipelineStep,
-        models: Sequence[VerifiedModelArtifact] = (),
+        models: Sequence[ModelRef] = (),
         thresholds: Mapping[str, object] | None = None,
     ) -> "PipelineProvenance":
         return cls._create(
@@ -145,7 +166,7 @@ class PipelineProvenance:
         *,
         sample_rate: int,
         steps: Sequence[PipelineStep],
-        models: Sequence[VerifiedModelArtifact] = (),
+        models: Sequence[ModelRef] = (),
         thresholds: Mapping[str, object] | None = None,
     ) -> "PipelineProvenance":
         if not isinstance(parent, PipelineProvenance):
@@ -209,7 +230,7 @@ class PipelineProvenance:
         data: Mapping[str, object],
         *,
         parent: "PipelineProvenance | None",
-        models: Sequence[VerifiedModelArtifact],
+        models: Sequence[ModelRef],
     ) -> "PipelineProvenance":
         if parent is not None and not isinstance(parent, PipelineProvenance):
             raise TypeError("parent exige PipelineProvenance")
