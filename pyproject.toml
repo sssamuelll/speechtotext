@@ -1,6 +1,6 @@
 [project]
 name = "speechtotext"
-version = "0.5.0"
+version = "0.5.1"
 description = "Transcripción offline con faster-whisper: audio, ASR, hablantes y evaluación, todo local."
 readme = "README.md"
 requires-python = ">=3.11"
