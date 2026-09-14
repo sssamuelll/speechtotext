@@ -9,7 +9,6 @@ determinó cruzando cada documento contra `git log`.
 | Documento | Qué es |
 |---|---|
 | [`api.md`](api.md) | Contrato para consumidores: esquema del JSON, la capa `audio/` entera, `asr/`, `transcribe()`, sondeo y modelos, registro de voces e identificación. Lo vigila `tests/test_api_contract.py`; lo que se rompa al cambiarlo sale en el `CHANGELOG.md`. |
-| [`superpowers/specs/2026-07-13-jarvis-voice-core-design.md`](superpowers/specs/2026-07-13-jarvis-voice-core-design.md) | Diseño del asistente de voz local que consume esta librería. Sigue informando trabajo: la evidencia de voz de la `0.5.0` nació de aquí. |
 
 ## Ejecutado
 
@@ -46,8 +45,6 @@ entonces.
 
 ## Ajeno a este repo
 
-[`superpowers/plans/2026-07-13-aurelius-esqueleto.md`](superpowers/plans/2026-07-13-aurelius-esqueleto.md)
-(2149 líneas) es el plan de implementación de **aurelius**, el asistente de voz
-que consume esta librería, no de `speechtotext`. Se quedó aquí por accidente de
-dónde se escribió, y aquí sigue porque es la única copia que existe: el repo de
-aurelius no lo tiene. Si algún día se mueve allá, que sea copiándolo primero.
+`superpowers/plans/` guarda algún documento que pertenece a un proyecto distinto
+y se quedó aquí por accidente de dónde se escribió. No describe `speechtotext` y
+no informa su desarrollo.

@@ -3,7 +3,13 @@
 El extra [mcp] no está en [dev] a propósito: las herramientas son funciones planas que
 no lo tocan, y serve() —lo único que lo importa— se prueba sembrando un doble en
 sys.modules, el mismo patrón que test_models.py usa con huggingface_hub.
+
+El doble, sin embargo, lo escribió quien escribió serve(): valida coherencia consigo
+mismo, no compatibilidad con el SDK. Por eso al final hay un test que corre contra el
+paquete de verdad y se salta cuando no está; el CI lo instala en un job para que alguien
+lo ejecute siempre.
 """
+import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -17,6 +23,8 @@ from speechtotext.core import transcribe as core_transcribe
 from speechtotext.core.segments import LabeledSegment
 from speechtotext.core.transcribe import EngineInfo
 from speechtotext.speakers import registry
+
+SIN_SDK = importlib.util.find_spec("mcp") is None
 
 
 def _transcript(segments):
@@ -61,6 +69,10 @@ def test_transcribe_escribe_el_json_al_lado_y_devuelve_el_texto(monkeypatch, tmp
     assert visto["kw"]["on_progress"] is None
     assert visto["kw"]["model"] == "large-v3" and visto["kw"]["language"] == "auto"
     assert visto["kw"]["diarize"] is False
+    # el audio que se transcribe es el que pidieron. `salida["json"]` se deriva del
+    # argumento del propio tool, así que sin esto una copia que le pasara otra ruta al
+    # núcleo aprobaría los once asserts de arriba.
+    assert visto["ruta"] == Path(str(audio))
 
 
 def test_find_devuelve_las_regiones_sin_extraer(monkeypatch, tmp_path):
@@ -95,11 +107,18 @@ def test_find_devuelve_las_regiones_sin_extraer(monkeypatch, tmp_path):
 
 
 def test_voices_lista_el_registro(monkeypatch):
-    monkeypatch.setattr(registry, "list_voices",
-                        lambda model=None: [{"name": "Voz 1", "model": "pyannote", "seconds": 30}])
+    visto = {}
+
+    def lista_falsa(model=None):
+        visto["model"] = model
+        return [{"name": "Voz 1", "model": "pyannote", "seconds": 30}]
+
+    monkeypatch.setattr(registry, "list_voices", lista_falsa)
     assert mcp_server.voices() == {
         "voices": [{"name": "Voz 1", "model": "pyannote", "seconds": 30}]
     }
+    # sin filtrar: la herramienta no expone `model`, así que tiene que listarlas todas
+    assert visto["model"] is None
 
 
 def test_probe_devuelve_maquina_y_ruta():
@@ -171,3 +190,31 @@ def test_el_modulo_no_importa_el_sdk_al_cargarse():
     fuente = Path(mcp_server.__file__).read_text(encoding="utf-8")
     arriba = fuente.split("def serve", 1)[0]
     assert "import mcp" not in arriba and "from mcp" not in arriba
+
+
+@pytest.mark.skipif(SIN_SDK, reason="el extra [mcp] no está instalado")
+def test_serve_registra_contra_el_sdk_real():
+    """Lo único que el doble no puede probar: que el API del SDK siga siendo el que
+    `serve()` asume. Si `mcp` 2.x mueve `MCPServer`, `.tool()` o la derivación del
+    esquema desde las anotaciones, el resto de la suite sigue verde y el comando
+    revienta en la máquina del usuario. Esto lo caza donde el extra esté instalado."""
+    import asyncio
+
+    from mcp.server import MCPServer
+
+    servidor = MCPServer(mcp_server.NOMBRE)
+    for fn in mcp_server.HERRAMIENTAS:
+        servidor.tool()(fn)
+
+    herramientas = asyncio.run(servidor.list_tools())
+    assert [t.name for t in herramientas] == ["transcribe", "find", "voices", "probe"]
+
+    esquemas = {t.name: t.input_schema for t in herramientas}
+    # los esquemas salen de las anotaciones: lo que no tiene default es obligatorio
+    assert esquemas["transcribe"]["required"] == ["path"]
+    assert sorted(esquemas["transcribe"]["properties"]) == [
+        "diarize", "language", "model", "path",
+    ]
+    assert sorted(esquemas["find"]["required"]) == ["path", "query"]
+    assert not esquemas["voices"].get("properties")
+    assert not esquemas["probe"].get("properties")

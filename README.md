@@ -391,7 +391,8 @@ Desktop. Requiere el extra: `pip install -e ".[mcp]"`.
 | `voices()` | Las voces registradas. |
 | `probe()` | Qué tiene la máquina y qué ruta elegiría `transcribe`. |
 
-Configuración del cliente (ajusta la ruta al ejecutable de tu entorno):
+Configuración del cliente (ajusta la ruta al ejecutable de tu entorno — en Windows es
+`...\Scripts\speechtotext.exe`, en macOS y Linux `.../bin/speechtotext`):
 
 ```json
 {

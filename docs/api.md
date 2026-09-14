@@ -92,8 +92,9 @@ arnés de evaluación de tu consumidor, no este campo.
 ## Capa `audio/`: medidas sobre la señal, sin veredicto
 
 `speechtotext.audio` mide y transforma audio; **nunca decide si transcribir**. Todo lo
-que exporta es inmutable y se valida al construirse: un tipo mal formado revienta donde
-se crea, no tres capas más abajo.
+que exporta es inmutable, y lo que se construye a mano se valida al construirse: un tipo
+mal formado revienta donde se crea, no tres capas más abajo. Los tipos que solo salen de
+una función (`GainResult`, `PreInferenceDecision`) no validan nada — nadie los arma.
 
 ```python
 from speechtotext.audio import decode_audio, AudioDecodeError
@@ -483,17 +484,24 @@ los verifica Hugging Face por tamaño. Nombres válidos: `tiny`, `base`, `small`
 
 ---
 
-## Módulos que no son contrato de esta librería
+## Qué de `core/` es contrato y qué no
 
-- **`core/`** no tiene `__init__.py` público: se importa por submódulo
-  (`from speechtotext.core.formats import write_json`). Lo que uses de ahí es
-  interno y puede moverse entre versiones.
+`core/` no se importa como paquete: se importa por submódulo, por ejemplo
+`from speechtotext.core.transcribe import transcribe`. De lo que vive ahí dentro es
+contrato **solo lo que este documento nombra** — `core.transcribe`, `core.probe`,
+`core.models`, y de `core.formats` los escritores y `is_suspect`. Eso es exactamente lo
+que vigila `tests/test_api_contract.py`, y lo que cambie ahí sale en el `CHANGELOG.md`.
+
+El resto de `core/` es interno: `chunked`, `segments`, `finder`, `benchmark`,
+`enginepin`, `postprocess` y `audio`. Úsalo si te sirve, pero puede moverse entre
+versiones sin aviso y sin entrada en el CHANGELOG.
+
+`cli/` no es contrato, `cli/mcp_server.py` incluido. Las cuatro herramientas que sirve
+`speechtotext mcp` son envoltorios delgados de `core.transcribe`, `core.finder`,
+`speakers.registry` y `core.probe`. Llamarlas desde Python no aporta nada: llama a lo
+envuelto, con las garantías que este documento le dé a cada pieza — `core.finder`, por
+ejemplo, no tiene ninguna.
 
 Los paquetes `evaluation/`, `security/`, `models/` y `confidence/` que existían
 hasta la `0.5.1` se extrajeron en la `0.6.0`: eran el arnés de evaluación y la
 cadena de custodia de un consumidor, no parte de transcribir audio.
-
-- **`cli/`** tampoco es contrato, incluido `cli/mcp_server.py`. Las cuatro herramientas
-  que sirve `speechtotext mcp` son envoltorios de `core.transcribe`, `core.finder`,
-  `speakers.registry` y `core.probe`: el contrato es el de abajo, no el de la envoltura.
-  Si quieres llamarlas desde Python, llama a lo envuelto.

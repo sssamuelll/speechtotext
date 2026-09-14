@@ -32,6 +32,10 @@ Lo marcado como **rompe** exige cambios en el código que consume la librería.
 - `docs/api.md` documenta la capa `audio/` entera (20 símbolos de `audio.__all__`, antes
   3) y los tipos de `asr/` que faltaban. `tests/test_api_contract.py` la vigila en las dos
   direcciones: nada se puede exportar sin documentar, ni documentar sin que exista.
+- **Contrato nuevo** en `docs/api.md`: `speakers.diarization.diarize` y `embed_voice`
+  (sección «Diarizar»), y `core.segments.native_signals`. Estaban en el árbol desde antes;
+  lo nuevo es que ahora son contrato vigilado, así que renombrarlos o moverlos **rompe** y
+  tiene que salir aquí.
 
 ### Cambiado
 

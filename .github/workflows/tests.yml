@@ -46,15 +46,24 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
 
-      # Sin los extras `diarize` ni `mcp`: ningun test los importa. torch y pyannote
-      # entran por import perezoso dentro de speakers/diarization.py, y el SDK de MCP
-      # solo lo toca serve(); los tests que los tocan siembran un doble en sys.modules
-      # en vez de cargarlos. Instalarlos anadiria cerca de un giga de descarga para no
+      # Sin el extra `diarize`: torch y pyannote entran por import perezoso dentro de
+      # speakers/diarization.py y los tests que los tocan siembran un doble en
+      # sys.modules, asi que instalarlos anadiria cerca de un giga de descarga para no
       # ejecutar una linea mas.
       - name: Instalar
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
+
+      # El extra `mcp` son unos pocos MB y NO cuesta un giga: la razon de no ponerlo en
+      # todas partes es que no hace falta repetirlo seis veces. Pero en algun sitio tiene
+      # que estar, porque `test_serve_registra_contra_el_sdk_real` se salta sin el y es lo
+      # unico que comprueba que el API del SDK sigue siendo el que serve() asume. Sin este
+      # paso, el dia que `mcp` mueva algo la suite sigue verde y el comando revienta en la
+      # maquina del usuario.
+      - name: Instalar el SDK de MCP (un solo job)
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.11'
+        run: pip install -e ".[mcp]"
 
       # La suite entera corre sin GPU, sin red y sin modelos: tests/conftest.py le da a
       # cada test una maquina sondeada fija y un SPEECHTOTEXT_HOME temporal.
