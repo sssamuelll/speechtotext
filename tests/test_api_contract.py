@@ -141,3 +141,22 @@ def test_ningun_code_span_cruza_un_salto_de_linea():
         f"{partidas}. Reajusta el salto para que el span quepa entero en una: partido "
         f"no cuenta como documentación."
     )
+
+
+def test_el_documento_no_llama_interno_a_lo_que_vigila():
+    """La contradicción que ya apareció dos veces en este mismo documento: api.md
+    declarando interno un submódulo del que CONTRATO vigila un símbolo. Las dos veces
+    la escribió alguien con cuidado; por eso ahora la vigila un test."""
+    texto = API_MD.read_text(encoding="utf-8")
+    assert "El resto de `core/` es interno" in texto, (
+        "cambió la frase que marca la lista de submódulos internos de core/; "
+        "ajusta este test a la nueva o el aviso deja de existir"
+    )
+    parrafo = texto.split("El resto de `core/` es interno", 1)[1].split("\n\n", 1)[0]
+    internos = set(re.findall(r"`([a-z_]+)`", parrafo))
+    vigilados = {r.split(".")[2] for r in CONTRATO if r.startswith("speechtotext.core.")}
+    choque = internos & vigilados
+    assert not choque, (
+        f"docs/api.md llama internos a submódulos de los que CONTRATO vigila un "
+        f"símbolo: {sorted(choque)}. Decide cuál de las dos cosas es cierta."
+    )

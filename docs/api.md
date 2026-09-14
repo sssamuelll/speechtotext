@@ -488,13 +488,24 @@ los verifica Hugging Face por tamaño. Nombres válidos: `tiny`, `base`, `small`
 
 `core/` no se importa como paquete: se importa por submódulo, por ejemplo
 `from speechtotext.core.transcribe import transcribe`. De lo que vive ahí dentro es
-contrato **solo lo que este documento nombra** — `core.transcribe`, `core.probe`,
-`core.models`, y de `core.formats` los escritores y `is_suspect`. Eso es exactamente lo
-que vigila `tests/test_api_contract.py`, y lo que cambie ahí sale en el `CHANGELOG.md`.
+contrato **solo lo que este documento nombra**, y el contrato se dibuja por símbolo, no
+por submódulo:
 
-El resto de `core/` es interno: `chunked`, `segments`, `finder`, `benchmark`,
-`enginepin`, `postprocess` y `audio`. Úsalo si te sirve, pero puede moverse entre
-versiones sin aviso y sin entrada en el CHANGELOG.
+| Submódulo | Qué es contrato |
+|---|---|
+| `core.transcribe` | `transcribe`, `Transcript`, `Progress`, `EngineInfo`, `DiarizationReport`, `load_audio` |
+| `core.probe` | `machine`, `choose_route`, `Machine`, `Route` |
+| `core.models` | `data_dir`, `installed`, `ensure`, `remove`, `remote_size`, `ModelInfo` |
+| `core.formats` | `write_json`, `is_suspect` — los demás escritores no |
+| `core.segments` | `native_signals` y nada más |
+
+Esa tabla es exactamente la lista `CONTRATO` de `tests/test_api_contract.py`: si una se
+mueve sin la otra, el test falla. Lo que cambie ahí sale en el `CHANGELOG.md`.
+
+El resto de `core/` es interno — `chunked`, `finder`, `benchmark`, `enginepin`,
+`postprocess`, y `core/audio.py`, que transcodifica con ffmpeg y no tiene nada que ver
+con el paquete `speechtotext.audio` de más arriba pese al nombre. Úsalo si te sirve, pero
+puede moverse entre versiones sin aviso y sin entrada en el CHANGELOG.
 
 `cli/` no es contrato, `cli/mcp_server.py` incluido. Las cuatro herramientas que sirve
 `speechtotext mcp` son envoltorios delgados de `core.transcribe`, `core.finder`,
