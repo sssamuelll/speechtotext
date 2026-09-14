@@ -66,10 +66,21 @@ def test_transcribe_escribe_el_json_al_lado_y_devuelve_el_texto(monkeypatch, tmp
 def test_find_devuelve_las_regiones_sin_extraer(monkeypatch, tmp_path):
     audio = tmp_path / "largo.m4a"
     audio.write_bytes(b"x")
-    monkeypatch.setattr(finder, "load_or_build_index",
-                        lambda a, m, r=False: ([{"start": 0.0, "end": 1.0, "text": "presupuesto"}], True))
-    monkeypatch.setattr(finder, "search",
-                        lambda segs, q, **kw: [finder.Region(10.0, 70.0, 3, 3, "…presupuesto…")])
+    # Los dobles anotan con qué los llamaron: si find() dejara de pasar el query o la
+    # ruta, devolver la forma correcta no bastaría para aprobar.
+    visto = {}
+    segmentos = [{"start": 0.0, "end": 1.0, "text": "presupuesto"}]
+
+    def indice_falso(ruta, scan_model, rebuild=False):
+        visto.update(ruta=ruta, scan_model=scan_model, rebuild=rebuild)
+        return segmentos, True
+
+    def busca_falso(segs, consulta, **kw):
+        visto.update(segs=segs, consulta=consulta)
+        return [finder.Region(10.0, 70.0, 3, 3, "…presupuesto…")]
+
+    monkeypatch.setattr(finder, "load_or_build_index", indice_falso)
+    monkeypatch.setattr(finder, "search", busca_falso)
 
     salida = mcp_server.find(str(audio), "presupuesto")
 
@@ -77,6 +88,10 @@ def test_find_devuelve_las_regiones_sin_extraer(monkeypatch, tmp_path):
     assert salida["regions"] == [
         {"start": 10.0, "end": 70.0, "hits": 3, "matches": 3, "snippet": "…presupuesto…"}
     ]
+    assert visto["ruta"] == Path(str(audio))
+    assert visto["scan_model"] == "tiny"       # el índice va con el modelo barato
+    assert visto["consulta"] == "presupuesto"  # el query llega tal cual, sin tocar
+    assert visto["segs"] is segmentos          # busca sobre lo que devolvió el índice
 
 
 def test_voices_lista_el_registro(monkeypatch):
