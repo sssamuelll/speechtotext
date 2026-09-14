@@ -89,6 +89,99 @@ arnés de evaluación de tu consumidor, no este campo.
 
 ---
 
+## Capa `audio/`: medidas sobre la señal, sin veredicto
+
+`speechtotext.audio` mide y transforma audio; **nunca decide si transcribir**. Todo lo
+que exporta es inmutable y se valida al construirse: un tipo mal formado revienta donde
+se crea, no tres capas más abajo.
+
+```python
+from speechtotext.audio import decode_audio, AudioDecodeError
+
+with open("reunion.m4a", "rb") as stream:
+    view = decode_audio(stream, sample_rate=16000)   # -> AudioView
+samples = view.samples                               # float32 mono, de solo lectura
+```
+
+### Decodificación
+
+- **`decode_audio(stream, *, sample_rate, av_module=None) -> AudioView`** — entra un
+  stream binario *seekable* (no una ruta: quien abre, cierra), sale un `AudioView` mono
+  float32 al `sample_rate` pedido. `av_module` es el seam de los tests.
+- **`AudioDecodeError(RuntimeError)`** — el archivo no se pudo abrir o no trae audio.
+
+### Un clip y sus vistas
+
+El mismo audio se mide, se identifica y se transcribe con preprocesados distintos.
+`AudioClip` los guarda juntos con su proveniencia, para que cada número se pueda rastrear
+hasta las muestras de las que salió.
+
+- **`AudioClip(started_at, ended_at, source_id, speech_regions, quality, views)`** —
+  `.view(name)` devuelve la vista pedida y lanza `KeyError` si no está o no existe.
+  Valida al construirse que las duraciones de las vistas y `quality.duration_ms` cuadren
+  con el clip, y que las regiones de habla no se solapen ni se salgan.
+- **`AudioViews(capture, analysis, asr, identity=None, spoof=None)`** — las tres primeras
+  son obligatorias.
+- **`AudioViewName`** — `Literal["capture", "analysis", "identity", "spoof", "asr"]`.
+- **`AudioView`** — `samples` (float32 mono, respaldado por `bytes`: no se puede escribir),
+  `sample_rate`, `provenance`. **Sin constructor público**: se crea con
+  `AudioView.capture(samples, sample_rate, *, step)` o con
+  `AudioView.derive(parent, samples, *, sample_rate=None, steps, models=(), thresholds=None)`.
+  Propiedades: `duration_s` y `pipeline_fingerprint`.
+- **`SpeechRegion(start_s, end_s)`** — ordenable; exige tiempos finitos y `0 <= start_s < end_s`.
+
+### Calidad y ganancia
+
+```python
+from speechtotext.audio import apply_fixed_gain, compute_audio_quality
+
+gain = apply_fixed_gain(samples, 6.0)
+report = compute_audio_quality(samples, gain.samples, 16000, regions,
+                               requested_gain_db=6.0, applied_gain_db=gain.applied_gain_db)
+```
+
+- **`compute_audio_quality(capture, processed, sample_rate, speech_regions, *, requested_gain_db, applied_gain_db, dropped_frames=0, discontinuities=0) -> AudioQualityReport`**
+- **`AudioQualityReport`** — `duration_ms`, `effective_voice_ms`, `input_rms_dbfs`,
+  `processed_rms_dbfs`, `peak_dbfs`, `clipping_ratio`, `noise_floor_dbfs`, `snr_db`,
+  `requested_gain_db`, `applied_gain_db`, `dropped_frames`, `discontinuities`, `warnings`.
+  `noise_floor_dbfs` y `snr_db` son `None` cuando no hubo silencio suficiente para
+  medirlos: **`None` no es cero**, la misma regla que gobierna la evidencia de voz.
+- **`apply_fixed_gain(samples, gain_db, *, max_gain_db=18.0, peak_limit_dbfs=-1.0) -> GainResult`**
+- **`GainResult(samples, requested_gain_db, applied_gain_db, limited)`** — `limited` es
+  `True` cuando el limitador tuvo que recortar la ganancia pedida.
+
+### Puerta de calidad
+
+Decide si un clip merece inferencia, contra umbrales que pone quien llama. La librería no
+trae umbrales por defecto: medir es suyo, decidir es de quien la usa.
+
+- **`QualityThresholds(min_effective_voice_ms, min_processed_rms_dbfs, min_snr_db, max_clipping_ratio, max_dropped_frames=0, max_discontinuities=0)`**
+- **`evaluate_pre_inference(report, thresholds) -> PreInferenceDecision`**
+- **`PreInferenceDecision(eligible, reason_codes)`**
+- **`QualityReason`** — `Literal["silence", "too_short", "level_too_low", "snr_unavailable",
+  "snr_too_low", "clipping", "dropped_audio", "discontinuous_audio"]`. La puerta acumula
+  **todas** las razones que aplican, no la primera.
+
+### Proveniencia
+
+La huella de un pipeline de audio: qué pasos, qué modelos, qué umbrales. Sirve para afirmar
+que dos resultados salieron del mismo tratamiento sin guardar el audio.
+
+- **`PipelineStep(name, version, parameters)`** — `parameters` tiene que ser JSON
+  serializable; se congela al construirse.
+- **`ModelRef(model_id, fingerprint)`** — `fingerprint` es un sha256 en hex minúsculas de
+  64 caracteres. La proveniencia no sabe de manifiestos ni de sistemas de archivos: quien
+  tenga un modelo verificado lo reduce a esto, y así la huella se puede calcular en
+  cualquier máquina.
+- **`PipelineProvenance`** — `sample_rate`, `parent_fingerprint`, `steps`,
+  `model_fingerprints`, `thresholds`. **Sin constructor público**:
+  `PipelineProvenance.capture(*, sample_rate, step, models=(), thresholds=None)` y
+  `PipelineProvenance.derive(parent, *, sample_rate, steps, models=(), thresholds=None)`.
+  Propiedad `fingerprint` (sha256 del payload ordenado), más `to_dict()` y
+  `from_dict(data, *, parent, models)`.
+
+---
+
 ## Evidencia de voz
 
 `speechtotext.audio.compute_voice_evidence` describe una señal de audio. **No
@@ -244,10 +337,11 @@ vectores de otro extractor funciona hoy. Lo que está atado a pyannote es el CLI
 
 ## Identificación
 
-`speechtotext.speakers.identify` compara por coseno y asigna nombres con un
-greedy: ordena todos los pares posibles de mayor a menor puntaje, corta por
-debajo del umbral, y asigna sin reusar ni un hablante ni un nombre. El umbral por
-defecto del CLI es `0.5`.
+`assign_names(clusters, enrolled, threshold) -> dict[str, str]` mapea cada `speaker_id`
+anónimo a un nombre registrado, con un greedy: ordena todos los pares posibles de mayor a
+menor coseno, corta por debajo del umbral, y asigna sin reusar ni un hablante ni un
+nombre. El umbral por defecto del CLI es `0.5`. `cosine` está expuesto pero es
+implementación: puede cambiar sin aviso.
 
 ---
 
@@ -287,6 +381,11 @@ class AsrBackend(Protocol):
     def transcribe(self, samples: np.ndarray, request: TranscriptionRequest) -> TranscriptionResult
 ```
 
+`TranscriptionResult.segments` son `TranscriptionSegment(start, end, text, words, native_signals)`,
+y sus `words` son `TranscriptionWord(text, start, end, confidence)` — `confidence` es `None`
+o un número entre 0 y 1, nunca fabricado. `Cap` es el `Literal["honrado", "degradado", "rechazado"]`
+del que se arman los `Caps`.
+
 Entra **float32 mono a 16 000 Hz** y nada más; quien llama resamplea (`core.transcribe.load_audio`
 lo hace desde cualquier archivo). El texto de segmentos y palabras se devuelve tal como lo
 emite el motor, con su espacio inicial: recortar es de quien presenta.
@@ -316,7 +415,7 @@ t = transcribe("reunion.mp4", model="large-v3", on_progress=print)
 Un archivo (o muestras 16 kHz mono) entra, un `Transcript` sale: `segments` (con hablante y
 señales nativas; la marca `suspect` la calcula el escritor JSON con `is_suspect`), `language`,
 `language_probability`, `duration`, `speech_s`,
-`gaps`, `engine`, `request` (la efectiva, tras CAPS), `warnings` y `diarization`. Una sola
+`gaps`, `engine` (un `EngineInfo`, con `.to_dict()` para el JSON), `request` (la efectiva, tras CAPS), `warnings` y `diarization` (un `DiarizationReport` o `None`). Una sola
 decodificación; el archivo corto y el largo son el mismo camino con n trozos; los trozos
 dejan checkpoint por contenido en `~/.speechtotext/chunks`. El núcleo nunca imprime:
 `on_progress` recibe `Progress(stage, done, total, detail)` con etapas `decode → load →
