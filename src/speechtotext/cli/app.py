@@ -859,5 +859,13 @@ def models_rm(
     console.print(f"  [green]Borrado[/green] {name} ({engine})")
 
 
+@app.command()
+def mcp() -> None:
+    """Sirve las herramientas por MCP sobre stdio (Claude Desktop y compatibles)."""
+    from speechtotext.cli import mcp_server
+
+    mcp_server.serve()
+
+
 if __name__ == "__main__":
     app()

@@ -30,6 +30,11 @@ dev = [
     "hypothesis>=6.156,<7",
     "pytest>=9,<10",
 ]
+mcp = [
+    # SDK oficial. La v2 cambio el import (mcp.server.MCPServer, no
+    # mcp.server.fastmcp.FastMCP): el tope mayor no es decorativo.
+    "mcp>=2.2,<3",
+]
 
 [project.scripts]
 speechtotext = "speechtotext.cli.app:app"

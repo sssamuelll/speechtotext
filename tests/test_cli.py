@@ -1055,3 +1055,13 @@ def test_el_cli_sondea_una_sola_vez(tmp_path, monkeypatch):
     audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0))
     assert _invoke(audio, tmp_path).exit_code == 0
     assert len(veces) == 1
+
+
+def test_mcp_llama_a_serve(monkeypatch):
+    from speechtotext.cli import mcp_server
+
+    llamado = []
+    monkeypatch.setattr(mcp_server, "serve", lambda: llamado.append(True))
+    resultado = runner.invoke(app, ["mcp"])
+    assert resultado.exit_code == 0, resultado.output
+    assert llamado == [True]
