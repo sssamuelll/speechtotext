@@ -17,7 +17,7 @@ coste por uso.
   esquema del JSON, tipos públicos y qué garantiza cada módulo. Los cambios de
   ese contrato se anotan en [`CHANGELOG.md`](CHANGELOG.md).
 - El servicio HTTP de evaluación de pronunciación (FastAPI + Azure) vivió aquí
-  hasta la `0.3.x`; hoy vive adaptado dentro de su único consumidor (klara).
+  hasta la `0.3.x`; hoy vive adaptado dentro de su único consumidor.
 
 ---
 
@@ -55,6 +55,8 @@ pip install -e ".[dev]"
 | `voices` | Listar las voces registradas. |
 | `forget` | Borrar una voz del registro. |
 | `bench` | Medir en tu máquina qué configuración conviene. |
+| `probe` | Ver qué tiene tu máquina y qué ruta elegiría `transcribe` (pégalo en un issue). |
+| `models` | Listar, bajar (`pull`) y borrar (`rm`) modelos. |
 
 ---
 
@@ -70,15 +72,15 @@ speechtotext transcribe entrevista.m4a -o transcripciones/ --device cuda
 
 | Flag | Default | Descripción |
 |---|---|---|
-| `--language`, `-l` | `es` | Código ISO-639-1 (`es`, `en`, `de`, `fr`, …) o `auto` para detectar. |
-| `--model`, `-m` | `small` | `tiny`, `base`, `small`, `medium`, `large-v3`, `distil-large-v3`. |
+| `--language`, `-l` | `auto` | `auto` detecta (bien con ≥ 30 s de audio; si la probabilidad sale baja, el CLI sugiere fijarlo) o un código ISO-639-1 (`es`, `en`, `de`, `fr`, …). |
+| `--model`, `-m` | `large-v3` | `tiny`, `base`, `small`, `medium`, `large-v3`, `distil-large-v3`. `small` = borrador rápido. |
 | `--formats`, `-f` | `txt,srt,json` | Cualquier combinación de `txt`, `srt`, `vtt`, `json`. |
-| `--device`, `-d` | `cpu` | `cpu`, `cuda`, `auto`. |
+| `--device`, `-d` | `auto` | `auto` sondea la GPU (ver [Motores](#motores)), `cpu`, `cuda`. |
 | `--compute-type` | `auto` | `auto` elige `int8` en CPU y `float16` en GPU. |
-| `--vad / --no-vad` | `--vad` | Filtro de silencios largos. |
+| `--vad / --no-vad` | `--no-vad` | Filtro de silencios largos. Apagado por defecto: medido, pierde frases cortas sin avisar. |
 | `--beam-size` | `5` | Tamaño del beam search (mínimo 1). |
 | `--output`, `-o` | junto al audio | Carpeta o ruta base de salida. |
-| `--engine` | `faster-whisper` | `faster-whisper` o `whispercpp` (ver [Motores](#motores)). |
+| `--engine` | `auto` | `auto` (según la máquina), `faster-whisper` o `whispercpp` (ver [Motores](#motores)). |
 | `--hotwords` | — | Términos que el modelo debe preferir, separados por coma. |
 | `--hotwords-file` | — | Archivo con esos términos, uno por línea. |
 | `--chunk / --no-chunk` | auto | Trocear el audio; automático por encima de 20 minutos. |
@@ -90,10 +92,12 @@ speechtotext transcribe entrevista.m4a -o transcripciones/ --device cuda
 
 ### Qué modelo
 
-`large-v3` en int8 corre en CPU a ~1,3× tiempo real con unos 3,5 GB de RAM y fue
-el único que no perdió nada en [lo medido](#lo-medido); `small` va cinco veces
-más rápido y cambia lo que se dijo. `tiny` y `base` son para probar el
-pipeline, no para leer el resultado. En tu máquina, [`bench`](#elegir-configuración-bench).
+`large-v3` es el default: en int8 corre en CPU a ~1,3× tiempo real con unos 3,5 GB de RAM
+y fue el único que no perdió nada en [lo medido](#lo-medido); `-m small` es el borrador
+rápido: cinco veces más veloz y cambia lo que se dijo. `tiny` y `base` son para probar el
+pipeline, no para leer el resultado. Antes de empezar, el CLI imprime la duración y una
+ETA (estimada de la tabla de referencia, o medida si corriste
+[`bench`](#elegir-configuración-bench)). En tu máquina: [`probe`](#sondeo-y-modelos-probe-y-models).
 
 ### Hotwords
 
@@ -193,13 +197,25 @@ La grabación es privada y no se publica; el gráfico se regenera con
 
 ## Motores
 
-`--engine faster-whisper` (el default) es el camino normal: CPU o CUDA, todos los
-flags honrados. `--engine whispercpp` existe para GPUs viejas donde CTranslate2 ya
-no rinde — usa un binario de whisper.cpp pinneado por SHA-256, que se descarga y
-verifica la primera vez y se cachea.
+`--engine auto` (el default) sondea la máquina antes de cargar nada — `speechtotext probe`
+muestra lo mismo que ve el CLI — y elige:
 
-La selección es siempre explícita: **ningún motor se elige solo**. Lo que sí
-cambia solo son los flags que el motor no puede honrar:
+| La máquina | Ruta |
+|---|---|
+| GPU NVIDIA con ≥ 5 GB de VRAM libres | `faster-whisper` · `cuda` · `float16` |
+| GPU NVIDIA con 2–5 GB libres, whisper.cpp instalado (o Windows, donde se descarga pinneado) y modelo `large-v3` o `small` | `whispercpp` · `cuda` · `q5_0` |
+| Lo demás | `faster-whisper` · `cpu` · `int8` |
+
+Lo que pidas explícito (`--engine`, `-d`) se respeta; el sondeo solo rellena lo que falta
+y **nunca cambia el modelo**: si `large-v3` no cabe en la RAM, corta y sugiere `-m small`.
+Los umbrales se midieron en una sola máquina (5900X + GTX 980); `bench` es quien los
+afina y su `bench.json` manda sobre la ETA estimada.
+
+`faster-whisper` es el camino normal: CPU o CUDA, todos los flags honrados. `whispercpp`
+existe para GPUs viejas donde CTranslate2 ya no rinde: en Windows usa un binario pinneado
+por SHA-256 que se descarga y verifica la primera vez; en macOS/Linux usa el `whisper-cli`
+del `PATH` (`brew install whisper-cpp`) y declara `device=native`, porque el build decide.
+Lo que cambia solo son los flags que el motor no puede honrar:
 
 | Flag | Bajo `whispercpp` |
 |---|---|
@@ -341,6 +357,24 @@ lo repinta sin volver a medir.
 
 ---
 
+## Sondeo y modelos: `probe` y `models`
+
+```bash
+speechtotext probe                          # qué tiene la máquina y qué ruta se elegiría
+speechtotext models                         # modelos instalados
+speechtotext models pull large-v3           # descarga (anuncia el tamaño antes)
+speechtotext models pull small --engine whispercpp
+speechtotext models rm small
+```
+
+Los modelos de `faster-whisper` viven en la caché de Hugging Face; los de whisper.cpp,
+bajo `%LOCALAPPDATA%\speechtotext` (Windows), `~/Library/Application Support/speechtotext`
+(macOS) o `~/.local/share/speechtotext` (Linux). `SPEECHTOTEXT_HOME` manda sobre todo
+eso si lo pones. La misma API desde Python: `speechtotext.core.models`
+([contrato](docs/api.md#sondeo-y-modelos)).
+
+---
+
 ## Salida
 
 `txt` es la transcripción plana, `srt`/`vtt` son subtítulos con tiempos, y `json`
@@ -364,6 +398,8 @@ src/speechtotext/
 │   ├── chunked.py        troceo por silencios, checkpoint y paralelismo
 │   ├── finder.py         índice rápido y búsqueda de regiones (subcomando find)
 │   ├── benchmark.py      medición de configuraciones (subcomando bench)
+│   ├── probe.py          sondeo de la máquina y elección de ruta (subcomando probe)
+│   ├── models.py         modelos: dónde viven, listar, bajar, borrar (subcomando models)
 │   ├── formats.py        writers txt/srt/vtt/json + is_suspect + huecos
 │   ├── segments.py       LabeledSegment y lectura de señales nativas
 │   ├── audio.py          transcode_to_wav() + errores tipados
@@ -385,7 +421,7 @@ src/speechtotext/
 │   ├── types.py          TranscriptionRequest / TranscriptionResult
 │   ├── faster_whisper.py FasterWhisperBackend
 │   └── whispercpp.py     WhisperCppBackend (subprocess sobre whisper-cli pinneado)
-└── cli/app.py            typer: transcribe / find / enroll / voices / forget / bench
+└── cli/app.py            typer: transcribe / find / enroll / voices / forget / bench / probe / models
 ```
 
 ---

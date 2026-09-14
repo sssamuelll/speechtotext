@@ -57,7 +57,7 @@ valor; ninguna aparece en `null`.
 | `speech_s` | `float` | Siempre. Suma de la duración de los segmentos con voz. |
 | `gaps` | `[[float, float], …]` | Siempre. Huecos sin voz de 5 s o más, como pares `[inicio, fin]`. |
 | `speakers` | `[str, …]` | Solo si la corrida produjo hablantes. |
-| `engine` | `object` | Solo si el CLI lo informa. Incluye `diarization: "segment"` o `"word"` cuando se usó `--diarize`. |
+| `engine` | `object` | Solo si el CLI lo informa. Incluye `diarization: "segment"` o `"word"` cuando se usó `--diarize`. `selection` es `"auto"` si el motor lo eligió el sondeo (`--engine auto`) y `"explicit"` si lo pidió el usuario. |
 | `segments` | `[object, …]` | Siempre. |
 
 ### Cada segmento
@@ -310,7 +310,7 @@ context=None, vad=False)`; `language="auto"` deja detectar. El `fingerprint` inc
 ```python
 from speechtotext.core.transcribe import transcribe, Transcript, Progress, AsrError
 
-t = transcribe(Path("reunion.mp4"), model="large-v3", language="auto", on_progress=print)
+t = transcribe("reunion.mp4", model="large-v3", on_progress=print)
 ```
 
 Un archivo (o muestras 16 kHz mono) entra, un `Transcript` sale: `segments` (con hablante y
@@ -320,12 +320,48 @@ señales nativas; la marca `suspect` la calcula el escritor JSON con `is_suspect
 decodificación; el archivo corto y el largo son el mismo camino con n trozos; los trozos
 dejan checkpoint por contenido en `~/.speechtotext/chunks`. El núcleo nunca imprime:
 `on_progress` recibe `Progress(stage, done, total, detail)` con etapas `decode → load →
-transcribe → diarize`; `cancel` es un `threading.Event` que se mira entre trozos.
+transcribe → diarize` (con archivo, `decode` se emite dos veces: antes con `total=None` y
+después con `done = total = duración`; `download` la emite `models.ensure`); `cancel` es un
+`threading.Event` que se mira entre trozos.
 
 Errores: `AsrError(code, recoverable, message)` con `code` en `unsupported_option`,
-`out_of_memory`, `backend_failed`, `cancelled`, `diarize_unavailable`, `diarize_failed`;
-`AudioDecodeError` si el archivo no se puede abrir. `backend=` permite reutilizar un
-modelo caliente entre llamadas.
+`out_of_memory`, `insufficient_resources`, `backend_failed`, `cancelled`, `diarize_unavailable`, `diarize_failed`;
+`AudioDecodeError` si el archivo no se puede abrir. Los avisos del motor (p. ej. `empty_transcript`)
+llegan a `warnings` como `"<motor>: <aviso>"`. `backend=` permite reutilizar un
+modelo caliente entre llamadas. `route=` recibe una `Route` ya resuelta (el CLI sondea,
+imprime la razón y la pasa: la máquina se mira una sola vez).
+
+---
+
+## Sondeo y modelos
+
+```python
+from speechtotext.core import probe, models
+
+m = probe.machine()                       # < 1 s, sin cargar modelos
+r = probe.choose_route(m, "large-v3")     # engine="auto", device="auto", compute_type="auto"
+```
+
+`Machine(platform, cpu_count, ram_gb, cuda, gpu_name, vram_free_gb, whispercpp)`: lo que
+hay, con `None` donde no se pudo medir. `Route(engine, device, compute_type, reason,
+eta_factor, estimated)`: la elección; `reason` es una frase para imprimir (vacía si no
+hay nada que avisar); `eta_factor` multiplica la duración del audio (`None` = sin medir)
+y `estimated` es `False` solo si salió del `bench.json` de esta máquina. Reglas: lo
+explícito se respeta, el sondeo solo rellena `auto`; **nunca cambia el modelo** — si no
+cabe, `AsrError("insufficient_resources")`. Fuera de Windows, whisper.cpp se etiqueta
+`device="native"`.
+
+```python
+models.data_dir() -> Path                                   # SPEECHTOTEXT_HOME o la ruta del sistema
+models.installed(engine=None) -> list[ModelInfo]            # ModelInfo(engine, name, path, size_bytes, verified)
+models.ensure(engine, name, on_progress=None) -> Path       # baja si falta; Progress("download", …)
+models.remove(engine, name) -> None                         # FileNotFoundError si no está
+models.remote_size(engine, name) -> int | None              # bytes que bajaría ensure; None sin red
+```
+
+`verified` es `True` solo para whisper.cpp (sha256 contra el pin); los de faster-whisper
+los verifica Hugging Face por tamaño. Nombres válidos: `tiny`, `base`, `small`, `medium`,
+`large-v3`, `distil-large-v3` (faster-whisper) y `large-v3`, `small` (whisper.cpp).
 
 ---
 

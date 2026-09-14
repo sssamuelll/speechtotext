@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import time
 import wave
@@ -96,11 +97,15 @@ class WhisperCppBackend:
 
     @property
     def engine_version(self) -> str:
+        if sys.platform != "win32":
+            return "whisper.cpp (PATH, sin pin)"   # binario del sistema: versión no garantizada
         return f"whisper.cpp {enginepin.ENGINE_PIN['version']}"
 
     @property
     def device(self) -> str:
-        return "cuda"
+        # win32: build CUDA pinneado, corre en la GPU siempre. Fuera: el binario del PATH
+        # decide según su build (Metal, CUDA, CPU) y no lo dice. Misma etiqueta que core.probe.
+        return "cuda" if sys.platform == "win32" else "native"
 
     def warm(self) -> None:
         if self._exe is None:

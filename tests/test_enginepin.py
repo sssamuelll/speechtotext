@@ -1,5 +1,6 @@
 import hashlib
 import io
+import shutil
 import sys
 import zipfile
 from pathlib import Path
@@ -29,19 +30,24 @@ def test_engine_pin_literal():
     assert ENGINE_PIN["zip_sha256"] == "106a2030eff8998e4ef320fe72e263a78449e9040386ee27c41ea80b001b601b"
     assert ENGINE_PIN["exe_relpath"] == "Release/whisper-cli.exe"
     assert ENGINE_PIN["exe_sha256"] == "789fddb0f05c0c28043b3c4f3bcf15a0ae839df24292c60f90c4edb8d02a5ab5"
+    assert ENGINE_PIN["zip_bytes"] == 677_887_125
 
 
 def test_models_pin_literal():
     lv3 = MODELS_PIN["large-v3-q5_0"]
     assert (lv3["repo"], lv3["filename"]) == ("ggerganov/whisper.cpp", "ggml-large-v3-q5_0.bin")
     assert lv3["sha256"] == "d75795ecff3f83b5faa89d1900604ad8c780abd5739fae406de19f23ecd98ad1"
+    assert MODELS_PIN["large-v3-q5_0"]["size_bytes"] == 1_081_140_203
     small = MODELS_PIN["small"]
     assert (small["repo"], small["filename"]) == ("ggerganov/whisper.cpp", "ggml-small.bin")
     assert small["sha256"] == "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"
+    assert small["size_bytes"] == 487_601_967
 
 
-def test_install_root_bajo_localappdata(monkeypatch, tmp_path):
+def test_install_root_win32_sin_home_cae_en_localappdata(monkeypatch, tmp_path):
+    monkeypatch.delenv("SPEECHTOTEXT_HOME", raising=False)
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(sys, "platform", "win32")
     assert install_root() == tmp_path / "speechtotext" / "whisper-cpp" / "v1.9.1"
 
 
@@ -66,6 +72,7 @@ def _instala_exe(root: Path, content: bytes = EXE) -> Path:
 
 
 def test_ensure_engine_adopta_instalacion_existente_y_marca(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "platform", "win32")
     _pin_engine(monkeypatch)
     exe = _instala_exe(tmp_path)
     assert ensure_engine(root=tmp_path) == exe
@@ -74,6 +81,7 @@ def test_ensure_engine_adopta_instalacion_existente_y_marca(monkeypatch, tmp_pat
 
 
 def test_ensure_engine_marcador_evita_rehash(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "platform", "win32")
     _pin_engine(monkeypatch)
     exe = _instala_exe(tmp_path)
     ensure_engine(root=tmp_path)
@@ -83,6 +91,7 @@ def test_ensure_engine_marcador_evita_rehash(monkeypatch, tmp_path):
 
 
 def test_ensure_engine_sha_que_no_cuadra_revienta_sin_marcar(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "platform", "win32")
     _pin_engine(monkeypatch)
     exe = _instala_exe(tmp_path, b"impostor")
     with pytest.raises(RuntimeError, match="sha256"):
@@ -99,6 +108,7 @@ def _zip_con_exe(exe_bytes: bytes) -> bytes:
 
 
 def test_ensure_engine_descarga_verifica_zip_y_extrae(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "platform", "win32")
     zip_bytes = _zip_con_exe(EXE)
     pin = _pin_engine(monkeypatch, zip_bytes=zip_bytes)
     urls = []
@@ -115,6 +125,7 @@ def test_ensure_engine_descarga_verifica_zip_y_extrae(monkeypatch, tmp_path):
 
 
 def test_ensure_engine_zip_sha_malo_no_extrae_nada(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "platform", "win32")
     zip_bytes = _zip_con_exe(EXE)
     pin = dict(ENGINE_PIN, exe_sha256=_sha(EXE), zip_sha256="0" * 64)
     monkeypatch.setattr(enginepin, "ENGINE_PIN", pin)
@@ -125,6 +136,7 @@ def test_ensure_engine_zip_sha_malo_no_extrae_nada(monkeypatch, tmp_path):
 
 
 def test_ensure_engine_exe_del_zip_corrupto_revienta(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "platform", "win32")
     # el zip cuadra pero el exe adentro no cuadra con exe_sha256: fail-closed igual
     zip_bytes = _zip_con_exe(b"exe troyano")
     pin = dict(ENGINE_PIN, exe_sha256=_sha(EXE), zip_sha256=_sha(zip_bytes))
@@ -132,6 +144,24 @@ def test_ensure_engine_exe_del_zip_corrupto_revienta(monkeypatch, tmp_path):
     monkeypatch.setattr(enginepin.urllib.request, "urlopen", lambda url: io.BytesIO(zip_bytes))
     with pytest.raises(RuntimeError, match="whisper-cli.exe"):
         ensure_engine(root=tmp_path)
+
+
+def test_ensure_engine_fuera_de_win32_usa_el_path(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(shutil, "which", lambda name: "/opt/homebrew/bin/whisper-cli")
+    assert ensure_engine(root=tmp_path) == Path("/opt/homebrew/bin/whisper-cli")
+    assert not any(tmp_path.iterdir())   # ni descarga ni extrae nada
+
+
+def test_ensure_engine_fuera_de_win32_sin_binario_corta_con_instrucciones(monkeypatch, tmp_path):
+    from speechtotext.asr.base import AsrError
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    with pytest.raises(AsrError) as ei:
+        ensure_engine(root=tmp_path)
+    assert ei.value.code == "backend_failed" and ei.value.recoverable is False
+    assert "brew install whisper-cpp" in str(ei.value) and "--engine faster-whisper" in str(ei.value)
 
 
 # --- ensure_model -----------------------------------------------------------------

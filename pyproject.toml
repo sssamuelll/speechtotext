@@ -43,3 +43,8 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+markers = [
+    "real_machine: no stubbea core.probe.machine(); el test stubbea nvidia-smi y compañía",
+]

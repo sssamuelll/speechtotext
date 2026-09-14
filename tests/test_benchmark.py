@@ -4,20 +4,20 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from speechtotext.core import benchmark
+from speechtotext.core import benchmark, probe
 from speechtotext.core.benchmark_child import run_child
-from speechtotext.core.enginepin import ENGINE_PIN
 
 ALL_CAPS = ("hotwords", "word_timestamps", "native_signals", "vad")
 
 
 def _cfg(engine: str, model: str) -> dict:
     return next(
-        c for c in benchmark.candidate_configs()
+        c for c in benchmark.candidate_configs(platform="win32")
         if c["engine"] == engine and c["model"] == model
     )
 
@@ -26,7 +26,7 @@ def _cfg(engine: str, model: str) -> dict:
 
 
 def test_candidate_configs_siete_y_capacidades():
-    configs = benchmark.candidate_configs()
+    configs = benchmark.candidate_configs(platform="win32")
     assert len(configs) == 7
     fw = [c for c in configs if c["engine"] == "faster-whisper"]
     assert [c["model"] for c in fw] == ["tiny", "base", "small", "medium", "large-v3"]
@@ -39,7 +39,7 @@ def test_candidate_configs_siete_y_capacidades():
 
 
 def test_candidate_configs_wer_ref():
-    wer = {(c["engine"], c["model"]): c["wer_ref"] for c in benchmark.candidate_configs()}
+    wer = {(c["engine"], c["model"]): c["wer_ref"] for c in benchmark.candidate_configs(platform="win32")}
     assert wer[("faster-whisper", "small")] == 0.419
     assert wer[("faster-whisper", "large-v3")] == 0.355
     assert wer[("whispercpp", "large-v3")] == 0.355
@@ -47,30 +47,68 @@ def test_candidate_configs_wer_ref():
     assert wer[("whispercpp", "small")] is None
 
 
+def test_candidate_configs_fuera_de_win32_etiqueta_native():
+    wc = [c for c in benchmark.candidate_configs(platform="darwin") if c["engine"] == "whispercpp"]
+    assert wc and all(c["device"] == "native" for c in wc)
+    assert all(c["device"] == "cpu" for c in benchmark.candidate_configs(platform="darwin")
+               if c["engine"] == "faster-whisper")
+
+
 # --- available_configs -----------------------------------------------------------
 
 
-def test_available_configs_exe_ausente(monkeypatch, tmp_path):
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+def _maquina(**over):
+    base = dict(platform="win32", cpu_count=8, ram_gb=32.0, cuda=False, gpu_name=None,
+                vram_free_gb=None, whispercpp=None)
+    base.update(over)
+    return probe.Machine(**base)
+
+
+def test_available_configs_sin_binario(monkeypatch):
+    monkeypatch.setattr(probe, "machine", lambda: _maquina(cuda=True, vram_free_gb=3.5))
     viables, skipped = benchmark.available_configs()
     assert all(c["engine"] == "faster-whisper" for c in viables) and len(viables) == 5
     assert [s["model"] for s in skipped] == ["small", "large-v3"]
     assert all(s["engine"] == "whispercpp" and "ausente" in s["reason"] for s in skipped)
 
 
-def test_available_configs_nvidia_smi_falla(monkeypatch, tmp_path):
-    exe = tmp_path / "speechtotext" / "whisper-cpp" / ENGINE_PIN["version"] / "Release" / "whisper-cli.exe"
-    exe.parent.mkdir(parents=True)
-    exe.write_bytes(b"fake exe")
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
-
-    def boom(*_a, **_k):
-        raise FileNotFoundError("nvidia-smi no existe")
-
-    monkeypatch.setattr(benchmark.subprocess, "run", boom)
+def test_available_configs_sin_gpu(monkeypatch):
+    monkeypatch.setattr(probe, "machine", lambda: _maquina(whispercpp=Path("C:/x/whisper-cli.exe")))
     viables, skipped = benchmark.available_configs()
-    assert len(viables) == 5
-    assert len(skipped) == 2 and all("nvidia-smi" in s["reason"] for s in skipped)
+    assert len(viables) == 5 and all("nvidia-smi" in s["reason"] for s in skipped)
+
+
+def test_available_configs_con_gpu_y_binario_mide_las_siete(monkeypatch):
+    monkeypatch.setattr(probe, "machine",
+                        lambda: _maquina(cuda=True, vram_free_gb=3.5, whispercpp=Path("C:/x/whisper-cli.exe")))
+    viables, skipped = benchmark.available_configs()
+    assert len(viables) == 7 and skipped == []
+
+
+def test_available_configs_fuera_de_win32_no_exige_nvidia(monkeypatch):
+    monkeypatch.setattr(probe, "machine", lambda: _maquina(
+        platform="darwin", whispercpp=Path("/opt/homebrew/bin/whisper-cli")))
+    viables, skipped = benchmark.available_configs()
+    assert skipped == []
+    assert [c["device"] for c in viables if c["engine"] == "whispercpp"] == ["native", "native"]
+
+
+def test_machine_info_es_la_forma_del_schema_v1(monkeypatch):
+    monkeypatch.setattr(probe, "machine",
+                        lambda: _maquina(gpu_name="GTX 980", cuda=True, vram_free_gb=3.5, ram_gb=31.9))
+    info = benchmark.machine_info()
+    assert set(info) == {"cpu", "logical_cores", "ram_gb", "gpu"}
+    assert (info["logical_cores"], info["ram_gb"], info["gpu"]) == (8, 31.9, "GTX 980")
+
+
+def test_caps_de_la_tabla_salen_de_los_backends():
+    from speechtotext.asr.whispercpp import WhisperCppBackend
+
+    assert benchmark._CAPS["faster-whisper"] == {
+        "hotwords": True, "word_timestamps": True, "native_signals": True, "vad": True}
+    assert benchmark._CAPS["whispercpp"] == {
+        "hotwords": False, "word_timestamps": False, "native_signals": False, "vad": False}
+    assert benchmark._CAPS["whispercpp"]["vad"] == (WhisperCppBackend.caps.vad == "honrado")
 
 
 # --- run_config ------------------------------------------------------------------

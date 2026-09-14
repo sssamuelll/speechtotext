@@ -22,14 +22,13 @@ from speechtotext.core.chunked import (
 )
 from speechtotext.core.formats import find_gaps
 from speechtotext.core.postprocess import normalize_hours
+from speechtotext.core import probe
+from speechtotext.core.probe import ENGINE_FASTER, ENGINE_WHISPERCPP, ENGINES, Route  # noqa: F401 — reexport
 from speechtotext.core.segments import LabeledSegment
 
 SAMPLE_RATE = 16000
-ENGINE_FASTER = "faster-whisper"
-ENGINE_WHISPERCPP = "whispercpp"
-ENGINES = (ENGINE_FASTER, ENGINE_WHISPERCPP)
 
-Stage = Literal["decode", "load", "transcribe", "diarize"]
+Stage = Literal["download", "decode", "load", "transcribe", "diarize"]
 
 
 @dataclass(frozen=True)
@@ -43,43 +42,12 @@ class Progress:
 ProgressCallback = Callable[[Progress], None]
 
 
-@dataclass(frozen=True)
-class Route:
-    engine: str
-    device: str
-    compute_type: str
-    reason: str              # una frase para imprimir; vacia si no hay nada que avisar
-
-
 def resolve_route(engine: str = "auto", device: str = "auto", compute_type: str = "auto",
                   model: str = "large-v3") -> Route:
-    """Resuelve engine/device/compute_type explicitos o 'auto'. ponytail: sin sondeo de la
-    maquina todavia — 'auto' es faster-whisper en CPU int8; el sondeo llega en el plan 2b."""
-    engine = ENGINE_FASTER if engine == "auto" else engine
-    if engine not in ENGINES:
-        raise ValueError(f"engine {engine!r} no existe; disponibles: {', '.join(ENGINES)}")
-    if engine == ENGINE_WHISPERCPP:
-        from speechtotext.core.enginepin import _MODEL_ALIAS
-
-        if model not in _MODEL_ALIAS:
-            raise ValueError(
-                f"modelo {model!r} no está pinneado para whispercpp; disponibles: "
-                f"{', '.join(sorted(_MODEL_ALIAS))}"
-            )
-        if compute_type not in ("auto", "q5_0"):
-            raise ValueError(
-                f"compute_type={compute_type!r} no soportado con whispercpp; usa 'auto' o 'q5_0'. "
-                "Motivo: fp16 = 0.53x tiempo real por paging WDDM en la 980 (medido 2026-07-27)."
-            )
-        # El binario pinneado es build CUDA y corre en la GPU SIEMPRE (medido en el smoke).
-        # Etiquetar cpu seria mentir en el header, la llave y el JSON: se declara cuda y
-        # el remapeo se AVISA — pisar un -d cpu en silencio seria la sustitucion callada.
-        reason = "" if device == "cuda" else "whisper.cpp (build CUDA) corre en la GPU; device=cuda"
-        return Route(ENGINE_WHISPERCPP, "cuda", "q5_0", reason)
-    device = "cpu" if device == "auto" else device
-    if compute_type == "auto":
-        compute_type = "int8" if device == "cpu" else "float16"
-    return Route(ENGINE_FASTER, device, compute_type, "")
+    """Sondea la máquina una vez (core.probe) y elige la ruta. ValueError con flags
+    imposibles; AsrError("insufficient_resources") si el modelo no cabe en RAM."""
+    return probe.choose_route(probe.machine(), model, engine=engine, device=device,
+                              compute_type=compute_type)
 
 
 def make_backend(engine: str, model: str, device: str, compute_type: str, jobs: int = 1) -> AsrBackend:
@@ -222,8 +190,8 @@ def _identity(path: Path, backend: AsrBackend, request: TranscriptionRequest) ->
 
 
 def _run_span(backend, samples, request, start, end, identity, cancel):
-    """(segmentos globales, desde_cache, idioma, probabilidad). El checkpoint viejo puede
-    traer un fantasma sobre el relleno: clip_to_end tambien al leer."""
+    """(segmentos globales, desde_cache, idioma, probabilidad, avisos del motor). El
+    checkpoint viejo puede traer un fantasma sobre el relleno: clip_to_end tambien al leer."""
     if cancel is not None and cancel.is_set():
         raise AsrError("cancelled", True, "transcripción cancelada")
     path = chunk_path(identity, start, end) if identity is not None else None
@@ -231,7 +199,7 @@ def _run_span(backend, samples, request, start, end, identity, cancel):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             segs = clip_to_end([seg_from_dict(d) for d in data["segments"]], end)
-            return segs, True, data.get("language"), None
+            return segs, True, data.get("language"), None, ()
         except (json.JSONDecodeError, KeyError):
             pass  # checkpoint corrupto -> recomputar
     a, b = int(start * SAMPLE_RATE), int(end * SAMPLE_RATE)
@@ -241,7 +209,7 @@ def _run_span(backend, samples, request, start, end, identity, cancel):
         path.write_text(json.dumps({"language": result.language,
                                     "segments": [seg_to_dict(s) for s in segs]},
                                    ensure_ascii=False), encoding="utf-8")
-    return segs, False, result.language, result.native_signals.language_probability
+    return segs, False, result.language, result.native_signals.language_probability, result.warnings
 
 
 def _diarize(samples, segments, speakers, identify, threshold):
@@ -271,7 +239,7 @@ def _diarize(samples, segments, speakers, identify, threshold):
 
 
 def transcribe(
-    audio: Path | np.ndarray,
+    audio: Path | str | np.ndarray,
     *,
     model: str = "large-v3",
     language: str = "auto",
@@ -289,22 +257,37 @@ def transcribe(
     chunk: bool | None = None,
     jobs: int = 4,
     backend: AsrBackend | None = None,
+    route: Route | None = None,
     on_progress: ProgressCallback | None = None,
     cancel: threading.Event | None = None,
 ) -> Transcript:
-    """Archivo (o muestras 16 kHz mono) -> Transcript. El corto y el largo son el mismo
-    camino con n = 1 trozo. Con muestras sin archivo no hay checkpoint ni cortes por
-    silencio (pick_cuts fijo): es la ruta de `find` y de la libreria."""
+    """Archivo (ruta como Path o str, o muestras 16 kHz mono) -> Transcript. El corto y el
+    largo son el mismo camino con n = 1 trozo. Con muestras sin archivo no hay checkpoint
+    ni cortes por silencio (pick_cuts fijo): es la ruta de `find` y de la libreria.
+
+    `route`: una Route ya resuelta (el CLI sondea, imprime y la pasa); `engine="auto"`
+    marca `engine.selection="auto"`."""
     emit = on_progress or (lambda p: None)
 
     def check_cancel() -> None:
         if cancel is not None and cancel.is_set():
             raise AsrError("cancelled", True, "transcripción cancelada")
 
-    if isinstance(audio, Path):
+    # La ruta se resuelve ANTES de decodificar: un --engine inexistente o un modelo que no
+    # cabe corta en milisegundos, no tras decodificar una hora de audio. Quien ya sondeó
+    # (el CLI) la pasa en `route` y la máquina se mira una sola vez.
+    if backend is not None:
+        route = None
+    elif route is None:
+        route = resolve_route(engine, device, compute_type, model)
+
+    if isinstance(audio, (str, Path)):
+        audio = Path(audio)
         emit(Progress("decode", 0, None, audio.name))
         samples = load_audio(audio)
         source: Path | None = audio
+        # Segundo evento con done = total = duración: es lo que el CLI necesita para la ETA.
+        emit(Progress("decode", len(samples) / SAMPLE_RATE, len(samples) / SAMPLE_RATE, audio.name))
     else:
         samples = np.asarray(audio, dtype=np.float32).reshape(-1)
         source = None
@@ -316,7 +299,6 @@ def transcribe(
     else:
         spans = [(0.0, duration)]
 
-    route = resolve_route(engine, device, compute_type, model) if backend is None else None
     engine_id = route.engine if route is not None else backend.backend_id
     # N subprocesos contra una sola GPU paginan en silencio (medido: 2 concurrentes tardan
     # MAS que en serie): whisper.cpp va de uno en uno, estructuralmente.
@@ -346,6 +328,7 @@ def transcribe(
     results: list = [None] * len(spans)
     langs: list = [None] * len(spans)
     probs: list = [None] * len(spans)
+    extra: list[str] = []   # avisos del motor (p. ej. empty_transcript), sin repetir entre trozos
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futs = {pool.submit(_run_span, backend, samples, eff, s, e, identity, cancel): i
                 for i, (s, e) in enumerate(spans)}
@@ -353,7 +336,7 @@ def transcribe(
             i = futs[fut]
             s, e = spans[i]
             try:
-                results[i], cached, langs[i], probs[i] = fut.result()
+                results[i], cached, langs[i], probs[i], span_warnings = fut.result()
             except RuntimeError as exc:   # AsrError tambien es RuntimeError
                 # Al primer fallo se cancela lo pendiente: con motor roto y fallos LENTOS
                 # (paging, timeout) drenar 17 trozos serian horas.
@@ -368,6 +351,10 @@ def transcribe(
                 raise AsrError("backend_failed", True,
                                f"motor {backend.backend_id} fallo en el trozo {i + 1}/{len(spans)} "
                                f"({_mmss(s)}-{_mmss(e)}): {exc}") from exc
+            for w in span_warnings:
+                aviso = f"{backend.backend_id}: {w}"
+                if aviso not in extra:
+                    extra.append(aviso)
             span = e - s
             cov = 100 * sum(x.end - x.start for x in results[i]) / span if span > 0 else 0.0
             emit(Progress("transcribe", done, len(spans),
@@ -401,7 +388,8 @@ def transcribe(
 
     engine_info = EngineInfo(
         backend.backend_id, backend.engine_version, backend.model_id, backend.quant, backend.device,
+        selection="auto" if route is not None and engine == "auto" else "explicit",
         diarization=("word" if eff.word_timestamps else "segment") if diarize else None,
     )
     return Transcript(final, lang_out, prob, duration, speech_s, gaps, engine_info, eff,
-                      warnings, report)
+                      warnings + tuple(extra), report)

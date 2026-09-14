@@ -16,6 +16,16 @@ Lo marcado como **rompe** exige cambios en el código que consume la librería.
   y el largo recorren el mismo camino. Contrato en [`docs/api.md`](docs/api.md#transcribe).
 - `WhisperCppBackend` implementa el mismo contrato que `FasterWhisperBackend`; el CLI,
   `bench` y `find` construyen los motores por un solo sitio.
+- `core.probe`: `machine()` sondea la máquina sin cargar modelos (`Machine`) y
+  `choose_route()` elige motor/device/compute_type con la tabla del spec (`Route`, con
+  `eta_factor` y `estimated`). `speechtotext probe` lo imprime.
+- `core.models`: `data_dir()`, `installed()`, `ensure()`, `remove()`, `remote_size()`.
+  `speechtotext models [pull|rm]` por encima.
+- El CLI imprime la duración y una ETA antes de transcribir, y sugiere fijar `-l` cuando
+  la detección sale con probabilidad < 0,5.
+- `transcribe()` acepta la ruta como `str`; los avisos del motor (`empty_transcript`)
+  llegan a `Transcript.warnings` con el prefijo del motor.
+- whisper.cpp en macOS/Linux: `ensure_engine()` usa el `whisper-cli` del `PATH`.
 
 ### Cambiado — rompe
 
@@ -55,6 +65,23 @@ Lo marcado como **rompe** exige cambios en el código que consume la librería.
   recomputan.
 - Se va `core/engines.py`: el adaptador de whisper.cpp es `asr.whispercpp.WhisperCppBackend`
   y los CAPS viven en cada backend.
+- **Defaults del CLI:** `-m large-v3`, `--no-vad`, `-l auto`, `--engine auto`, `-d auto`
+  (antes `small`, `--vad`, `es`, `faster-whisper`, `cpu`). Quien dependía del default
+  lo pasa explícito. `find` igual (`large-v3`, `auto`).
+- `Route` vive en `core.probe` (sigue importable desde `core.transcribe`) y gana
+  `eta_factor` y `estimated`; `resolve_route()` ahora sondea la máquina y puede lanzar
+  `AsrError("insufficient_resources")` cuando el modelo no cabe en RAM.
+- `Progress`: etapa nueva `download`; con archivo, `decode` se emite dos veces (antes,
+  indeterminado; después, `done = total = duración`).
+- `enginepin.install_root()` cuelga de `models.data_dir()`: en Windows es la misma ruta
+  de siempre; en macOS/Linux, `~/Library/Application Support/speechtotext` y
+  `~/.local/share/speechtotext`. `SPEECHTOTEXT_HOME` manda si está puesto.
+- `benchmark._nvidia_smi/_ram_gb/_pinned_exe/machine_info` se fueron a `core.probe`
+  (`machine_info()` sigue en `benchmark` como adaptador del schema v1).
+- `WhisperCppBackend.device` es `"native"` y `engine_version` es
+  `"whisper.cpp (PATH, sin pin)"` fuera de Windows.
+- `engine.selection` en el JSON vale `"auto"` cuando el motor lo eligió el sondeo (antes
+  siempre `"explicit"`); `transcribe()` acepta `route=` para no sondear dos veces.
 
 ---
 
@@ -114,8 +141,8 @@ Lo marcado como **rompe** exige cambios en el código que consume la librería.
 ### Cambiado — rompe
 
 - **Se extrajo el servicio HTTP de evaluación de pronunciación** (FastAPI +
-  Azure). Vivía en `api/` y hoy vive adaptado dentro de su único consumidor
-  (klara). Esta librería quedó como lo que es: voz a texto local, sin servidor y
+  Azure). Vivía en `api/` y hoy vive adaptado
+  (su único consumidor). Esta librería quedó como lo que es: voz a texto local, sin servidor y
   sin dependencias de nube.
 - A partir de aquí el repo se consume como **librería versionada por tags**. Los
   consumidores fijan tag o SHA, nunca `@main`: cambio que un consumidor necesite
