@@ -121,3 +121,23 @@ def test_la_prosa_no_documenta():
     """Nombrar algo en una frase no es documentarlo: tiene que estar en código."""
     assert _nombrados("AudioClip es la entrada por clip.") == set()
     assert "AudioClip" in _nombrados("- **`AudioClip(started_at, ...)`** — la entrada.")
+
+
+def test_ningun_code_span_cruza_un_salto_de_linea():
+    """Un span partido en dos líneas no lo ve `[^`\\n]+`: el símbolo que nombra deja de
+    contar como documentado y, peor, descoloca el emparejamiento del resto de la línea.
+    Así fue como `TranscriptionRequest` y `Route` dejaron de contar desde su propia firma
+    y pasaron solo porque se nombraban en otra parte. Se vigila aquí, no en la cabeza de
+    quien edite el documento."""
+    dentro = False
+    partidas = []
+    for numero, linea in enumerate(API_MD.read_text(encoding="utf-8").split("\n"), 1):
+        if linea.lstrip().startswith("```"):
+            dentro = not dentro
+        elif not dentro and linea.count("`") % 2:
+            partidas.append(numero)
+    assert not partidas, (
+        f"docs/api.md tiene code spans que cruzan un salto de línea, en las líneas "
+        f"{partidas}. Reajusta el salto para que el span quepa entero en una: partido "
+        f"no cuenta como documentación."
+    )

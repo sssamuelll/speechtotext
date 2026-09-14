@@ -162,8 +162,9 @@ fotograma perdido no es aceptable por omisión.
 - **`QualityThresholds(min_effective_voice_ms, min_processed_rms_dbfs, min_snr_db, max_clipping_ratio, max_dropped_frames=0, max_discontinuities=0)`**
 - **`evaluate_pre_inference(report, thresholds) -> PreInferenceDecision`**
 - **`PreInferenceDecision(eligible, reason_codes)`**
-- **`QualityReason`** — `Literal["silence", "too_short", "level_too_low", "snr_unavailable",
-  "snr_too_low", "clipping", "dropped_audio", "discontinuous_audio"]`. La puerta acumula
+- **`QualityReason`** — un `Literal` con ocho códigos:
+  `"silence"`, `"too_short"`, `"level_too_low"`, `"snr_unavailable"`, `"snr_too_low"`,
+  `"clipping"`, `"dropped_audio"`, `"discontinuous_audio"`. La puerta acumula
   **todas** las razones que aplican, no la primera.
 
 ### Proveniencia
@@ -415,8 +416,8 @@ Dos implementaciones, ninguna reexportada (importar `speechtotext.asr` no carga 
   por SHA-256 (`core/enginepin.py`), CUDA siempre, `q5_0`. Rechaza hotwords (el prompt es
   inerte bajo `-mc 0`), degrada VAD y palabras, y no emite señales nativas.
 
-`TranscriptionRequest(language="es", hotwords=(), word_timestamps=True, beam_size=5,
-context=None, vad=False)`; `language="auto"` deja detectar. El `fingerprint` incluye `vad`.
+`TranscriptionRequest(language="es", hotwords=(), word_timestamps=True, beam_size=5, context=None, vad=False)`;
+`language="auto"` deja detectar. El `fingerprint` incluye `vad`.
 
 ---
 
@@ -434,9 +435,10 @@ señales nativas; la marca `suspect` la calcula el escritor JSON con `is_suspect
 `gaps`, `engine` (un `EngineInfo`, con `.to_dict()` para el JSON), `request` (la efectiva, tras CAPS), `warnings` y `diarization` (un `DiarizationReport` o `None`). Una sola
 decodificación; el archivo corto y el largo son el mismo camino con n trozos; los trozos
 dejan checkpoint por contenido en `~/.speechtotext/chunks`. El núcleo nunca imprime:
-`on_progress` recibe `Progress(stage, done, total, detail)` con etapas `decode → load →
-transcribe → diarize` (con archivo, `decode` se emite dos veces: antes con `total=None` y
-después con `done = total = duración`; `download` la emite `models.ensure`); `cancel` es un
+`on_progress` recibe `Progress(stage, done, total, detail)` con etapas
+`decode → load → transcribe → diarize` (con archivo, `decode` se emite dos veces: antes
+con `total=None` y después con `done = total = duración`; `download` la emite
+`models.ensure`); `cancel` es un
 `threading.Event` que se mira entre trozos.
 
 Errores: `AsrError(code, recoverable, message)` con `code` en `unsupported_option`,
@@ -458,8 +460,9 @@ r = probe.choose_route(m, "large-v3")     # engine="auto", device="auto", comput
 ```
 
 `Machine(platform, cpu_count, ram_gb, cuda, gpu_name, vram_free_gb, whispercpp)`: lo que
-hay, con `None` donde no se pudo medir. `Route(engine, device, compute_type, reason,
-eta_factor, estimated)`: la elección; `reason` es una frase para imprimir (vacía si no
+hay, con `None` donde no se pudo medir.
+`Route(engine, device, compute_type, reason, eta_factor, estimated)`: la elección;
+`reason` es una frase para imprimir (vacía si no
 hay nada que avisar); `eta_factor` multiplica la duración del audio (`None` = sin medir)
 y `estimated` es `False` solo si salió del `bench.json` de esta máquina. Reglas: lo
 explícito se respeta, el sondeo solo rellena `auto`; **nunca cambia el modelo** — si no
