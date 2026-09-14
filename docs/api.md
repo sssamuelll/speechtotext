@@ -349,6 +349,16 @@ menor coseno, corta por debajo del umbral, y asigna sin reusar ni un hablante ni
 nombre. El umbral por defecto del CLI es `0.5`. `cosine` está expuesto pero es
 implementación: puede cambiar sin aviso.
 
+### Diarizar
+
+`speakers.diarization.diarize(samples, sample_rate, num_speakers=None)` devuelve
+`(turns, embeddings)`: `turns` es una lista de `(start, end, speaker_id)` y `embeddings`
+un vector por `speaker_id`, en el mismo espacio que `embed_voice` — comparables contra lo
+registrado. `num_speakers` es una pista; si se omite, el pipeline decide cuántos hay. Un
+hablante cuyo embedding salga con `NaN`, o que el pipeline no devuelva, aparece en `turns`
+pero no en `embeddings`. Requiere el extra `[diarize]`; el pipeline se carga una vez por
+proceso.
+
 ---
 
 ## Señales no finitas: dos políticas, a propósito

@@ -12,6 +12,16 @@ existe. Un parser de firmas Markdown se pudriría más rápido que lo que vigila
 `core/` y `speakers/` no tienen `__all__` — se importan por submódulo — así que su
 superficie pública vive en CONTRATO, nombre a nombre. Añadir algo ahí es declararlo
 contrato: sale en el CHANGELOG cuando cambie.
+
+Límite conocido, a propósito. La dirección (b) compara el nombre DESNUDO contra los
+tokens del documento entero, sin atarlo a su módulo, y eso deja dos huecos. Uno: dos
+rutas con el mismo último segmento (`core.models.remove` y `speakers.registry.remove`)
+se tapan entre sí — si una pierde su documentación, el token de la otra la sigue
+cubriendo. Dos: un token puede venir de una mención que no documenta nada; durante un
+commit, `speakers.diarization.diarize` pasó en verde porque el documento nombraba la
+flag `--diarize` y la etapa de progreso `diarize`, no la función. Exigir la mención
+calificada arreglaría ambos y rompería las menciones legítimas del propio documento, así
+que se queda el chequeo desnudo y el aviso escrito.
 """
 import importlib
 import re
@@ -42,12 +52,14 @@ CONTRATO = (
     "speechtotext.core.models.ModelInfo",
     "speechtotext.core.formats.write_json",
     "speechtotext.core.formats.is_suspect",
+    "speechtotext.core.segments.native_signals",
     "speechtotext.speakers.registry.enroll",
     "speechtotext.speakers.registry.list_voices",
     "speechtotext.speakers.registry.get_embeddings",
     "speechtotext.speakers.registry.remove",
     "speechtotext.speakers.identify.assign_names",
     "speechtotext.speakers.diarization.diarize",
+    "speechtotext.speakers.diarization.embed_voice",
     "speechtotext.asr.base.AsrError",
     "speechtotext.asr.faster_whisper.FasterWhisperBackend",
     "speechtotext.asr.whispercpp.WhisperCppBackend",
