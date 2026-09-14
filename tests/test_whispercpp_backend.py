@@ -32,7 +32,7 @@ def test_la_fixture_es_sintetica_y_sin_rutas_de_maquina():
 
 
 def _run_stub(write="fixture", rc=0, stderr=b""):
-    """`write`: 'fixture' copia la salida real grabada; un dict escribe ese JSON; None no
+    """`write`: 'fixture' copia la fixture sintética; un dict escribe ese JSON; None no
     escribe nada; un str crudo escribe basura. Devuelve (run, seen)."""
     seen = {}
 
