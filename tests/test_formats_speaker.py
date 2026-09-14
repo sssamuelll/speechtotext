@@ -240,7 +240,7 @@ def test_json_diarization_va_dentro_del_bloque_engine(tmp_path):
 
 
 def test_pipeline_whispercpp_fixture_a_write_json(tmp_path):
-    """Contrato dual de punta a punta: la fixture real de -ojf pasa por el parser del
+    """Contrato dual de punta a punta: la fixture sintética de -ojf pasa por el parser del
     núcleo, se convierte en LabeledSegments (el puente que hoy hace el CLI) y sale por
     write_json. test_whispercpp_backend.py no cubre este último tramo; aquí vive."""
     from speechtotext.asr.whispercpp import parse_ojf
@@ -261,7 +261,7 @@ def test_pipeline_whispercpp_fixture_a_write_json(tmp_path):
     assert "language_probability" not in data
     assert data["language"] == "es"
     # (b) el texto sobrevive intacto (write_json solo recorta el espacio decorativo inicial)
-    assert data["segments"][0]["text"] == "Ay, gracias. Gracias por haberme dejado tantos años."
+    assert data["segments"][0]["text"] == "Segmento uno de la pista de prueba."
     assert data["segments"][0]["start"] == 0.0
     assert data["segments"][0]["end"] == 19.92
     assert len(data["segments"]) == len(segs)

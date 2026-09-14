@@ -4,7 +4,7 @@ Sin claves de API, sin subir audio a la nube. Solo necesita ffmpeg en el PATH
 (en Linux/macOS: paquete `ffmpeg`; en Windows: https://ffmpeg.org/download.html).
 
 Uso rápido:
-    speechtotext transcribe src/static/audio.wav
+    speechtotext transcribe reunion.m4a
     speechtotext transcribe charla.mp3 --model medium --language auto --formats txt,srt
 """
 from __future__ import annotations
@@ -857,6 +857,14 @@ def models_rm(
         console.print(str(e), style="red", markup=False)
         raise typer.Exit(1)
     console.print(f"  [green]Borrado[/green] {name} ({engine})")
+
+
+@app.command()
+def mcp() -> None:
+    """Sirve las herramientas por MCP sobre stdio (Claude Desktop y compatibles)."""
+    from speechtotext.cli import mcp_server
+
+    mcp_server.serve()
 
 
 if __name__ == "__main__":

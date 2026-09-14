@@ -19,8 +19,20 @@ from speechtotext.core import enginepin
 FIXTURE = Path(__file__).parent / "fixtures" / "whispercpp_ojf.json"
 
 
+def test_la_fixture_es_sintetica_y_sin_rutas_de_maquina():
+    """Guarda de lanzamiento: esta fixture viaja al repo público. Si alguien la regenera
+    pegando una salida real de su máquina, se entera aquí y no en el filter-repo."""
+    crudo = FIXTURE.read_text(encoding="utf-8")
+    assert "\\" not in crudo, "ruta de Windows en la fixture"
+    assert "Users" not in crudo, "ruta de máquina en la fixture"
+    payload = json.loads(crudo)
+    textos = [s["text"].strip() for s in payload["transcription"]]
+    assert len(textos) == 6
+    assert all(t.startswith("Segmento ") for t in textos), textos
+
+
 def _run_stub(write="fixture", rc=0, stderr=b""):
-    """`write`: 'fixture' copia la salida real grabada; un dict escribe ese JSON; None no
+    """`write`: 'fixture' copia la fixture sintética; un dict escribe ese JSON; None no
     escribe nada; un str crudo escribe basura. Devuelve (run, seen)."""
     seen = {}
 
@@ -93,12 +105,12 @@ def test_warm_resuelve_exe_y_modelo_por_el_pin(monkeypatch, tmp_path):
     assert backend._model_path == tmp_path / "small.bin"
 
 
-def test_transcribe_parsea_la_fixture_real():
+def test_transcribe_parsea_la_fixture():
     run, seen = _run_stub()
     result = _backend(run).transcribe(_samples(), TranscriptionRequest(language="es"))
     assert len(result.segments) == 6
     assert (result.segments[0].start, result.segments[0].end) == (0.0, 19.92)
-    assert result.segments[0].text == " Ay, gracias. Gracias por haberme dejado tantos años."
+    assert result.segments[0].text == " Segmento uno de la pista de prueba."
     assert result.segments[0].words == ()
     assert result.segments[0].native_signals.no_speech is None
     assert result.language == "es"

@@ -10,6 +10,7 @@ Los tests de aqui nacieron de una revision adversarial en la que 24 de 33
 mutaciones SOBREVIVIERON a la suite anterior. Cada test nuevo nombra la
 mutacion que mata.
 """
+import math
 import subprocess
 import sys
 import tracemalloc
@@ -234,15 +235,28 @@ def test_el_dataclass_valida_como_sus_vecinos(campos):
 # determinismo de verdad, y memoria acotada
 # ----------------------------------------------------------------------------
 
-# Valores clavados de `_voz_sintetica()` a 16 kHz (numpy pocketfft, 2026-09-11).
-# Si cambian sin que cambie la definicion de la medida, cambio el backend o la
-# aritmetica — y eso es lo que este test existe para gritar.
+# Valores clavados de `_voz_sintetica()` a 16 kHz (numpy pocketfft, 2026-09-11, en
+# Windows x86-64). Si cambian sin que cambie la definicion de la medida, cambio el
+# backend o la aritmetica — y eso es lo que este test existe para gritar.
+#
+# Pero NO se comparan bit a bit. La primera corrida de CI fuera de Windows lo dejo
+# claro: pocketfft despacha por SIMD segun la maquina y el ultimo bit no viaja. Medido
+# 2026-09-14 con estos mismos valores: Linux x86-64 da `band` a 1 ULP del valor de
+# Windows, y macOS arm64 da `flat` a 3 ULP. No es una regresion; es que la igualdad
+# exacta de floats entre plataformas nunca fue una propiedad que este codigo pudiera
+# prometer. La tolerancia de abajo deja pasar ese ruido y sigue gritando ante cualquier
+# cambio que importe: un backend o una formula distintos mueven digitos, no bits.
+#
+# Lo que si se compara bit a bit es el otro proceso contra este: misma maquina, misma
+# build, y ahi la igualdad exacta es exigible. Esa es la mitad del test que de verdad
+# comprueba determinismo, y la que caza un mutante que dependa de time.time_ns().
 GOLDEN = {
-    "band": "0x1.4fcbde67765d5p-1",     # 0.6558522702500179
-    "voiced": "0x1.0000000000000p+0",   # 1.0
-    "f0": "0x1.18b3a62ce98b4p+7",       # 140.35087719298247 = 16000 / 114
-    "flat": "0x1.259ac0bf686efp-29",    # 2.1362539235000618e-09
+    "band": 0.6558522702500179,
+    "voiced": 1.0,
+    "f0": 140.35087719298247,   # 16000 / 114
+    "flat": 2.1362539235000618e-09,
 }
+TOLERANCIA = 1e-12   # ~6000 veces el ruido de plataforma medido
 
 _CODIGO_OTRO_PROCESO = (
     "import sys; sys.path.insert(0, 'tests');"
@@ -266,10 +280,14 @@ def test_la_evidencia_es_determinista_ENTRE_PROCESOS_y_esta_clavada():
         e.voice_band_ratio.hex(), e.voiced_ratio.hex(), e.f0_median_hz.hex(),
         e.spectral_flatness.hex(), str(e.frames),
     ]
-    assert e.voice_band_ratio.hex() == GOLDEN["band"]
-    assert e.voiced_ratio.hex() == GOLDEN["voiced"]
-    assert e.f0_median_hz.hex() == GOLDEN["f0"]
-    assert e.spectral_flatness.hex() == GOLDEN["flat"]
+    medido = {"band": e.voice_band_ratio, "voiced": e.voiced_ratio,
+              "f0": e.f0_median_hz, "flat": e.spectral_flatness}
+    lejos = {
+        clave: (valor, GOLDEN[clave])
+        for clave, valor in medido.items()
+        if not math.isclose(valor, GOLDEN[clave], rel_tol=TOLERANCIA)
+    }
+    assert not lejos, f"la medida se movio mas que el ruido de plataforma: {lejos}"
 
 
 def _pico_mb(x):

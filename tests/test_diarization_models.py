@@ -5,6 +5,7 @@ verifica que el camino real (importar pyannote perezosamente, cargar audio en me
 correr el pipeline y desempaquetar la salida 4.x) no explota y devuelve los tipos
 esperados. El de configuración corre siempre, con un doble en sys.modules.
 """
+import importlib.util
 import os
 import subprocess
 import sys
@@ -13,9 +14,12 @@ import types
 import pytest
 
 
+# La guarda pide las DOS cosas. Con solo HF_TOKEN el test arrancaba en un entorno sin el
+# extra [diarize] y moría importando pyannote: un fallo que no dice nada del código.
 @pytest.mark.skipif(
-    not os.environ.get("HF_TOKEN"),
-    reason="requiere HF_TOKEN + modelos gated de pyannote aceptados",
+    not os.environ.get("HF_TOKEN")
+    or importlib.util.find_spec("pyannote.audio") is None,
+    reason="requiere HF_TOKEN + modelos gated aceptados + el extra [diarize]",
 )
 def test_diarize_returns_turns_and_embeddings(tmp_path):
     from speechtotext.speakers.diarization import diarize

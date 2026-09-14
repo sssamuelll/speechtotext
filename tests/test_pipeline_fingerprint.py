@@ -1,7 +1,7 @@
 import math
 
 import pytest
-from hypothesis import given, strategies as st
+from hypothesis import HealthCheck, given, settings, strategies as st
 
 from speechtotext.audio.fingerprint import ModelRef, PipelineProvenance, PipelineStep
 
@@ -47,6 +47,13 @@ def test_fingerprint_rechaza_nan():
         )
 
 
+# too_slow mide cuánto tarda Hypothesis en GENERAR entradas, no la propiedad. Bajo la
+# suite entera (y en los runners de CI, más lentos que cualquier portátil) el generador de
+# `st.text()` sin alfabeto acotado se pasa del presupuesto y tumba el test sin que nada
+# esté mal: llegó a fallar en 2 de cada 3 corridas completas aquí. La propiedad que se
+# comprueba —la huella no depende del orden de las claves— es la misma con el health check
+# encendido o apagado.
+@settings(suppress_health_check=[HealthCheck.too_slow])
 @given(
     st.dictionaries(
         st.text(min_size=1),

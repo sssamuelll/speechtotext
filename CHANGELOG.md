@@ -26,6 +26,24 @@ Lo marcado como **rompe** exige cambios en el código que consume la librería.
 - `transcribe()` acepta la ruta como `str`; los avisos del motor (`empty_transcript`)
   llegan a `Transcript.warnings` con el prefijo del motor.
 - whisper.cpp en macOS/Linux: `ensure_engine()` usa el `whisper-cli` del `PATH`.
+- `speechtotext mcp`: servidor MCP sobre stdio con cuatro herramientas (`transcribe`,
+  `find`, `voices`, `probe`), tras el extra opcional `[mcp]`. El núcleo no gana
+  dependencias.
+- `docs/api.md` documenta la capa `audio/` entera (20 símbolos de `audio.__all__`, antes
+  3) y los tipos de `asr/` que faltaban. `tests/test_api_contract.py` la vigila en las dos
+  direcciones: nada se puede exportar sin documentar, ni documentar sin que exista.
+- **Contrato nuevo** en `docs/api.md`: `speakers.diarization.diarize` y `embed_voice`
+  (sección «Diarizar»), y `core.segments.native_signals`. Estaban en el árbol desde antes;
+  lo nuevo es que ahora son contrato vigilado, así que renombrarlos o moverlos **rompe** y
+  tiene que salir aquí.
+
+### Cambiado
+
+- CI activado de verdad: la suite corre en Linux, macOS y Windows sobre Python 3.11 y
+  3.14, y un job aparte construye el wheel y lo instala en un venv limpio. Antes el
+  workflow existía pero instalaba un extra (`[evaluation]`) que ya no existe.
+- `tests/fixtures/whispercpp_ojf.json` pasa a ser sintética: misma forma de la salida
+  `-ojf`, sin habla humana real y sin rutas de máquina.
 
 ### Cambiado — rompe
 
