@@ -144,16 +144,20 @@ report = compute_audio_quality(samples, gain.samples, 16000, regions,
 - **`AudioQualityReport`** — `duration_ms`, `effective_voice_ms`, `input_rms_dbfs`,
   `processed_rms_dbfs`, `peak_dbfs`, `clipping_ratio`, `noise_floor_dbfs`, `snr_db`,
   `requested_gain_db`, `applied_gain_db`, `dropped_frames`, `discontinuities`, `warnings`.
-  `noise_floor_dbfs` y `snr_db` son `None` cuando no hubo silencio suficiente para
-  medirlos: **`None` no es cero**, la misma regla que gobierna la evidencia de voz.
+  `noise_floor_dbfs` es `None` cuando el clip es habla de punta a punta y no queda ni una
+  muestra de silencio que medir; `snr_db` es `None` cuando falta cualquiera de los dos
+  lados de la resta — sin silencio, o sin ninguna región de habla. **`None` no es cero**:
+  la misma regla que gobierna la evidencia de voz.
 - **`apply_fixed_gain(samples, gain_db, *, max_gain_db=18.0, peak_limit_dbfs=-1.0) -> GainResult`**
 - **`GainResult(samples, requested_gain_db, applied_gain_db, limited)`** — `limited` es
   `True` cuando el limitador tuvo que recortar la ganancia pedida.
 
 ### Puerta de calidad
 
-Decide si un clip merece inferencia, contra umbrales que pone quien llama. La librería no
-trae umbrales por defecto: medir es suyo, decidir es de quien la usa.
+Decide si un clip merece inferencia, contra umbrales que pone quien llama. Los cuatro
+umbrales de señal no traen valor por defecto a propósito — medir es de la librería,
+decidir es de quien la usa. Los dos contadores de transporte sí lo traen, en `0`: un
+fotograma perdido no es aceptable por omisión.
 
 - **`QualityThresholds(min_effective_voice_ms, min_processed_rms_dbfs, min_snr_db, max_clipping_ratio, max_dropped_frames=0, max_discontinuities=0)`**
 - **`evaluate_pre_inference(report, thresholds) -> PreInferenceDecision`**
@@ -337,7 +341,9 @@ vectores de otro extractor funciona hoy. Lo que está atado a pyannote es el CLI
 
 ## Identificación
 
-`assign_names(clusters, enrolled, threshold) -> dict[str, str]` mapea cada `speaker_id`
+`speechtotext.speakers.identify` es el módulo — el paquete `speakers` no reexporta nada,
+se importa por submódulo. `assign_names(clusters, enrolled, threshold) -> dict[str, str]`
+mapea cada `speaker_id`
 anónimo a un nombre registrado, con un greedy: ordena todos los pares posibles de mayor a
 menor coseno, corta por debajo del umbral, y asigna sin reusar ni un hablante ni un
 nombre. El umbral por defecto del CLI es `0.5`. `cosine` está expuesto pero es
