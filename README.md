@@ -41,6 +41,9 @@ pip install -e ".[diarize]"
 
 # Suite de tests
 pip install -e ".[dev]"
+
+# Servidor MCP (SDK oficial `mcp`)
+pip install -e ".[mcp]"
 ```
 
 ---
@@ -57,6 +60,7 @@ pip install -e ".[dev]"
 | `bench` | Medir en tu máquina qué configuración conviene. |
 | `probe` | Ver qué tiene tu máquina y qué ruta elegiría `transcribe` (pégalo en un issue). |
 | `models` | Listar, bajar (`pull`) y borrar (`rm`) modelos. |
+| `mcp` | Servir las herramientas por MCP sobre stdio, para un cliente como Claude Desktop. |
 
 ---
 
@@ -375,6 +379,36 @@ eso si lo pones. La misma API desde Python: `speechtotext.core.models`
 
 ---
 
+## Servidor MCP
+
+`speechtotext mcp` expone cuatro herramientas por stdio, para clientes MCP como Claude
+Desktop. Requiere el extra: `pip install -e ".[mcp]"`.
+
+| Herramienta | Qué hace |
+|---|---|
+| `transcribe(path, language?, model?, diarize?)` | Transcribe y escribe el JSON junto al audio; devuelve el texto y la ruta. |
+| `find(path, query)` | Las regiones del audio donde aparece la consulta, sin transcribirlo entero. |
+| `voices()` | Las voces registradas. |
+| `probe()` | Qué tiene la máquina y qué ruta elegiría `transcribe`. |
+
+Configuración del cliente (ajusta la ruta al ejecutable de tu entorno):
+
+```json
+{
+  "mcpServers": {
+    "speechtotext": {
+      "command": "/ruta/a/tu/venv/bin/speechtotext",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+El servidor no imprime nada por su cuenta: en stdio, stdout es el protocolo. Las
+transcripciones largas no reportan progreso por esa razón — el cliente espera.
+
+---
+
 ## Salida
 
 `txt` es la transcripción plana, `srt`/`vtt` son subtítulos con tiempos, y `json`
@@ -421,7 +455,9 @@ src/speechtotext/
 │   ├── types.py          TranscriptionRequest / TranscriptionResult
 │   ├── faster_whisper.py FasterWhisperBackend
 │   └── whispercpp.py     WhisperCppBackend (subprocess sobre whisper-cli pinneado)
-└── cli/app.py            typer: transcribe / find / enroll / voices / forget / bench / probe / models
+└── cli/                  la superficie de usuario
+    ├── app.py            typer: transcribe / find / enroll / voices / forget / bench / probe / models / mcp
+    └── mcp_server.py     las cuatro herramientas MCP y el servidor stdio
 ```
 
 ---
@@ -443,7 +479,9 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-El CI de GitHub Actions está deshabilitado: los gates son locales.
+El CI corre la suite en Linux, macOS y Windows sobre Python 3.11 y 3.14, y además
+construye el wheel y lo instala en un venv limpio para comprobar que el paquete sirve
+fuera de este árbol. El gate local sigue siendo `pytest -q`.
 
 ### Añadir un formato de salida nuevo al CLI
 

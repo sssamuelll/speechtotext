@@ -492,3 +492,8 @@ los verifica Hugging Face por tamaño. Nombres válidos: `tiny`, `base`, `small`
 Los paquetes `evaluation/`, `security/`, `models/` y `confidence/` que existían
 hasta la `0.5.1` se extrajeron en la `0.6.0`: eran el arnés de evaluación y la
 cadena de custodia de un consumidor, no parte de transcribir audio.
+
+- **`cli/`** tampoco es contrato, incluido `cli/mcp_server.py`. Las cuatro herramientas
+  que sirve `speechtotext mcp` son envoltorios de `core.transcribe`, `core.finder`,
+  `speakers.registry` y `core.probe`: el contrato es el de abajo, no el de la envoltura.
+  Si quieres llamarlas desde Python, llama a lo envuelto.

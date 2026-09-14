@@ -8,7 +8,7 @@ determinó cruzando cada documento contra `git log`.
 
 | Documento | Qué es |
 |---|---|
-| [`api.md`](api.md) | Contrato para consumidores: esquema del JSON, evidencia de voz, registro de voces, identificación. Lo que se rompe si cambia sale en el `CHANGELOG.md`. |
+| [`api.md`](api.md) | Contrato para consumidores: esquema del JSON, la capa `audio/` entera, `asr/`, `transcribe()`, sondeo y modelos, registro de voces e identificación. Lo vigila `tests/test_api_contract.py`; lo que se rompa al cambiarlo sale en el `CHANGELOG.md`. |
 | [`superpowers/specs/2026-07-13-jarvis-voice-core-design.md`](superpowers/specs/2026-07-13-jarvis-voice-core-design.md) | Diseño del asistente de voz local que consume esta librería. Sigue informando trabajo: la evidencia de voz de la `0.5.0` nació de aquí. |
 
 ## Ejecutado

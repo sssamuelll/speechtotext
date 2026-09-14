@@ -265,7 +265,7 @@ Para cada módulo público, cada nombre en su `__all__` tiene que aparecer en `d
 4. **Traducción** (§8).
 5. **Reescritura de historia**, sobre un clon fresco, una sola vez:
    - Antes: borrar en `origin` las 5 ramas stale pre-squash (`docs/lo-medido`, `docs/registro-al-dia`, `feat/senales-nativas`, `feat/voice-evidence`, `fix/trozos-recortan-a-su-ventana`).
-   - `git filter-repo` purga de **toda** la historia: `docs/superpowers/**`, `src/static/audio.wav`, `src/static/texto.txt`, `src/.vscode/**`, `src/avconv.exe`, `src/ffmpeg.exe`, `docs/audio-evaluation.md`.
+   - `git filter-repo` purga de **toda** la historia: `docs/superpowers/**`, archivos de ejemplo en `src/static/`, ejecutables del árbol, y documentos de trabajo privado.
    - `--replace-text` con tabla: nombres privados (`aurelius`, `jarvis`, `klara`), rutas de máquina (`C:\Users\simon`, `D:\AudioBench\...`, `D:\Desktop\...`, `c:\caminantes`), y el nombre del familiar y la emisora en `docs/benchmark-turboscribe.md`.
    - Mensajes: callback con tabla para los 121 commits (traducción + los 13 con nombres privados o ramas `claude/…-XXXXX`).
    - **Verificación obligatoria antes de publicar:** `git grep -i` de cada palabra prohibida (nombres privados, el político de la entrevista, COPEI, Vielma, caminantes, el familiar, `simon`) sobre `$(git rev-list --all)` = **cero**; `git cat-file -e` de los SHAs de `audio.wav` y `texto.txt` falla; `git fsck` limpio; tamaño del repo sin el wav.
