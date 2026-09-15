@@ -1,38 +1,39 @@
-"""Servidor MCP sobre stdio: cuatro herramientas delgadas sobre el núcleo.
+"""MCP server over stdio: four thin tools over the core.
 
-Las cuatro son funciones planas con anotaciones (el SDK deriva el esquema de ahí) y no
-tocan `mcp`: asi se prueban sin el extra instalado, y `speechtotext --help` no lo exige.
-`serve()` es lo unico que lo importa.
+The four are plain annotated functions (the SDK derives the schema from that) and they
+don't touch `mcp`: that way they're tested without the extra installed, and
+`speechtotext --help` doesn't require it. `serve()` is the only thing that imports it.
 
-Nada aqui imprime. Un servidor stdio que escriba en stdout rompe el protocolo: por eso
-`on_progress=None` en vez del callback rich del CLI.
+Nothing here prints. A stdio server that writes to stdout breaks the protocol: hence
+`on_progress=None` instead of the CLI's rich callback.
 """
 from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
 
-NOMBRE = "speechtotext"
+NAME = "speechtotext"
 
 
 def transcribe(path: str, language: str = "auto", model: str = "large-v3",
                diarize: bool = False) -> dict:
     """Transcribe a local audio or video file and write the JSON next to it."""
     from speechtotext.core.formats import write_json
-    from speechtotext.core import transcribe as nucleo
+    from speechtotext.core import transcribe as core_transcribe
 
     audio = Path(path)
-    t = nucleo.transcribe(audio, model=model, language=language, diarize=diarize,
-                          on_progress=None)
-    destino = audio.with_suffix(".json")   # el mismo default que el CLI sin -o
+    t = core_transcribe.transcribe(
+        audio, model=model, language=language, diarize=diarize, on_progress=None
+    )
+    dest = audio.with_suffix(".json")   # same default as the CLI without -o
     info = SimpleNamespace(language=t.language,
                            language_probability=t.language_probability,
                            duration=t.duration)
-    write_json(t.segments, info, destino, engine_info=t.engine.to_dict(),
+    write_json(t.segments, info, dest, engine_info=t.engine.to_dict(),
                speech_s=t.speech_s, gaps=t.gaps)
     return {
         "text": "\n".join(s.text.strip() for s in t.segments),
-        "json": str(destino),
+        "json": str(dest),
         "language": t.language,
         "duration": t.duration,
         "warnings": list(t.warnings),
@@ -64,32 +65,32 @@ def voices() -> dict:
 def probe() -> dict:
     """Probe this machine and report the route `transcribe` would choose for large-v3."""
     from speechtotext.asr import AsrError
-    from speechtotext.core import probe as sondeo
+    from speechtotext.core import probe as probe_mod
 
-    m = sondeo.machine()
-    salida: dict = {"machine": {
+    m = probe_mod.machine()
+    output: dict = {"machine": {
         "platform": m.platform, "cpu_count": m.cpu_count, "ram_gb": m.ram_gb,
         "cuda": m.cuda, "gpu_name": m.gpu_name, "vram_free_gb": m.vram_free_gb,
         "whispercpp": str(m.whispercpp) if m.whispercpp is not None else None,
     }}
     try:
-        r = sondeo.choose_route(m, "large-v3")
+        r = probe_mod.choose_route(m, "large-v3")
     except AsrError as e:
-        # El sondeo nunca cambia el modelo: si no cabe, lo dice y para (spec §5.1).
-        salida["route"] = None
-        salida["error"] = str(e)
-        return salida
-    salida["route"] = {"engine": r.engine, "device": r.device,
+        # The probe never changes the model: if it doesn't fit, it says so and stops (spec §5.1).
+        output["route"] = None
+        output["error"] = str(e)
+        return output
+    output["route"] = {"engine": r.engine, "device": r.device,
                        "compute_type": r.compute_type, "reason": r.reason,
                        "eta_factor": r.eta_factor, "estimated": r.estimated}
-    return salida
+    return output
 
 
-HERRAMIENTAS = (transcribe, find, voices, probe)
+TOOLS = (transcribe, find, voices, probe)
 
 
 def serve() -> None:
-    """Registra las cuatro herramientas y sirve por stdio. Bloquea hasta que cierren."""
+    """Registers the four tools and serves over stdio. Blocks until they disconnect."""
     try:
         from mcp.server import MCPServer
     except ImportError as e:
@@ -98,7 +99,7 @@ def serve() -> None:
             '    pip install "speechtotext[mcp]"'
         ) from e
 
-    servidor = MCPServer(NOMBRE)
-    for fn in HERRAMIENTAS:
-        servidor.tool()(fn)
-    servidor.run()     # stdio por defecto
+    server = MCPServer(NAME)
+    for fn in TOOLS:
+        server.tool()(fn)
+    server.run()     # stdio by default

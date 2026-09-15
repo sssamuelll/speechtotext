@@ -51,7 +51,6 @@ WATCHED = (
 
 # Still untranslated. One line per task; they come off in order.
 PENDING = (
-    "src/",                          # task 4
     "tests/",                        # task 5
     "README.md",                     # task 6
     "docs/api.md",                   # task 7

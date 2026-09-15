@@ -1,7 +1,7 @@
-"""Sondeo de la máquina (< 1 s, sin cargar modelos) y elección de ruta.
+"""Machine probe (< 1 s, without loading models) and route selection.
 
-Reglas (spec §5.1): el sondeo NUNCA cambia el modelo; `engine`/`device` explícitos se
-respetan y el sondeo solo rellena lo que falta; todo remapeo se avisa en `Route.reason`.
+Rules (spec §5.1): the probe NEVER changes the model; explicit `engine`/`device` values are
+honored and the probe only fills in what is missing; every remapping is reported in `Route.reason`.
 """
 from __future__ import annotations
 
@@ -17,15 +17,15 @@ ENGINE_FASTER = "faster-whisper"
 ENGINE_WHISPERCPP = "whispercpp"
 ENGINES = (ENGINE_FASTER, ENGINE_WHISPERCPP)
 
-# ponytail: umbrales medidos en UNA máquina (5900X + GTX 980 de 4 GB, 2026-09-11), no
-# leyes. `bench` es quien los afina; moverlos es un commit consciente con medición.
-VRAM_FW_GB = 5.0     # faster-whisper large-v3 float16 en CUDA
-VRAM_WCPP_GB = 2.0   # whisper.cpp large-v3 q5_0: 1.3 GB medidos en la 980
-RAM_MIN_GB = {"large-v3": 6.0, "small": 3.0}   # techo sobre el pico medido de 3.6 GB en int8
+# ponytail: thresholds measured on ONE machine (5900X + 4 GB GTX 980, 2026-09-11), not
+# laws. `bench` is what tunes them; moving them is a deliberate commit with measurement.
+VRAM_FW_GB = 5.0     # faster-whisper large-v3 float16 on CUDA
+VRAM_WCPP_GB = 2.0   # whisper.cpp large-v3 q5_0: 1.3 GB measured on the 980
+RAM_MIN_GB = {"large-v3": 6.0, "small": 3.0}   # ceiling above the measured 3.6 GB peak in int8
 
-# Factor × duración del audio, medido en la máquina de referencia (scripts/benchmark_chart.py,
-# 2026-09-11: 1.27x, 6.4x, 7.97x y 15.7x tiempo real). None = sin medir. El bench.json de
-# ESTA máquina manda sobre esta tabla (eta_factor).
+# Factor × audio duration, measured on the reference machine (scripts/benchmark_chart.py,
+# 2026-09-11: 1.27x, 6.4x, 7.97x, and 15.7x real time). None = unmeasured. This machine's
+# bench.json takes precedence over this table (eta_factor).
 ETA_FACTORS = {
     (ENGINE_FASTER, "cpu", "int8", "large-v3"): round(1 / 1.27, 3),
     (ENGINE_FASTER, "cpu", "int8", "small"): round(1 / 6.4, 3),
@@ -39,24 +39,24 @@ class Route:
     engine: str
     device: str
     compute_type: str
-    reason: str                       # una frase para imprimir; vacía si no hay nada que avisar
-    eta_factor: float | None = None   # × duración del audio; None = sin medir
-    estimated: bool = True            # False si el factor salió del bench.json de ESTA máquina
+    reason: str                       # one sentence to print; empty if there is nothing to report
+    eta_factor: float | None = None   # × audio duration; None = unmeasured
+    estimated: bool = True            # False if the factor came from THIS machine's bench.json
 
 
 @dataclass(frozen=True)
 class Machine:
     platform: str                 # sys.platform: win32 | darwin | linux
     cpu_count: int
-    ram_gb: float | None          # None = no se pudo medir
-    cuda: bool                    # nvidia-smi responde: hay GPU NVIDIA con driver
+    ram_gb: float | None          # None = could not be measured
+    cuda: bool                    # nvidia-smi responds: an NVIDIA GPU with a driver is present
     gpu_name: str | None
     vram_free_gb: float | None
-    whispercpp: Path | None       # binario ya instalado (pinneado o en el PATH); jamás descarga
+    whispercpp: Path | None       # already installed binary (pinned or on the PATH); never downloads
 
 
 def nvidia_smi(query: str, timeout_s: float = 10) -> str | None:
-    """Una consulta a nvidia-smi; None si no hay GPU NVIDIA o el comando no responde."""
+    """One nvidia-smi query; None if there is no NVIDIA GPU or the command does not respond."""
     try:
         proc = subprocess.run(
             ["nvidia-smi", f"--query-gpu={query}", "--format=csv,noheader,nounits"],
@@ -70,10 +70,10 @@ def nvidia_smi(query: str, timeout_s: float = 10) -> str | None:
 
 
 def _ram_gb() -> float | None:
-    """RAM física total en GB; None si el sistema no la dice."""
+    """Total physical RAM in GB; None if the system does not report it."""
     if sys.platform == "win32":
         import ctypes
-        from ctypes import wintypes  # solo tras comprobar win32 (regla de la casa)
+        from ctypes import wintypes  # only after checking win32 (house rule)
 
         class MEMORYSTATUSEX(ctypes.Structure):
             _fields_ = [
@@ -89,7 +89,7 @@ def _ram_gb() -> float | None:
             ]
 
         kernel32 = ctypes.WinDLL("kernel32")
-        # argtypes/restype explícitos: sin ellos ctypes trunca punteros en x64.
+        # Explicit argtypes/restype: without them ctypes truncates pointers on x64.
         kernel32.GlobalMemoryStatusEx.restype = wintypes.BOOL
         kernel32.GlobalMemoryStatusEx.argtypes = [ctypes.POINTER(MEMORYSTATUSEX)]
         stat = MEMORYSTATUSEX()
@@ -104,14 +104,14 @@ def _ram_gb() -> float | None:
 
 
 def _first_line(raw: str | None) -> str | None:
-    # ponytail: con varias GPUs manda la primera; elegir la mejor es trabajo de bench.
+    # ponytail: with multiple GPUs, the first one wins; choosing the best is bench's job.
     return raw.splitlines()[0].strip() if raw else None
 
 
 def machine() -> Machine:
-    """Sondea sin cargar modelos: nvidia-smi (nombre y VRAM libre), RAM total y si el
-    binario de whisper.cpp ya está presente."""
-    from speechtotext.core import enginepin   # perezoso: enginepin sabe dónde vive el binario
+    """Probe without loading models: nvidia-smi (name and free VRAM), total RAM, and whether
+    the whisper.cpp binary is already present."""
+    from speechtotext.core import enginepin   # lazy: enginepin knows where the binary lives
 
     gpu = _first_line(nvidia_smi("name"))
     free = _first_line(nvidia_smi("memory.free"))   # MiB
@@ -124,12 +124,12 @@ def machine() -> Machine:
 
 
 def eta_factor(engine: str, device: str, compute_type: str, model: str) -> tuple[float | None, bool]:
-    """(factor, estimado). El bench.json de esta máquina si midió esa ruta; si no, la tabla."""
-    from speechtotext.core.benchmark import read_table   # perezoso: benchmark importa probe
+    """(factor, estimated). This machine's bench.json if it measured that route; otherwise, the table."""
+    from speechtotext.core.benchmark import read_table   # lazy: benchmark imports probe
 
     try:
         table = read_table()
-    except (OSError, ValueError, KeyError):   # un bench.json corrupto no tumba una transcripción
+    except (OSError, ValueError, KeyError):   # a corrupt bench.json does not take down a transcription
         table = None
     for row in (table or {}).get("results", ()):
         if ((row.get("engine"), row.get("device"), row.get("quant"), row.get("model"))
@@ -139,7 +139,7 @@ def eta_factor(engine: str, device: str, compute_type: str, model: str) -> tuple
 
 
 def _fw_device(m: Machine) -> tuple[str, str]:
-    """(device, razón) para faster-whisper cuando el usuario dejó device='auto'."""
+    """(device, reason) for faster-whisper when the user left device='auto'."""
     free = m.vram_free_gb if m.cuda else None
     if free is not None and free >= VRAM_FW_GB:
         return "cuda", f"GPU with {free:.1f} GB free"
@@ -149,9 +149,9 @@ def _fw_device(m: Machine) -> tuple[str, str]:
 
 
 def _auto(m: Machine, model: str, device: str) -> tuple[str, str, str]:
-    """La tabla del spec §5.1 para engine='auto'. Un device explícito manda (whisper.cpp
-    solo sabe GPU): con -d cpu o -d cuda el motor es faster-whisper. Devuelve
-    (engine, device, reason); para whispercpp el device lo etiqueta choose_route."""
+    """The spec §5.1 table for engine='auto'. An explicit device wins (whisper.cpp only
+    knows GPU): with -d cpu or -d cuda the engine is faster-whisper. Return
+    (engine, device, reason); for whispercpp, choose_route labels the device."""
     if device != "auto":
         return ENGINE_FASTER, device, ""
     from speechtotext.core.enginepin import _MODEL_ALIAS
@@ -169,23 +169,23 @@ def _auto(m: Machine, model: str, device: str) -> tuple[str, str, str]:
 
 def choose_route(m: Machine, model: str, *, engine: str = "auto", device: str = "auto",
                  compute_type: str = "auto") -> Route:
-    """Elige motor/device/compute_type para `model` en la máquina `m`. ValueError con flags
-    imposibles; AsrError("insufficient_resources") si el modelo no cabe en RAM — el sondeo
-    NUNCA cambia el modelo, lo dice y para."""
+    """Choose engine/device/compute_type for `model` on machine `m`. ValueError for impossible
+    flags; AsrError("insufficient_resources") if the model does not fit in RAM — the probe
+    NEVER changes the model, reports it, and stops."""
     if engine != "auto" and engine not in ENGINES:
         raise ValueError(f"engine {engine!r} does not exist; available: {', '.join(ENGINES)}")
     need = RAM_MIN_GB.get(model)
     if need is not None and m.ram_gb is not None and m.ram_gb < need:
-        consejo = "; try -m small" if model != "small" else ""
+        advice = "; try -m small" if model != "small" else ""
         raise AsrError(
             "insufficient_resources", False,
-            f"{model} needs ~{need:g} GB of RAM and this machine has {m.ram_gb:.1f} GB{consejo}",
+            f"{model} needs ~{need:g} GB of RAM and this machine has {m.ram_gb:.1f} GB{advice}",
         )
     reason = ""
     if engine == "auto":
         engine, device, reason = _auto(m, model, device)
     elif engine == ENGINE_FASTER and device == "auto":
-        # Motor explícito, device libre: el sondeo lo rellena y lo dice (spec §5.1).
+        # Explicit engine, free device: the probe fills it in and reports it (spec §5.1).
         device, reason = _fw_device(m)
     if engine == ENGINE_WHISPERCPP:
         from speechtotext.core.enginepin import _MODEL_ALIAS
@@ -200,11 +200,11 @@ def choose_route(m: Machine, model: str, *, engine: str = "auto", device: str = 
                 f"compute_type={compute_type!r} is not supported with whispercpp; use 'auto' or "
                 "'q5_0'. Reason: fp16 = 0.53x real time from WDDM paging on the 980 (measured 2026-07-27)."
             )
-        # win32: el binario pinneado es build CUDA y corre en la GPU SIEMPRE (medido en el
-        # smoke); etiquetar cpu sería mentir en el header, la llave y el JSON. Fuera de
-        # win32 el whisper-cli del PATH decide según su build (Metal, CUDA o CPU) y no lo
-        # dice: se etiqueta native. Pisar un -d explícito en silencio sería la sustitución
-        # callada: se avisa.
+        # win32: the pinned binary is a CUDA build and ALWAYS runs on the GPU (measured in the
+        # smoke test); labeling it cpu would lie in the header, key, and JSON. Outside win32,
+        # the whisper-cli on the PATH decides based on its build (Metal, CUDA, or CPU) and does
+        # not say: it is labeled native. Silently overriding an explicit -d would be the silent
+        # substitution: report it.
         label = "cuda" if m.platform == "win32" else "native"
         if not reason and device != label:
             reason = ("whisper.cpp (CUDA build) runs on the GPU; device=cuda" if label == "cuda"

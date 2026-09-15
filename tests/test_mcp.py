@@ -202,8 +202,8 @@ def test_serve_registra_contra_el_sdk_real():
 
     from mcp.server import MCPServer
 
-    servidor = MCPServer(mcp_server.NOMBRE)
-    for fn in mcp_server.HERRAMIENTAS:
+    servidor = MCPServer(mcp_server.NAME)
+    for fn in mcp_server.TOOLS:
         servidor.tool()(fn)
 
     herramientas = asyncio.run(servidor.list_tools())

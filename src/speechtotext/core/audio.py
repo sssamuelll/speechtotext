@@ -1,4 +1,4 @@
-"""Utilidades de audio compartidas: transcoding a WAV PCM 16 kHz mono via ffmpeg."""
+"""Shared audio utilities: transcoding to 16 kHz mono PCM WAV via ffmpeg."""
 from __future__ import annotations
 
 import subprocess
@@ -15,9 +15,9 @@ class FfmpegMissingError(RuntimeError):
 
 
 def transcode_to_wav(src_bytes: bytes, *, sample_rate: int = 16_000) -> Path:
-    """Convierte cualquier audio (webm/ogg/mp3/m4a/...) a WAV PCM mono.
+    """Convert any audio (webm/ogg/mp3/m4a/...) to mono PCM WAV.
 
-    Devuelve la ruta a un archivo temporal; el llamante es responsable de borrarlo.
+    Return the path to a temporary file; the caller is responsible for deleting it.
     """
     src = tempfile.NamedTemporaryFile(suffix=".bin", delete=False)
     src.write(src_bytes)

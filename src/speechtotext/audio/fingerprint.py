@@ -74,11 +74,11 @@ class PipelineStep:
 
 @dataclass(frozen=True)
 class ModelRef:
-    """Un modelo que participó en el pipeline, reducido a lo que la huella necesita.
+    """A model that participated in the pipeline, reduced to what the fingerprint needs.
 
-    Quien tenga un artefacto verificado lo convierte aquí; la proveniencia no sabe de
-    manifiestos ni de sistemas de archivos, y así la huella se puede calcular en
-    cualquier sistema con un modelo bajado de donde sea.
+    The holder of a verified artifact converts it here; provenance knows nothing of
+    manifests or file systems, so the fingerprint can be calculated on any system
+    using a model downloaded from anywhere.
     """
 
     model_id: str

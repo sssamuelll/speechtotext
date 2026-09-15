@@ -1,4 +1,4 @@
-"""Buscador de segmento: índice de transcripción tiny + búsqueda por regiones."""
+"""Segment finder: tiny transcription index + search by region."""
 from __future__ import annotations
 
 import hashlib
@@ -33,7 +33,7 @@ def _snip(text: str, width: int = 80) -> str:
 
 
 def cluster_regions(hits: list[tuple[float, float, str, int]], gap: float) -> list[Region]:
-    """Fusiona hits (start, end, text, match_count) cercanos (< gap) en una región."""
+    """Merge nearby hits (start, end, text, match_count) (< gap) into a region."""
     if not hits:
         return []
     ordered = sorted(hits, key=lambda h: h[0])
@@ -52,7 +52,7 @@ def cluster_regions(hits: list[tuple[float, float, str, int]], gap: float) -> li
 
 
 def search(segments: list[dict], query: str, gap: float = 60.0, top: int = 5) -> list[Region]:
-    """Regiones (top-N por densidad) donde aparece la consulta."""
+    """Regions (top N by density) where the query appears."""
     terms = _terms(query)
     if not terms:
         return []
@@ -68,7 +68,7 @@ def search(segments: list[dict], query: str, gap: float = 60.0, top: int = 5) ->
 
 
 def clip_window(start: float, end: float, context: float) -> tuple[float, float]:
-    """(inicio, duración) para recortar con `context` segundos de margen a cada lado."""
+    """(start, duration) for clipping with `context` seconds of margin on each side."""
     begin = max(0.0, start - context)
     duration = (end - start) + 2 * context
     return begin, duration
@@ -112,7 +112,7 @@ def load_or_build_index(
             data = json.loads(path.read_text(encoding="utf-8"))
             return data["segments"], True
         except (json.JSONDecodeError, KeyError):
-            pass  # caché corrupta → reconstruir
+            pass  # corrupt cache → rebuild
     segments = build_index(audio, scan_model)
     st = audio.stat()
     path.write_text(

@@ -1,4 +1,4 @@
-"""Transcripción por trozos: durabilidad (checkpoint/resume) + paralelismo."""
+"""Chunked transcription: durability (checkpoint/resume) + parallelism."""
 from __future__ import annotations
 
 import hashlib
@@ -24,15 +24,15 @@ class TimedSegment:
     end: float
     text: str
     words: list[TimedWord] | None = None
-    # Señales nativas de faster-whisper (Fase 2, G5), al final, mismo patrón que words.
+    # Native signals from faster-whisper (Phase 2, G5), at the end, following the same pattern as words.
     no_speech: float | None = None
     avg_logprob: float | None = None
     compression_ratio: float | None = None
 
 
 def shift_segments(segments, offset: float) -> list[TimedSegment]:
-    """Copia segmentos aplicando `offset` a start/end del segmento y de cada palabra.
-    Los Segment de faster-whisper son inmutables; devolvemos TimedSegment nuevos."""
+    """Copy segments, applying `offset` to the segment and each word's start/end.
+    faster-whisper Segments are immutable; we return new TimedSegments."""
     out: list[TimedSegment] = []
     for s in segments:
         words = getattr(s, "words", None)
@@ -49,13 +49,13 @@ def shift_segments(segments, offset: float) -> list[TimedSegment]:
 
 
 def clip_to_end(segs: list[TimedSegment], end: float) -> list[TimedSegment]:
-    """Whisper rellena la última ventana del trozo a 30 s con ceros y puede emitir un segmento
-    sobre el relleno (medido 2026-09-11: "Gracias por ver el video." en 598.6-628.6 sobre un
-    trozo que acababa en 598.7) — y ese segmento cae ENCIMA del trozo siguiente. Un segmento
-    con más relleno que audio se descarta; uno que apenas sobresale se recorta a `end`, y sus
-    palabras igual. Va en tiempo global y también sobre lo que sale de un checkpoint: los
-    escritos antes de este recorte traen el fantasma, y limpiarlos al leer no invalida la
-    caché de nadie."""
+    """Whisper pads the chunk's last window to 30 s with zeros and can emit a segment over
+    the padding (measured 2026-09-11: "Gracias por ver el video." at 598.6-628.6 over a chunk
+    that ended at 598.7) — and that segment lands ON TOP of the next chunk. A segment with
+    more padding than audio is discarded; one that barely protrudes is clipped to `end`, as
+    are its words. This runs in global time and also on checkpoint output: checkpoints written
+    before this clipping contain the phantom, and cleaning them on read invalidates nobody's
+    cache."""
     out: list[TimedSegment] = []
     for s in segs:
         if s.end - end > end - s.start:
@@ -76,7 +76,7 @@ _SIL_END = re.compile(r"silence_end:\s*([0-9.]+)")
 def parse_silences(stderr: str) -> list[tuple[float, float]]:
     starts = [float(m.group(1)) for m in _SIL_START.finditer(stderr)]
     ends = [float(m.group(1)) for m in _SIL_END.finditer(stderr)]
-    return list(zip(starts, ends))  # zip corta el start final sin end
+    return list(zip(starts, ends))  # zip drops the final start without an end
 
 
 def pick_cuts(
@@ -108,15 +108,15 @@ def plan_chunks(audio: Path, duration: float, target_len: float = 600.0) -> list
         proc = subprocess.run(cmd, capture_output=True)
         silences = parse_silences(proc.stderr.decode("utf-8", errors="ignore"))
     except (FileNotFoundError, OSError):
-        silences = []  # sin ffmpeg -> cortes fijos
+        silences = []  # no ffmpeg -> fixed cuts
     return pick_cuts(silences, duration, target_len)
 
 
 def chunk_path(identity: str, start: float, end: float) -> Path:
-    """Checkpoint de un trozo. `identity` la arma core.transcribe: archivo (ruta, tamano,
-    mtime), motor, modelo, cuantizacion, device y la peticion EFECTIVA — asi faster-whisper
-    int8 y whispercpp q5_0 sobre el mismo audio jamas comparten digest, y --vad/--no-vad
-    bajo whispercpp si lo comparten (la peticion efectiva ya viene sin VAD)."""
+    """Checkpoint for a chunk. core.transcribe builds `identity`: file (path, size, mtime),
+    engine, model, quantization, device, and the EFFECTIVE request — so faster-whisper int8
+    and whispercpp q5_0 on the same audio never share a digest, while --vad/--no-vad under
+    whispercpp do share it (the effective request already has no VAD)."""
     digest = hashlib.sha1(f"{identity}|{start}|{end}".encode("utf-8")).hexdigest()[:16]
     d = _home() / "chunks"
     d.mkdir(parents=True, exist_ok=True)
@@ -143,7 +143,7 @@ def seg_from_dict(d: dict) -> TimedSegment:
                         avg_logprob=d.get("avg_logprob"), compression_ratio=d.get("compression_ratio"))
 
 
-CHUNK_THRESHOLD = 1200.0  # s (20 min): por encima, auto-trocea
+CHUNK_THRESHOLD = 1200.0  # s (20 min): above this, auto-chunk
 
 
 def should_chunk(duration: float, chunk_flag: bool | None, threshold: float = CHUNK_THRESHOLD) -> bool:

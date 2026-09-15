@@ -7,9 +7,9 @@ import numpy as np
 
 from speechtotext.asr.types import TranscriptionRequest, TranscriptionResult
 
-# Contrato de capacidades por motor. Regla madre: degradar con aviso cuando el resultado
-# sigue siendo lo pedido con menos precision; rechazar cuando el knob seria inerte;
-# jamas silencio ni sustitucion.
+# Capability contract per engine. Guiding rule: degrade with a warning when the result
+# is still what was requested with less precision; reject when the knob would be inert;
+# never silence or substitution.
 Cap = Literal["honored", "degraded", "rejected"]
 
 
@@ -29,8 +29,8 @@ class AsrError(RuntimeError):
 
 @runtime_checkable
 class AsrBackend(Protocol):
-    """Un motor de voz a texto. Entra float32 mono a 16 kHz; nada mas. Quien llama
-    resamplea. El objeto es la cache del modelo: warm() carga una vez."""
+    """A speech-to-text engine. It accepts float32 mono at 16 kHz; nothing else. The caller
+    resamples. The object is the model cache: warm() loads it once."""
 
     backend_id: str
     caps: Caps

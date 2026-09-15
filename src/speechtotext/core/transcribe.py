@@ -1,7 +1,7 @@
-"""Un archivo entra, una transcripcion sale. Una sola decodificacion, un solo backend.
+"""One file in, one transcription out. A single decode, a single backend.
 
-El nucleo NUNCA imprime: progreso por callback, avisos en Transcript.warnings, errores
-como AsrError con codigo. El CLI, el MCP y la desktop pintan cada uno lo suyo.
+The core NEVER prints: progress goes through a callback, warnings through Transcript.warnings,
+and errors as AsrError with a code. The CLI, MCP, and desktop each render their own output.
 """
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ Stage = Literal["download", "decode", "load", "transcribe", "diarize"]
 class Progress:
     stage: Stage
     done: float
-    total: float | None      # None = indeterminado
+    total: float | None      # None = indeterminate
     detail: str
 
 
@@ -44,15 +44,15 @@ ProgressCallback = Callable[[Progress], None]
 
 def resolve_route(engine: str = "auto", device: str = "auto", compute_type: str = "auto",
                   model: str = "large-v3") -> Route:
-    """Sondea la máquina una vez (core.probe) y elige la ruta. ValueError con flags
-    imposibles; AsrError("insufficient_resources") si el modelo no cabe en RAM."""
+    """Probe the machine once (core.probe) and choose the route. ValueError for impossible
+    flags; AsrError("insufficient_resources") if the model does not fit in RAM."""
     return probe.choose_route(probe.machine(), model, engine=engine, device=device,
                               compute_type=compute_type)
 
 
 def make_backend(engine: str, model: str, device: str, compute_type: str, jobs: int = 1) -> AsrBackend:
-    """Los DOS motores se construyen aqui y solo aqui. Imports perezosos: no pagar
-    faster_whisper si el motor es whisper.cpp, ni el pin si es faster-whisper."""
+    """Both engines are built here and only here. Lazy imports: do not pay for
+    faster_whisper when the engine is whisper.cpp, or the pin when it is faster-whisper."""
     if engine == ENGINE_FASTER:
         import os
 
@@ -60,8 +60,8 @@ def make_backend(engine: str, model: str, device: str, compute_type: str, jobs: 
 
         cfg = FasterWhisperConfig(
             device=device, compute_type=compute_type,
-            # Al trocear, N trozos en paralelo comparten un modelo: CT2 necesita N replicas
-            # (num_workers) y los hilos se reparten. Con jobs=1, cpu_threads=0 deja decidir a CT2.
+            # When chunking, N parallel chunks share one model: CT2 needs N replicas
+            # (num_workers) and the threads are divided among them. With jobs=1, cpu_threads=0 lets CT2 decide.
             cpu_threads=max(1, (os.cpu_count() or 1) // jobs) if jobs > 1 else 0,
             num_workers=jobs,
         )
@@ -74,7 +74,7 @@ def make_backend(engine: str, model: str, device: str, compute_type: str, jobs: 
 
 
 def load_audio(path: Path) -> np.ndarray:
-    """Decodifica UNA vez con PyAV a float32 mono 16 kHz. Lanza AudioDecodeError."""
+    """Decode ONCE with PyAV to float32 mono 16 kHz. Raise AudioDecodeError."""
     from speechtotext.audio.io import decode_audio
 
     with open(path, "rb") as stream:
@@ -105,8 +105,8 @@ class DiarizationReport:
     unattributed_pct: int
     identified: int
     enrolled: int
-    best_score: float | None   # el mejor coseno cuando nadie alcanzo el umbral
-    auto: bool                 # True si el numero de hablantes no lo fijo el usuario
+    best_score: float | None   # best cosine when nobody reached the threshold
+    auto: bool                 # True if the user did not set the number of speakers
 
 
 @dataclass
@@ -118,7 +118,7 @@ class Transcript:
     speech_s: float
     gaps: list[list[float]]
     engine: EngineInfo
-    request: TranscriptionRequest        # la efectiva, tras CAPS
+    request: TranscriptionRequest        # effective request, after CAPS
     warnings: tuple[str, ...] = ()
     diarization: DiarizationReport | None = None
 
@@ -135,7 +135,7 @@ def _request(*, language, vad, hotwords, beam_size, word_timestamps) -> Transcri
 
 def _apply_caps(backend: AsrBackend, request: TranscriptionRequest
                 ) -> tuple[TranscriptionRequest, tuple[str, ...]]:
-    """Contrato de capacidades: se aplica ANTES de construir modelo alguno."""
+    """Capability contract: applied BEFORE building any model."""
     warnings: list[str] = []
     eff = request
     if request.hotwords and backend.caps.hotwords == "rejected":
@@ -156,18 +156,18 @@ def _apply_caps(backend: AsrBackend, request: TranscriptionRequest
 
 
 def _oom(exc: RuntimeError, engine: str) -> RuntimeError:
-    """El OOM real sube como RuntimeError del allocator ('mkl_malloc: failed to allocate
-    memory', 'ggml_cuda: failed to allocate'). ponytail: se decide por substring 'alloc';
-    si un backend inventa otro texto, se propaga crudo, que es la falla correcta."""
+    """The real OOM surfaces as a RuntimeError from the allocator ('mkl_malloc: failed to
+    allocate memory', 'ggml_cuda: failed to allocate'). ponytail: decided by the 'alloc'
+    substring; if a backend invents different text, it propagates raw, which is the correct failure."""
     if "alloc" not in str(exc).lower():
         return exc
     if engine == ENGINE_WHISPERCPP:
-        consejo = ("The GPU ran out of VRAM. Close applications that use the GPU, "
-                   "try a smaller model, or use --engine faster-whisper (CPU).")
+        advice = ("The GPU ran out of VRAM. Close applications that use the GPU, "
+                  "try a smaller model, or use --engine faster-whisper (CPU).")
     else:
-        consejo = ("large-v3 needs ~3.5 GB just to load. Close other processes or use -m medium. "
-                   "This does not cover --diarize's own native crash.")
-    return AsrError("out_of_memory", False, f"{exc}\n{consejo}")
+        advice = ("large-v3 needs ~3.5 GB just to load. Close other processes or use -m medium. "
+                  "This does not cover --diarize's own native crash.")
+    return AsrError("out_of_memory", False, f"{exc}\n{advice}")
 
 
 def _timed(result: TranscriptionResult) -> list[TimedSegment]:
@@ -190,8 +190,8 @@ def _identity(path: Path, backend: AsrBackend, request: TranscriptionRequest) ->
 
 
 def _run_span(backend, samples, request, start, end, identity, cancel):
-    """(segmentos globales, desde_cache, idioma, probabilidad, avisos del motor). El
-    checkpoint viejo puede traer un fantasma sobre el relleno: clip_to_end tambien al leer."""
+    """(global segments, from_cache, language, probability, engine warnings). An old
+    checkpoint can contain a phantom over the padding: clip_to_end also runs on read."""
     if cancel is not None and cancel.is_set():
         raise AsrError("cancelled", True, "transcription cancelled")
     path = chunk_path(identity, start, end) if identity is not None else None
@@ -201,7 +201,7 @@ def _run_span(backend, samples, request, start, end, identity, cancel):
             segs = clip_to_end([seg_from_dict(d) for d in data["segments"]], end)
             return segs, True, data.get("language"), None, ()
         except (json.JSONDecodeError, KeyError):
-            pass  # checkpoint corrupto -> recomputar
+            pass  # corrupt checkpoint -> recompute
     a, b = int(start * SAMPLE_RATE), int(end * SAMPLE_RATE)
     result = backend.transcribe(samples[a:b], request)
     segs = clip_to_end(shift_segments(_timed(result), start), end)
@@ -233,8 +233,8 @@ def _diarize(samples, segments, speakers, identify, threshold):
     best = None
     if enrolled and not name_map and clusters:
         best = max(cosine(vec, ref) for vec in clusters.values() for ref in enrolled.values())
-    sin = round(100 * sum(1 for s in labeled if s.speaker is None) / len(labeled)) if labeled else 0
-    report = DiarizationReport(len(clusters), sin, len(name_map), len(enrolled), best, speakers is None)
+    unattributed_pct = round(100 * sum(1 for s in labeled if s.speaker is None) / len(labeled)) if labeled else 0
+    report = DiarizationReport(len(clusters), unattributed_pct, len(name_map), len(enrolled), best, speakers is None)
     return diarization.apply_names(labeled, name_map), report
 
 
@@ -261,21 +261,21 @@ def transcribe(
     on_progress: ProgressCallback | None = None,
     cancel: threading.Event | None = None,
 ) -> Transcript:
-    """Archivo (ruta como Path o str, o muestras 16 kHz mono) -> Transcript. El corto y el
-    largo son el mismo camino con n = 1 trozo. Con muestras sin archivo no hay checkpoint
-    ni cortes por silencio (pick_cuts fijo): es la ruta de `find` y de la libreria.
+    """File (path as Path or str, or 16 kHz mono samples) -> Transcript. Short and long
+    follow the same path with n = 1 chunk. With samples and no file there is no checkpoint
+    or silence-based cutting (fixed pick_cuts): this is the code path for `find` and the library.
 
-    `route`: una Route ya resuelta (el CLI sondea, imprime y la pasa); `engine="auto"`
-    marca `engine.selection="auto"`."""
+    `route`: an already resolved Route (the CLI probes, prints, and passes it); `engine="auto"`
+    marks `engine.selection="auto"`."""
     emit = on_progress or (lambda p: None)
 
     def check_cancel() -> None:
         if cancel is not None and cancel.is_set():
             raise AsrError("cancelled", True, "transcription cancelled")
 
-    # La ruta se resuelve ANTES de decodificar: un --engine inexistente o un modelo que no
-    # cabe corta en milisegundos, no tras decodificar una hora de audio. Quien ya sondeó
-    # (el CLI) la pasa en `route` y la máquina se mira una sola vez.
+    # The route is resolved BEFORE decoding: a nonexistent --engine or a model that does not
+    # fit stops in milliseconds, not after decoding an hour of audio. A caller that already
+    # probed (the CLI) passes it in `route`, and the machine is inspected only once.
     if backend is not None:
         route = None
     elif route is None:
@@ -286,7 +286,7 @@ def transcribe(
         emit(Progress("decode", 0, None, audio.name))
         samples = load_audio(audio)
         source: Path | None = audio
-        # Segundo evento con done = total = duración: es lo que el CLI necesita para la ETA.
+        # Second event with done = total = duration: this is what the CLI needs for the ETA.
         emit(Progress("decode", len(samples) / SAMPLE_RATE, len(samples) / SAMPLE_RATE, audio.name))
     else:
         samples = np.asarray(audio, dtype=np.float32).reshape(-1)
@@ -300,14 +300,14 @@ def transcribe(
         spans = [(0.0, duration)]
 
     engine_id = route.engine if route is not None else backend.backend_id
-    # N subprocesos contra una sola GPU paginan en silencio (medido: 2 concurrentes tardan
-    # MAS que en serie): whisper.cpp va de uno en uno, estructuralmente.
+    # N subprocesses against a single GPU page silently (measured: 2 concurrent runs take
+    # LONGER than serial runs): whisper.cpp runs one at a time, structurally.
     workers = 1 if engine_id == ENGINE_WHISPERCPP else max(1, min(jobs, len(spans)))
     if backend is None:
         backend = make_backend(route.engine, model, route.device, route.compute_type, jobs=workers)
 
-    # word_timestamps solo se piden al diarizar (la asignacion palabra->hablante parte los
-    # segmentos en el cambio de voz) o si el llamador los quiere; cuestan.
+    # word_timestamps are requested only for diarization (word-to-speaker assignment splits
+    # segments at the speaker change) or if the caller wants them; they cost time.
     request = _request(language=language, vad=vad, hotwords=hotwords, beam_size=beam_size,
                        word_timestamps=word_timestamps or diarize)
     eff, warnings = _apply_caps(backend, request)
@@ -322,13 +322,13 @@ def transcribe(
             raise
         raise translated from exc
 
-    # Checkpoints solo al trocear (como hoy): un pase unico no deja nada en disco.
+    # Checkpoints only when chunking (as today): a single pass leaves nothing on disk.
     identity = _identity(source, backend, eff) if (source is not None and chunking) else None
 
     results: list = [None] * len(spans)
     langs: list = [None] * len(spans)
     probs: list = [None] * len(spans)
-    extra: list[str] = []   # avisos del motor (p. ej. empty_transcript), sin repetir entre trozos
+    extra: list[str] = []   # engine warnings (e.g. empty_transcript), deduplicated across chunks
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futs = {pool.submit(_run_span, backend, samples, eff, s, e, identity, cancel): i
                 for i, (s, e) in enumerate(spans)}
@@ -337,13 +337,13 @@ def transcribe(
             s, e = spans[i]
             try:
                 results[i], cached, langs[i], probs[i], span_warnings = fut.result()
-            except RuntimeError as exc:   # AsrError tambien es RuntimeError
-                # Al primer fallo se cancela lo pendiente: con motor roto y fallos LENTOS
-                # (paging, timeout) drenar 17 trozos serian horas.
+            except RuntimeError as exc:   # AsrError is also a RuntimeError
+                # On the first failure, pending work is canceled: with a broken engine and SLOW
+                # failures (paging, timeout), draining 17 chunks would take hours.
                 pool.shutdown(wait=False, cancel_futures=True)
                 if isinstance(exc, AsrError) and exc.code != "backend_failed":
-                    raise                                   # cancelled, unsupported_option: tal cual
-                translated = _oom(exc, backend.backend_id)  # el mensaje envuelto conserva el texto del allocator
+                    raise                                   # cancelled, unsupported_option: as-is
+                translated = _oom(exc, backend.backend_id)  # the wrapped message preserves the allocator text
                 if translated is not exc:
                     raise translated from exc
                 if len(spans) == 1:
@@ -352,9 +352,9 @@ def transcribe(
                                f"engine {backend.backend_id} failed on chunk {i + 1}/{len(spans)} "
                                f"({_mmss(s)}-{_mmss(e)}): {exc}") from exc
             for w in span_warnings:
-                aviso = f"{backend.backend_id}: {w}"
-                if aviso not in extra:
-                    extra.append(aviso)
+                warning = f"{backend.backend_id}: {w}"
+                if warning not in extra:
+                    extra.append(warning)
             span = e - s
             cov = 100 * sum(x.end - x.start for x in results[i]) / span if span > 0 else 0.0
             emit(Progress("transcribe", done, len(spans),
@@ -363,13 +363,13 @@ def transcribe(
     segments = [seg for chunk_segs in results for seg in chunk_segs]
     detected = next((l for l in langs if l), None)
     if language != "auto":
-        lang_out, prob = language, 1.0   # fiel a faster-whisper: idioma impuesto -> 1.0
+        lang_out, prob = language, 1.0   # faithful to faster-whisper: forced language -> 1.0
     else:
         lang_out = detected or "es"
-        prob = probs[0] if len(spans) == 1 else None   # varios trozos: nadie midio una sola
+        prob = probs[0] if len(spans) == 1 else None   # multiple chunks: nobody measured a single one
 
-    # La cobertura y los huecos se miden sobre lo que el ASR emitio, ANTES de diarizar:
-    # la diarizacion recomprime cada span a sus palabras y publicaria otro numero.
+    # Coverage and gaps are measured over what ASR emitted, BEFORE diarization:
+    # diarization recompresses each span to its words and would publish a different number.
     speech_s = round(sum(s.end - s.start for s in segments), 2)
     gaps = find_gaps(segments, duration)
 

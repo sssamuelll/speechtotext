@@ -75,10 +75,10 @@ class FasterWhisperBackend:
         model_factory: Callable | None = None,
         clock: Callable[[], float] = time.perf_counter,
     ) -> None:
-        # Un nombre lo resuelve faster-whisper (cache de HF Hub); una ruta es un
-        # directorio CTranslate2 y se carga solo local. Este backend no verifica pesos:
-        # quien lo haga por manifiesto lo envuelve, pasa la ruta verificada y su
-        # revision como model_version.
+        # A name is resolved by faster-whisper (HF Hub cache); a path is a CTranslate2
+        # directory and is loaded locally only. This backend does not verify weights:
+        # whoever does so through a manifest wraps it, passes the verified path and its
+        # revision as model_version.
         if isinstance(model, Path):
             self._model_path: Path | None = model
             self._model_id = model.name

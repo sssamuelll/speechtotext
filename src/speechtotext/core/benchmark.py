@@ -1,10 +1,10 @@
-"""Benchmark de configs ASR viables en ESTA maquina -> tabla bench.json.
+"""Benchmark viable ASR configs on THIS machine -> bench.json table.
 
-Schema "speechtotext.bench/v1": una fila por config con tiempos, picos de memoria,
-capacidades y WER de referencia, para que quien consuma la tabla elija config según lo
-que necesite (rapidez, calidad, hotwords...). Cada config se mide en un subproceso
-hijo dedicado (benchmark_child): un proceso que ya cargo un modelo contamina el
-pico de RAM del siguiente.
+Schema "speechtotext.bench/v1": one row per config with timings, memory peaks,
+capabilities, and reference WER, so consumers of the table can choose a config based
+on their needs (speed, quality, hotwords...). Each config is measured in a dedicated
+child subprocess (benchmark_child): a process that has already loaded a model
+contaminates the next one's peak RAM.
 """
 from __future__ import annotations
 
@@ -21,17 +21,17 @@ from speechtotext.asr.faster_whisper import FasterWhisperBackend
 from speechtotext.asr.whispercpp import WhisperCppBackend
 from speechtotext.core import probe
 
-# Se reutiliza el _home privado de finder: misma frontera core/, mismo dueño, y el
-# bench vive al lado del index bajo SPEECHTOTEXT_HOME. Duplicarlo seria un segundo
-# punto de verdad para el mismo directorio.
+# Reuse finder's private _home: same core/ boundary, same owner, and the benchmark
+# lives beside the index under SPEECHTOTEXT_HOME. Duplicating it would create a second
+# source of truth for the same directory.
 from speechtotext.core.finder import _home
 
 SCHEMA_VERSION = "speechtotext.bench/v1"
 
 
 def _caps(backend_cls, native_signals: bool) -> dict:
-    """La tabla de capacidades sale del Caps del backend: un solo punto de verdad.
-    native_signals no es un knob de Caps (no se pide, se emite): literal aquí, medido."""
+    """The capabilities table comes from the backend's Caps: a single source of truth.
+    native_signals is not a Caps knob (it is not requested, it is emitted): literal here, measured."""
     c = backend_cls.caps
     return {"hotwords": c.hotwords == "honored", "word_timestamps": c.word_timestamps == "honored",
             "native_signals": native_signals, "vad": c.vad == "honored"}
@@ -42,8 +42,8 @@ _CAPS = {
     "whispercpp": _caps(WhisperCppBackend, False),
 }
 
-# WER medido 2026-07-27 contra la referencia curada (sesion multimotor); estatico
-# porque el WER es del par (motor, modelo), no de la maquina. El resto: null = no medido.
+# WER measured 2026-07-27 against the curated reference (multi-engine session); static
+# because WER belongs to the (engine, model) pair, not the machine. The rest: null = unmeasured.
 _WER_REF = {
     ("faster-whisper", "small"): 0.419,
     ("faster-whisper", "large-v3"): 0.355,
@@ -70,41 +70,41 @@ def _config(engine: str, model: str, quant: str, device: str) -> dict:
 
 
 def _wcpp_device(platform: str) -> str:
-    # Misma etiqueta que core.probe.choose_route y WhisperCppBackend.device: cuda es el
-    # build pinneado de win32; fuera, el whisper-cli del PATH decide y se etiqueta native.
+    # Same label as core.probe.choose_route and WhisperCppBackend.device: cuda is the
+    # pinned win32 build; elsewhere, the whisper-cli on the PATH decides and is labeled native.
     return "cuda" if platform == "win32" else "native"
 
 
 def candidate_configs(platform: str = sys.platform) -> list[dict]:
-    """Las 7 candidatas fijas; available_configs las filtra por máquina."""
+    """The 7 fixed candidates; available_configs filters them by machine."""
     configs = [_config("faster-whisper", m, "int8", "cpu") for m in _FW_MODELS]
     configs += [_config("whispercpp", m, "q5_0", _wcpp_device(platform)) for m in _WCPP_MODELS]
     return configs
 
 
 def available_configs() -> tuple[list[dict], list[dict]]:
-    """(viables, skipped): whispercpp solo con binario instalado y GPU NVIDIA que responda."""
+    """(viable, skipped): whispercpp only with an installed binary and a responsive NVIDIA GPU."""
     m = probe.machine()
     if m.whispercpp is None:
         wcpp_reason = "whisper-cli missing (not pinned, not on the PATH)"
     elif m.platform == "win32" and not m.cuda:
-        # El build pinneado es CUDA: sin nvidia-smi no corre. Fuera de win32 el binario
-        # del PATH decide (Metal/CUDA/CPU) y basta con que exista.
+        # The pinned build is CUDA: it does not run without nvidia-smi. Outside win32, the
+        # binary on the PATH decides (Metal/CUDA/CPU), and merely existing is enough.
         wcpp_reason = "nvidia-smi is not responding (no usable NVIDIA GPU)"
     else:
         wcpp_reason = None
-    viables: list[dict] = []
+    viable_configs: list[dict] = []
     skipped: list[dict] = []
     for cfg in candidate_configs(m.platform):
         if cfg["engine"] == "whispercpp" and wcpp_reason:
             skipped.append({"engine": cfg["engine"], "model": cfg["model"], "reason": wcpp_reason})
         else:
-            viables.append(cfg)
-    return viables, skipped
+            viable_configs.append(cfg)
+    return viable_configs, skipped
 
 
 def machine_info() -> dict:
-    """La forma del schema v1; los datos los pone probe.machine()."""
+    """The shape of the v1 schema; probe.machine() supplies the data."""
     m = probe.machine()
     return {
         "cpu": platform.processor() or platform.machine(),
@@ -115,11 +115,11 @@ def machine_info() -> dict:
 
 
 class _VramPoller:
-    """Pico de VRAM por polling de nvidia-smi cada 0.5 s durante la corrida.
+    """Peak VRAM from polling nvidia-smi every 0.5 s during the run.
 
-    ponytail: aproximado por muestreo (puede perder picos < 0.5 s) y mide la GPU
-    entera, no el proceso hijo; suficiente para decidir config. NVML por proceso
-    si algun dia hace falta precision.
+    ponytail: approximate by sampling (may miss peaks < 0.5 s) and measures the entire
+    GPU, not the child process; enough to choose a config. Per-process NVML if precision
+    is ever needed.
     """
 
     def __init__(self):
@@ -150,8 +150,8 @@ class _VramPoller:
 
 def run_config(config: dict, wav_path, duration_s: float, *, run=None,
                timeout_s: int = 1800) -> dict:
-    """Mide UNA config en su subproceso hijo. Config que muere -> fila con error,
-    numeros en null, JAMAS excepcion. `run` inyectable para tests."""
+    """Measure ONE config in its child subprocess. Config that dies -> row with error,
+    numbers as null, NEVER an exception. Injectable `run` for tests."""
     run = run or subprocess.run
     result = {
         "engine": config["engine"],
@@ -191,8 +191,8 @@ def run_config(config: dict, wav_path, duration_s: float, *, run=None,
         tail = "\n".join((proc.stderr or "").splitlines()[-5:])
         result["error"] = f"child process died with rc={proc.returncode}: {tail}"
         return result
-    # El hijo emite UNA linea JSON al final; lo anterior en stdout (si lo hay) es ruido
-    # de las libs del motor.
+    # The child emits ONE JSON line at the end; any preceding stdout is noise from
+    # the engine libraries.
     lines = [ln for ln in (proc.stdout or "").splitlines() if ln.strip()]
     try:
         payload = json.loads(lines[-1])
@@ -220,14 +220,15 @@ def _sha1(path) -> str:
     return digest.hexdigest()
 
 
-# Casos de uso del ecosistema: la tabla no solo mide, RECOMIENDA. Cada caso declara
-# requisitos duros (capacidades/engine) y un criterio; la eleccion sale de lo MEDIDO,
-# asi cambia sola si cambia la maquina (GPU nueva, exe ausente, config que revienta).
+# Ecosystem use cases: the table does not just measure, it RECOMMENDS. Each case declares
+# hard requirements (capabilities/engine) and a criterion; the choice comes from WHAT THE
+# MEASUREMENTS SAY, so it changes automatically if the machine changes (new GPU, missing
+# executable, config that blows up).
 #
-# El requisito engine=faster-whisper en conversacion/dictado no es capricho: un asistente
-# por voz mantiene el motor CARGADO en su proceso y transcribe frase a frase; whispercpp
-# es un subprocess que carga el modelo en cada invocacion — pagar la carga por frase lo
-# descarta por arquitectura, no por velocidad.
+# The engine=faster-whisper requirement for conversation/dictation is not arbitrary: a voice
+# assistant keeps the engine LOADED in its process and transcribes sentence by sentence;
+# whispercpp is a subprocess that loads the model on every invocation — paying the load cost
+# per sentence rules it out architecturally, not for speed.
 USE_CASES = (
     {
         "case": "live_conversation",
@@ -299,8 +300,8 @@ def _choose(candidates: list[dict], criterion: str) -> tuple[dict | None, str]:
             f"best measured WER ({best['wer_ref']}) at {best['x_realtime']}x real time"
         )
     if criterion == "balanced":
-        # ponytail: "comodo" = >= 10x tiempo real; umbral a ojo sobre lo medido hoy,
-        # subelo si el dictado se siente lento.
+        # ponytail: "comfortable" = >= 10x real time; eyeballed threshold based on today's
+        # measurements, raise it if dictation feels slow.
         comfortable = [r for r in with_wer if r["x_realtime"] >= 10.0]
         if comfortable:
             best = min(comfortable, key=lambda r: r["wer_ref"])
@@ -316,11 +317,11 @@ def _choose(candidates: list[dict], criterion: str) -> tuple[dict | None, str]:
 
 
 def recommend(results: list[dict]) -> list[dict]:
-    """Una recomendacion por caso de uso, derivada de las filas medidas SIN error.
+    """One recommendation per use case, derived from measured rows WITHOUT errors.
 
-    Un caso sin candidata viable se declara con su razon (p.ej. diarizacion fina en
-    una maquina donde solo corrio whispercpp): la ausencia explicada vale mas que
-    una recomendacion inventada.
+    A case without a viable candidate is declared with its reason (e.g. fine diarization
+    on a machine where only whispercpp ran): an explained absence is worth more than an
+    invented recommendation.
     """
     viable = [r for r in results if not r.get("error") and r.get("x_realtime")]
     out = []
@@ -341,13 +342,13 @@ def recommend(results: list[dict]) -> list[dict]:
 
 
 def run_benchmark(wav_path, duration_s: float, configs: list[dict], *, progress=None) -> dict:
-    """Corre las configs dadas y arma la tabla completa del schema.
+    """Run the given configs and build the complete schema table.
 
-    `skipped` sale de available_configs() en el momento de la corrida: la tabla
-    documenta POR QUE faltan filas, no solo cuales corrieron.
-    `progress`: callable(config, resultado) por config; None lo apaga.
+    `skipped` comes from available_configs() at run time: the table documents WHY rows
+    are missing, not just which ones ran.
+    `progress`: callable(config, result) per config; None disables it.
     """
-    _viables, skipped = available_configs()
+    _viable_configs, skipped = available_configs()
     results = []
     for cfg in configs:
         res = run_config(cfg, wav_path, duration_s)
@@ -379,9 +380,9 @@ def read_table(path: Path | None = None) -> dict | None:
     table = json.loads(path.read_text(encoding="utf-8"))
     recs = table.get("recommendations")
     if recs is None or (recs and "case" not in recs[0]):
-        # Retrocompat: a table measured before this section existed, or written with
-        # the old Spanish recommendation keys (caso/que/motivo/eleccion), regains a
-        # fresh block on read without re-measuring anything — recommendations are
-        # derived from `results` (untouched by the key rename), the measurement rules.
+        # Backward compatibility: a table measured before this section existed, or written
+        # with the old Spanish-language recommendation keys, regains a fresh block on read
+        # without re-measuring anything — recommendations are derived from `results`
+        # (untouched by the key rename), the measurement rules.
         table["recommendations"] = recommend(table.get("results") or [])
     return table

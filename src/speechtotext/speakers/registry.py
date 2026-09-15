@@ -1,4 +1,4 @@
-"""Registro de voces para identificación: guarda un embedding por persona."""
+"""Voice registry for identification: stores one embedding per person."""
 from __future__ import annotations
 
 import json
@@ -26,21 +26,21 @@ def _manifest_path() -> Path:
 
 
 def _load_manifest() -> dict:
-    """Carga el manifiesto anidado por modelo: {modelo: {nombre: meta}}.
+    """Load the manifest nested by model: {model: {name: meta}}.
 
-    Reagrupa transparentemente el formato plano de v0.4 ({nombre: meta}) usando el
-    campo "model" de cada entrada. El discriminador es isinstance(valor, str) sobre
-    "file": en el formato plano entrada["file"] es un str; en el anidado,
-    manifiesto[modelo]["file"] sería el dict de meta de una persona llamada "file"."""
+    Transparently regroup the flat v0.4 format ({name: meta}) using each entry's
+    "model" field. The discriminator is isinstance(value, str) on "file": in the
+    flat format entry["file"] is a str; in the nested one, manifest[model]["file"]
+    would be the meta dict for a person named "file"."""
     p = _manifest_path()
     if not p.exists():
         return {}
     raw = json.loads(p.read_text(encoding="utf-8"))
     if not raw:
         return {}
-    primera = next(iter(raw.values()))
-    if isinstance(primera.get("file"), str):
-        # formato plano v0.4: cada entrada trae su propio modelo
+    first = next(iter(raw.values()))
+    if isinstance(first.get("file"), str):
+        # flat v0.4 format: each entry carries its own model
         nested: dict = {}
         for name, meta in raw.items():
             nested.setdefault(meta["model"], {})[name] = meta
@@ -59,8 +59,8 @@ def _slug(name: str) -> str:
 
 
 def enroll(name: str, embedding: np.ndarray, *, seconds: float, model: str) -> None:
-    # Ruta relativa a voices/, con "/" fijo (no os.sep) para que el manifiesto sea
-    # portable entre plataformas.
+    # Path relative to voices/, with a fixed "/" (not os.sep) so the manifest is
+    # portable across platforms.
     rel = f"{_slug(model)}/{_slug(name)}.npy"
     dest = _voices_dir() / rel
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -76,10 +76,10 @@ def enroll(name: str, embedding: np.ndarray, *, seconds: float, model: str) -> N
 
 def list_voices(model: str | None = None) -> list[dict]:
     m = _load_manifest()
-    modelos = [model] if model is not None else list(m)
+    models = [model] if model is not None else list(m)
     rows = [
         {"name": name, "model": mod, **meta}
-        for mod in modelos
+        for mod in models
         for name, meta in m.get(mod, {}).items()
     ]
     return sorted(rows, key=lambda r: r["name"])
@@ -97,14 +97,14 @@ def get_embeddings(model: str) -> dict[str, np.ndarray]:
 
 def remove(name: str, *, model: str | None = None) -> bool:
     m = _load_manifest()
-    modelos = [model] if model is not None else list(m)
-    borrado = False
-    for mod in modelos:
-        voces = m.get(mod, {})
-        if name in voces:
-            (_voices_dir() / voces[name]["file"]).unlink(missing_ok=True)
-            del voces[name]
-            borrado = True
-    if borrado:
+    models = [model] if model is not None else list(m)
+    deleted = False
+    for mod in models:
+        voices = m.get(mod, {})
+        if name in voices:
+            (_voices_dir() / voices[name]["file"]).unlink(missing_ok=True)
+            del voices[name]
+            deleted = True
+    if deleted:
         _save_manifest(m)
-    return borrado
+    return deleted

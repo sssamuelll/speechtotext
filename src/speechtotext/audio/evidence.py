@@ -1,27 +1,27 @@
-"""Evidencia de voz por DSP determinista.
+"""Deterministic DSP voice evidence.
 
-Ninguna medida de aqui es la opinion de un modelo: son descriptores de senal
-con nombre propio y literatura detras. Mismo audio, mismos numeros, siempre.
-Devuelve MEDIDAS, no veredictos — el umbral y la decision son de quien conoce
-el contexto (el que llama), no de esta libreria.
+None of the measurements here is a model's opinion: they are named signal
+descriptors backed by literature. Same audio, same numbers, every time.
+Returns MEASUREMENTS, not verdicts — the threshold and decision belong to whoever
+knows the context (the caller), not this library.
 
-Por que existe (medido 2026-09-11 sobre audio real de telefono): el `no_speech`
-de whisper salio con el signo al reves — cortaba habla real y dejaba pasar
-frases inventadas sobre silencio. La energia en banda de voz separo
-conversacion de cuarto vacio con 0 % de solape por ventana.
+Why it exists (measured 2026-09-11 on real phone audio): Whisper's `no_speech`
+came out with the sign reversed — it cut real speech and let invented phrases
+through on silence. Energy in the voice band separated conversation from an
+empty room with 0 % overlap per window.
 
-Limites declarados (medidos en la revision adversarial del mismo dia):
+Declared limitations (measured in the adversarial review that same day):
 
-- Un tono periodico DENTRO o por encima de la banda (timbre, alarma, acople a
-  1 kHz) da `voice_band_ratio` ~1 y `voiced_ratio` ~1 con un F0 subarmonico:
-  la autocorrelacion tiene picos en todos los multiplos del periodo y el rango
-  70-350 Hz los recoge. Lo que lo delata es `spectral_flatness` (una sola
-  linea espectral). El que llama combina las tres medidas.
-- F0 a resolucion de lag entero (~1 Hz a 140 Hz, ~3 Hz a 350 Hz), sin
-  interpolacion ni seguimiento de candidatos entre tramos: una fuente con
-  SOLO armonicos pares se reporta una octava arriba, porque ese ES su periodo.
-- Tramo de 64 ms y salto de 16 ms fijos; una tasa de muestreo por llamada.
-- Memoria acotada por lotes de tramos: el pico no depende de la duracion.
+- A periodic tone WITHIN or above the band (ringtone, alarm, feedback at 1 kHz)
+  yields `voice_band_ratio` ~1 and `voiced_ratio` ~1 with a subharmonic F0:
+  autocorrelation has peaks at every multiple of the period, and the 70-350 Hz
+  range captures them. `spectral_flatness` (a single spectral line) gives it
+  away. The caller combines all three measurements.
+- F0 at integer lag resolution (~1 Hz at 140 Hz, ~3 Hz at 350 Hz), without
+  interpolation or candidate tracking between frames: a source with ONLY even
+  harmonics is reported an octave higher, because that IS its period.
+- Fixed 64 ms frame and 16 ms hop; one sample rate per call.
+- Memory bounded by batches of frames: peak memory does not depend on duration.
 """
 from __future__ import annotations
 
@@ -30,34 +30,34 @@ from dataclasses import dataclass
 
 import numpy as np
 
-VOICE_BAND_HZ = (300.0, 3400.0)   # banda telefonica: donde vive la inteligibilidad
-F0_RANGE_HZ = (70.0, 350.0)       # de voz grave adulta a voz aguda
-FRAME_S = 0.064                   # >= 4 periodos de 70 Hz: la autocorrelacion resuelve el F0 mas grave
+VOICE_BAND_HZ = (300.0, 3400.0)   # telephone band: where intelligibility lives
+F0_RANGE_HZ = (70.0, 350.0)       # from a low adult voice to a high voice
+FRAME_S = 0.064                   # >= 4 periods of 70 Hz: autocorrelation resolves the lowest F0
 HOP_S = 0.016
-VOICING_THRESHOLD = 0.5           # autocorrelacion normalizada minima para llamar sonoro a un tramo
-OCTAVE_COST = 0.05                # por octava de lag: entre dos picos casi iguales gana el periodo corto (Praat: 0.01)
-SILENCE_RMS = 1e-4                # -80 dBFS: por debajo un tramo no se MIDE (ni voz ni no-voz)
-BATCH_FRAMES = 512                # ~8 s a 16 kHz por lote: decenas de MB de pico, no gigas
-_FLOOR = 1e-12                    # suelo RELATIVO al maximo de cada espectro, no absoluto
+VOICING_THRESHOLD = 0.5           # minimum normalized autocorrelation for calling a frame voiced
+OCTAVE_COST = 0.05                # per lag octave: between two nearly equal peaks, the short period wins (Praat: 0.01)
+SILENCE_RMS = 1e-4                # -80 dBFS: below this a frame is not MEASURED (neither voice nor non-voice)
+BATCH_FRAMES = 512                # ~8 s at 16 kHz per batch: tens of MB peak, not gigabytes
+_FLOOR = 1e-12                    # floor RELATIVE to each spectrum's maximum, not absolute
 
 
 @dataclass(frozen=True)
 class VoiceEvidence:
-    """Todas las medidas son `None` cuando ningun tramo supera `SILENCE_RMS`:
-    «no pude medir» y «no hay voz» son cosas distintas, y `0.0` solo significa
-    la segunda."""
+    """All measurements are `None` when no frame exceeds `SILENCE_RMS`:
+    "could not measure" and "there is no voice" are different things, and `0.0`
+    only means the latter."""
 
-    voice_band_ratio: float | None   # energia 300-3400 Hz / total, ponderada por tramo
-    voiced_ratio: float | None       # fraccion de TODOS los tramos con F0 en 70-350 Hz
-    f0_median_hz: float | None       # mediana de F0 sobre los tramos sonoros; None si ninguno
-    spectral_flatness: float | None  # 0 = tonal/picudo, 1 = ruido blanco; ponderada por energia
-    frames: int                      # tramos analizados; 0 = audio mas corto que un tramo
+    voice_band_ratio: float | None   # 300-3400 Hz energy / total, weighted by frame
+    voiced_ratio: float | None       # fraction of ALL frames with F0 in 70-350 Hz
+    f0_median_hz: float | None       # median F0 over voiced frames; None if there are none
+    spectral_flatness: float | None  # 0 = tonal/peaked, 1 = white noise; energy-weighted
+    frames: int                      # frames analyzed; 0 = audio shorter than one frame
 
     def __post_init__(self) -> None:
-        for nombre in ("voice_band_ratio", "voiced_ratio", "spectral_flatness"):
-            v = getattr(self, nombre)
+        for name in ("voice_band_ratio", "voiced_ratio", "spectral_flatness"):
+            v = getattr(self, name)
             if v is not None and not (math.isfinite(v) and 0.0 <= v <= 1.0):
-                raise ValueError(f"{nombre} must be in [0, 1] or None")
+                raise ValueError(f"{name} must be in [0, 1] or None")
         if self.f0_median_hz is not None and not (
             math.isfinite(self.f0_median_hz) and self.f0_median_hz > 0.0
         ):
@@ -67,12 +67,12 @@ class VoiceEvidence:
 
 
 def _normalized_autocorrelation(frames: np.ndarray) -> np.ndarray:
-    """r[L] / sqrt(E(x[0:N-L]) * E(x[L:N])) por tramo — la normalizacion de Praat.
+    """r[L] / sqrt(E(x[0:N-L]) * E(x[L:N])) per frame — Praat normalization.
 
-    Dividir por r[0] a secas castiga los lags largos (el solape encoge con L) y
-    sesga el F0 hacia arriba. Con la energia de cada mitad, un tramo periodico
-    da ~1 en su periodo sea cual sea el lag. Sin ventana a proposito: esta
-    normalizacion ES la compensacion que una ventana obligaria a deshacer.
+    Dividing by r[0] alone penalizes long lags (overlap shrinks with L) and
+    biases F0 upward. With the energy of each half, a periodic frame yields ~1
+    at its period regardless of lag. No window on purpose: this normalization
+    IS the compensation that a window would force us to undo.
     """
     n = frames.shape[1]
     nfft = 2 * n
@@ -101,65 +101,65 @@ def compute_voice_evidence(samples: np.ndarray, sample_rate: int) -> VoiceEviden
     if len(x) < frame:
         return VoiceEvidence(None, None, None, None, 0)
 
-    vista = np.lib.stride_tricks.sliding_window_view(x, frame)[::hop]   # sin copia
+    view = np.lib.stride_tricks.sliding_window_view(x, frame)[::hop]   # no copy
     window = np.hanning(frame)
     freqs = np.fft.rfftfreq(frame, 1.0 / sample_rate)
     band = (freqs >= VOICE_BAND_HZ[0]) & (freqs <= VOICE_BAND_HZ[1])
     lags = np.arange(1, frame - 1)
     in_range = (lags >= lag_min) & (lags <= lag_max)
-    # Una serie armonica pura vale ~1 en su periodo Y en sus multiplos: sin coste
-    # de octava el argmax cae en el subarmonico por ruido de redondeo.
+    # A pure harmonic series yields ~1 at its period AND its multiples: without
+    # octave cost, argmax lands on the subharmonic due to rounding noise.
     octave_penalty = OCTAVE_COST * np.log2(lags / lag_min)
 
-    energia_total = energia_banda = planitud_ponderada = 0.0
-    medibles = sonoros = 0
-    lags_sonoros: list[np.ndarray] = []
+    total_energy = band_energy = weighted_flatness = 0.0
+    measurable_count = voiced_count = 0
+    voiced_lags: list[np.ndarray] = []
 
-    for inicio in range(0, len(vista), BATCH_FRAMES):
-        lote = vista[inicio:inicio + BATCH_FRAMES]
-        lote = lote - lote.mean(axis=1, keepdims=True)         # sin DC: el offset no es voz
-        rms = np.sqrt(np.mean(np.square(lote), axis=1))
-        medible = rms > SILENCE_RMS
-        if not medible.any():
+    for start in range(0, len(view), BATCH_FRAMES):
+        batch = view[start:start + BATCH_FRAMES]
+        batch = batch - batch.mean(axis=1, keepdims=True)      # no DC: the offset is not voice
+        rms = np.sqrt(np.mean(np.square(batch), axis=1))
+        measurable = rms > SILENCE_RMS
+        if not measurable.any():
             continue
-        lote = lote[medible]
-        medibles += int(len(lote))
+        batch = batch[measurable]
+        measurable_count += int(len(batch))
 
-        power = np.abs(np.fft.rfft(lote * window, axis=1)) ** 2
-        energia = power.sum(axis=1)
-        energia_total += float(energia.sum())
-        energia_banda += float(power[:, band].sum())
-        # Suelo relativo al maximo de CADA espectro: con un EPS absoluto la media
-        # geometrica dependia del volumen (4e9x entre 0 y -40 dB). Y se pondera
-        # por energia: una media plana seguia la fraccion de pausa, no el espectro.
+        power = np.abs(np.fft.rfft(batch * window, axis=1)) ** 2
+        energy = power.sum(axis=1)
+        total_energy += float(energy.sum())
+        band_energy += float(power[:, band].sum())
+        # Floor relative to the maximum of EACH spectrum: with an absolute EPS,
+        # the geometric mean depended on volume (4e9x between 0 and -40 dB). And it
+        # is energy-weighted: a plain mean tracked the pause fraction, not the spectrum.
         p = np.maximum(power, power.max(axis=1, keepdims=True) * _FLOOR)
-        planitud = np.exp(np.mean(np.log(p), axis=1)) / np.mean(p, axis=1)
-        planitud_ponderada += float((planitud * energia).sum())
+        flatness = np.exp(np.mean(np.log(p), axis=1)) / np.mean(p, axis=1)
+        weighted_flatness += float((flatness * energy).sum())
 
-        # F0: pico LOCAL de la autocorrelacion normalizada dentro del rango de voz.
-        # Exigir pico local (y no solo valor alto) es lo que deja fuera un zumbido
-        # de 50 Hz: alto en lags cortos pero bajando en cuesta, sin cima en rango.
-        r = _normalized_autocorrelation(lote)
+        # F0: LOCAL peak of normalized autocorrelation within the voice range.
+        # Requiring a local peak (not just a high value) is what excludes a 50 Hz hum:
+        # high at short lags but sloping downward, with no summit in range.
+        r = _normalized_autocorrelation(batch)
         peak = (r[:, 1:-1] > r[:, :-2]) & (r[:, 1:-1] >= r[:, 2:])
         candidates = np.where(peak & in_range, r[:, 1:-1] - octave_penalty, -np.inf)
         best_idx = np.argmax(candidates, axis=1)
-        filas = np.arange(len(lote))
-        hay_pico = np.isfinite(candidates[filas, best_idx])
-        voiced = hay_pico & (r[:, 1:-1][filas, best_idx] >= VOICING_THRESHOLD)
-        sonoros += int(voiced.sum())
+        rows = np.arange(len(batch))
+        has_peak = np.isfinite(candidates[rows, best_idx])
+        voiced = has_peak & (r[:, 1:-1][rows, best_idx] >= VOICING_THRESHOLD)
+        voiced_count += int(voiced.sum())
         if voiced.any():
-            lags_sonoros.append(best_idx[voiced] + 1)
+            voiced_lags.append(best_idx[voiced] + 1)
 
-    frames = int(len(vista))
-    if medibles == 0:
+    frames = int(len(view))
+    if measurable_count == 0:
         return VoiceEvidence(None, None, None, None, frames)
     f0 = None
-    if lags_sonoros:
-        f0 = float(np.median(sample_rate / np.concatenate(lags_sonoros)))
+    if voiced_lags:
+        f0 = float(np.median(sample_rate / np.concatenate(voiced_lags)))
     return VoiceEvidence(
-        voice_band_ratio=energia_banda / energia_total,
-        voiced_ratio=sonoros / frames,
+        voice_band_ratio=band_energy / total_energy,
+        voiced_ratio=voiced_count / frames,
         f0_median_hz=f0,
-        spectral_flatness=planitud_ponderada / energia_total,
+        spectral_flatness=weighted_flatness / total_energy,
         frames=frames,
     )
