@@ -299,31 +299,31 @@ def _tabla_realista():
 
 def test_recommend_cubre_todos_los_casos_declarados():
     recs = benchmark.recommend(_tabla_realista())
-    assert [r["caso"] for r in recs] == [c["caso"] for c in benchmark.USE_CASES]
-    assert all(r["que"] and r["motivo"] for r in recs)
+    assert [r["case"] for r in recs] == [c["case"] for c in benchmark.USE_CASES]
+    assert all(r["description"] and r["reason"] for r in recs)
 
 
 def test_recommend_conversacion_exige_motor_residente():
     # whispercpp es subprocess (carga el modelo por frase): aunque sea rapido, la
     # conversacion en vivo solo puede elegir faster-whisper.
-    recs = {r["caso"]: r for r in benchmark.recommend(_tabla_realista())}
-    conv = recs["conversacion_en_vivo"]["eleccion"]
+    recs = {r["case"]: r for r in benchmark.recommend(_tabla_realista())}
+    conv = recs["live_conversation"]["choice"]
     assert conv["engine"] == "faster-whisper"
     assert conv["model"] == "base"  # la mas rapida entre las fw medidas
 
 
 def test_recommend_calidad_elige_mejor_wer_y_desempata_por_velocidad():
     # large-v3 empata WER (0.355) en fw y whispercpp: gana el mas rapido (whispercpp).
-    recs = {r["caso"]: r for r in benchmark.recommend(_tabla_realista())}
-    top = recs["transcripcion_maxima_calidad"]["eleccion"]
+    recs = {r["case"]: r for r in benchmark.recommend(_tabla_realista())}
+    top = recs["max_quality_transcription"]["choice"]
     assert (top["engine"], top["model"]) == ("whispercpp", "large-v3")
 
 
 def test_recommend_diarizacion_fina_exige_word_timestamps():
     # whispercpp no tiene words: aunque su large-v3 sea mas rapido, la diarizacion
     # fina cae al fw large-v3.
-    recs = {r["caso"]: r for r in benchmark.recommend(_tabla_realista())}
-    dia = recs["transcripcion_con_diarizacion_fina"]["eleccion"]
+    recs = {r["case"]: r for r in benchmark.recommend(_tabla_realista())}
+    dia = recs["fine_diarization_transcription"]["choice"]
     assert (dia["engine"], dia["model"]) == ("faster-whisper", "large-v3")
 
 
@@ -331,10 +331,10 @@ def test_recommend_caso_sin_candidata_se_declara_con_razon():
     # Maquina hipotetica donde solo corrio whispercpp: los casos que exigen
     # capacidades de fw quedan sin candidata Y CON motivo, no inventados.
     solo_wcpp = [_fila("whispercpp", "large-v3", 10.66, wer=0.355)]
-    recs = {r["caso"]: r for r in benchmark.recommend(solo_wcpp)}
-    assert recs["conversacion_en_vivo"]["eleccion"] is None
-    assert "no measured config" in recs["conversacion_en_vivo"]["motivo"]
-    assert recs["transcripcion_maxima_calidad"]["eleccion"] is not None
+    recs = {r["case"]: r for r in benchmark.recommend(solo_wcpp)}
+    assert recs["live_conversation"]["choice"] is None
+    assert "no measured config" in recs["live_conversation"]["reason"]
+    assert recs["max_quality_transcription"]["choice"] is not None
 
 
 def test_recommend_ignora_configs_con_error():
@@ -342,8 +342,8 @@ def test_recommend_ignora_configs_con_error():
         _fila("faster-whisper", "large-v3", None, wer=0.355, error="murio"),
         _fila("faster-whisper", "small", 21.15, wer=0.419),
     ]
-    recs = {r["caso"]: r for r in benchmark.recommend(filas)}
-    top = recs["transcripcion_maxima_calidad"]["eleccion"]
+    recs = {r["case"]: r for r in benchmark.recommend(filas)}
+    top = recs["max_quality_transcription"]["choice"]
     assert top["model"] == "small"  # la rota no puede ganar por buen WER
 
 
@@ -358,4 +358,4 @@ def test_read_table_retrocompat_anade_recommendations(tmp_path, monkeypatch):
     benchmark.bench_path().write_text(_json.dumps(vieja), encoding="utf-8")
     table = benchmark.read_table()
     assert table["recommendations"]
-    assert table["recommendations"][0]["caso"] == "conversacion_en_vivo"
+    assert table["recommendations"][0]["case"] == "live_conversation"

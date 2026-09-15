@@ -208,7 +208,7 @@ def choose_route(m: Machine, model: str, *, engine: str = "auto", device: str = 
         label = "cuda" if m.platform == "win32" else "native"
         if not reason and device != label:
             reason = ("whisper.cpp (CUDA build) runs on the GPU; device=cuda" if label == "cuda"
-                      else "the whisper-cli on the PATH decides the device from its build; device=native")
+                      else "the whisper-cli on the PATH decides the device based on its build; device=native")
         factor, estimated = eta_factor(ENGINE_WHISPERCPP, label, "q5_0", model)
         return Route(ENGINE_WHISPERCPP, label, "q5_0", reason, factor, estimated)
     device = "cpu" if device == "auto" else device

@@ -715,7 +715,7 @@ def test_bench_config_con_error_sale_marcada(tmp_path, monkeypatch):
     result = runner.invoke(app, ["bench", "--show"])
     assert result.exit_code == 0
     assert "child died" in result.stdout  # la fila rota se ve, no se oculta
-    assert "1 with errors" in result.stdout
+    assert "1 with error" in result.stdout
 
 
 def test_whispercpp_avisa_el_remapeo_de_device(tmp_path, monkeypatch):

@@ -353,8 +353,8 @@ def transcribe(
         "--model",
         "-m",
         help="tiny | base | small | medium | large-v3 | distil-large-v3. large-v3 is the only "
-        "one that lost nothing in what the measurements say; small is a fast draft (5x faster, "
-        "changes what was said).",
+        "one that lost nothing in testing; small is a fast draft (5x faster, changes what "
+        "was said).",
     ),
     formats: str = typer.Option(
         "txt,srt,json", "--formats", "-f", help="Comma-separated formats (txt, srt, vtt, json)."
@@ -653,7 +653,8 @@ def _print_bench(table: dict) -> None:
     ok = sum(1 for r in table["results"] if not r.get("error"))
     con_error = len(table["results"]) - ok
     skipped = table.get("skipped", [])
-    console.print(f"{ok} viable · {con_error} with errors · {len(skipped)} skipped")
+    errores = "error" if con_error == 1 else "errors"
+    console.print(f"{ok} working · {con_error} with {errores} · {len(skipped)} skipped")
     for s in skipped:
         console.print(f"  skipped {s['engine']} {s['model']}: {s['reason']}", markup=False)
 
@@ -661,9 +662,9 @@ def _print_bench(table: dict) -> None:
     if recs:
         r_t = Table("Use case", "Config", "Reason", title="Which config for what?")
         for rec in recs:
-            e = rec.get("eleccion")
+            e = rec.get("choice")
             config = f"{e['engine']} {e['model']}" if e else "— no candidate —"
-            r_t.add_row(rec["caso"], config, rec["motivo"])
+            r_t.add_row(rec["case"], config, rec["reason"])
         Console(width=120).print(r_t)
 
 

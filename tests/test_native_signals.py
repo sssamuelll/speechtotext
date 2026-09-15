@@ -198,7 +198,7 @@ def test_cli_transcribe_lleva_las_senales_al_json(tmp_path, monkeypatch):
     )
     fake = SimpleNamespace(backend_id="faster-whisper", model_id="small", device="cpu", quant="int8",
                            model_version="1", engine_version="faster-whisper 1.2.0",
-                           caps=Caps("honrado", "honrado", "honrado"), warm=lambda: None,
+                           caps=Caps("honored", "honored", "honored"), warm=lambda: None,
                            transcribe=lambda samples, request: result)
     monkeypatch.setattr(core_transcribe, "make_backend", lambda *a, **k: fake)
 

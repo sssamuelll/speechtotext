@@ -230,89 +230,89 @@ def _sha1(path) -> str:
 # descarta por arquitectura, no por velocidad.
 USE_CASES = (
     {
-        "caso": "conversacion_en_vivo",
-        "que": "Voice conversation: resident engine, one short sentence at a time",
-        "requisitos": {"engine": "faster-whisper"},
-        "criterio": "mas_rapido",
+        "case": "live_conversation",
+        "description": "Voice conversation: resident engine, one short sentence at a time",
+        "requirements": {"engine": "faster-whisper"},
+        "criterion": "fastest",
     },
     {
-        "caso": "dictado_por_voz",
-        "que": "Dictation: more accurate than conversation, latency still comfortable",
-        "requisitos": {"engine": "faster-whisper"},
-        "criterio": "equilibrio",
+        "case": "voice_dictation",
+        "description": "Dictation: more accurate than conversation, latency still comfortable",
+        "requirements": {"engine": "faster-whisper"},
+        "criterion": "balanced",
     },
     {
-        "caso": "transcripcion_maxima_calidad",
-        "que": "Transcribing files at the best quality available",
-        "requisitos": {},
-        "criterio": "mejor_calidad",
+        "case": "max_quality_transcription",
+        "description": "Transcribing files at the best quality available",
+        "requirements": {},
+        "criterion": "best_quality",
     },
     {
-        "caso": "transcripcion_con_diarizacion_fina",
-        "que": "Who-said-what, word by word (fine --diarize, cuts on the speaker change)",
-        "requisitos": {"word_timestamps": True},
-        "criterio": "mejor_calidad",
+        "case": "fine_diarization_transcription",
+        "description": "Who-said-what, word by word (fine --diarize, cuts on the speaker change)",
+        "requirements": {"word_timestamps": True},
+        "criterion": "best_quality",
     },
     {
-        "caso": "audio_con_nombres_propios",
-        "que": ("Audio full of names/jargon: --hotwords exists, but measured runs produced "
+        "case": "audio_with_proper_nouns",
+        "description": ("Audio full of names/jargon: --hotwords exists, but measured runs produced "
                 "blackouts (n=3, 2026-09-11); compare against a run without them"),
-        "requisitos": {"hotwords": True},
-        "criterio": "mejor_calidad",
+        "requirements": {"hotwords": True},
+        "criterion": "best_quality",
     },
     {
-        "caso": "borrador_rapido",
-        "que": "Rough text as fast as possible, quality is secondary",
-        "requisitos": {},
-        "criterio": "mas_rapido",
+        "case": "fast_draft",
+        "description": "Rough text as fast as possible, quality is secondary",
+        "requirements": {},
+        "criterion": "fastest",
     },
 )
 
 
-def _cumple(r: dict, requisitos: dict) -> bool:
-    for clave, valor in requisitos.items():
-        if clave == "engine":
-            if r["engine"] != valor:
+def _meets(r: dict, requirements: dict) -> bool:
+    for key, value in requirements.items():
+        if key == "engine":
+            if r["engine"] != value:
                 return False
-        elif not (r.get("capabilities") or {}).get(clave):
+        elif not (r.get("capabilities") or {}).get(key):
             return False
     return True
 
 
-def _elegir(candidatas: list[dict], criterio: str) -> tuple[dict | None, str]:
-    """(ganadora, motivo). Los motivos citan numeros MEDIDOS: la recomendacion debe
-    poder defenderse sola ante quien lea la tabla."""
-    if not candidatas:
+def _choose(candidates: list[dict], criterion: str) -> tuple[dict | None, str]:
+    """(winner, reason). Reasons cite MEASURED numbers: the recommendation has to be
+    able to stand on its own for whoever reads the table."""
+    if not candidates:
         return None, "no measured config meets the requirements on this machine"
-    rapida = max(candidatas, key=lambda r: r["x_realtime"])
-    con_wer = [r for r in candidatas if r.get("wer_ref") is not None]
-    if criterio == "mas_rapido":
-        return rapida, f"the fastest that qualifies: {rapida['x_realtime']}x real time"
-    if criterio == "mejor_calidad":
-        if not con_wer:
-            return rapida, (
+    fastest = max(candidates, key=lambda r: r["x_realtime"])
+    with_wer = [r for r in candidates if r.get("wer_ref") is not None]
+    if criterion == "fastest":
+        return fastest, f"the fastest that qualifies: {fastest['x_realtime']}x real time"
+    if criterion == "best_quality":
+        if not with_wer:
+            return fastest, (
                 f"no measured WER among the candidates; picking the fastest "
-                f"({rapida['x_realtime']}x)"
+                f"({fastest['x_realtime']}x)"
             )
-        mejor = min(con_wer, key=lambda r: (r["wer_ref"], -r["x_realtime"]))
-        return mejor, (
-            f"best measured WER ({mejor['wer_ref']}) at {mejor['x_realtime']}x real time"
+        best = min(with_wer, key=lambda r: (r["wer_ref"], -r["x_realtime"]))
+        return best, (
+            f"best measured WER ({best['wer_ref']}) at {best['x_realtime']}x real time"
         )
-    if criterio == "equilibrio":
+    if criterion == "balanced":
         # ponytail: "comodo" = >= 10x tiempo real; umbral a ojo sobre lo medido hoy,
         # subelo si el dictado se siente lento.
-        comodas = [r for r in con_wer if r["x_realtime"] >= 10.0]
-        if comodas:
-            mejor = min(comodas, key=lambda r: r["wer_ref"])
-            return mejor, (
-                f"best WER ({mejor['wer_ref']}) while staying >= 10x real time "
-                f"({mejor['x_realtime']}x)"
+        comfortable = [r for r in with_wer if r["x_realtime"] >= 10.0]
+        if comfortable:
+            best = min(comfortable, key=lambda r: r["wer_ref"])
+            return best, (
+                f"best WER ({best['wer_ref']}) while staying >= 10x real time "
+                f"({best['x_realtime']}x)"
             )
-        if con_wer:
-            mejor = min(con_wer, key=lambda r: r["wer_ref"])
-            return mejor, f"best measured WER ({mejor['wer_ref']}); none reaches 10x"
-        return rapida, f"no measured WER; the fastest ({rapida['x_realtime']}x)"
-    return None, f"unknown criterion: {criterio}"
+        if with_wer:
+            best = min(with_wer, key=lambda r: r["wer_ref"])
+            return best, f"best measured WER ({best['wer_ref']}); none reaches 10x"
+        return fastest, f"no measured WER; the fastest ({fastest['x_realtime']}x)"
+    return None, f"unknown criterion: {criterion}"
 
 
 def recommend(results: list[dict]) -> list[dict]:
@@ -322,20 +322,20 @@ def recommend(results: list[dict]) -> list[dict]:
     una maquina donde solo corrio whispercpp): la ausencia explicada vale mas que
     una recomendacion inventada.
     """
-    vivas = [r for r in results if not r.get("error") and r.get("x_realtime")]
+    viable = [r for r in results if not r.get("error") and r.get("x_realtime")]
     out = []
-    for caso in USE_CASES:
-        eleccion, motivo = _elegir(
-            [r for r in vivas if _cumple(r, caso["requisitos"])], caso["criterio"]
+    for case in USE_CASES:
+        choice, reason = _choose(
+            [r for r in viable if _meets(r, case["requirements"])], case["criterion"]
         )
         out.append({
-            "caso": caso["caso"],
-            "que": caso["que"],
-            "eleccion": None if eleccion is None else {
-                "engine": eleccion["engine"], "model": eleccion["model"],
-                "quant": eleccion["quant"], "device": eleccion["device"],
+            "case": case["case"],
+            "description": case["description"],
+            "choice": None if choice is None else {
+                "engine": choice["engine"], "model": choice["model"],
+                "quant": choice["quant"], "device": choice["device"],
             },
-            "motivo": motivo,
+            "reason": reason,
         })
     return out
 
@@ -377,8 +377,11 @@ def read_table(path: Path | None = None) -> dict | None:
     if not path.exists():
         return None
     table = json.loads(path.read_text(encoding="utf-8"))
-    if "recommendations" not in table:
-        # Retrocompat: las tablas medidas antes de esta seccion la ganan al leerse,
-        # sin re-medir nada — las recomendaciones son derivadas, la medicion manda.
+    recs = table.get("recommendations")
+    if recs is None or (recs and "case" not in recs[0]):
+        # Retrocompat: a table measured before this section existed, or written with
+        # the old Spanish recommendation keys (caso/que/motivo/eleccion), regains a
+        # fresh block on read without re-measuring anything — recommendations are
+        # derived from `results` (untouched by the key rename), the measurement rules.
         table["recommendations"] = recommend(table.get("results") or [])
     return table
