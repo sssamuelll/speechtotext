@@ -21,6 +21,18 @@ PENDING lists the files nobody has translated yet. Each task of the plan deletes
 its line. When the list empties, the test stops forgiving -- and that, not
 anyone's opinion, is what "done" means here.
 
+PENDING is temporary and file-wide: a file waits its turn, then comes off the
+list whole. Some Spanish is neither. A line can mark itself permanently exempt:
+`# spanish-is-data: <reason>` excludes that line, and only that line, from the
+three signals above -- never from the real-names check below, because a real
+name is never data. The reason is not decoration; a marker with nothing after
+the colon is not a marker, and the line under it is still caught like any other.
+The test for using this marker is whether translating the line would BREAK
+something -- a migration that reads a schema by its old key spelling, an
+accent-stripping test that needs a real accent to strip -- not whether
+translating it would merely read oddly. Inconvenient is not a reason;
+unfinished is not data.
+
 Deliberately out of scope: `docs/superpowers/` and `.superpowers/`. Section 9.5
 strips both from the published tree, so translating them is wasted work -- and a
 sweep that includes them ends up editing the design document to silence a grep,
@@ -60,6 +72,12 @@ PENDING = (
 
 # Terms English writes with an accent. Not leftover Spanish.
 ALLOWED = ("Bézier",)
+
+# Line-scoped opt-out: `# spanish-is-data: <reason>` exempts the line it is on,
+# and only that line, from the three signals below. `\s*\S` after the colon is
+# the enforcement -- a colon followed by nothing (or only whitespace) does not
+# match, so a reasonless marker is not a marker and its line stays exposed.
+SPANISH_IS_DATA = re.compile(r"#\s*spanish-is-data:\s*\S")
 
 ACCENTS = re.compile("[ñÑ¿¡áéíóúüÁÉÍÓÚÜ]")
 
@@ -125,11 +143,25 @@ def _files():
             yield rel
 
 
+def _strip_data_lines(text: str) -> str:
+    """Blank every line `SPANISH_IS_DATA` matches, keeping every other line and
+    every line break exactly as they were -- so line numbers in a failure
+    message still point at the right place, and a marked line's neighbors are
+    never touched."""
+    out = []
+    for line in text.splitlines(keepends=True):
+        if SPANISH_IS_DATA.search(line):
+            out.append("\n" if line.endswith("\n") else "")
+        else:
+            out.append(line)
+    return "".join(out)
+
+
 def _read(rel: str) -> str:
     text = (ROOT / rel).read_text(encoding="utf-8")
     for allowed in ALLOWED:
         text = text.replace(allowed, "")
-    return text
+    return _strip_data_lines(text)
 
 
 FILES = sorted(_files())
@@ -158,6 +190,43 @@ def test_no_spanish_function_words(rel):
 def test_no_spanish_vocabulary(rel):
     found = {m.group(0).lower() for m in GLOSSARY.finditer(_read(rel))}
     assert not found, f"{rel} still uses the Spanish glossary: {', '.join(sorted(found))}"
+
+
+def test_spanish_is_data_hides_only_its_own_line(tmp_path):
+    """Proof, not trust: written against a throwaway file this test creates and
+    the OS cleans up, never against anything in the real tree -- so the proof
+    itself never becomes a second file someone has to keep translated. One line
+    carries every one of the three signals and the marker; its neighbor carries
+    the same three signals with no marker. Stripping must silence the first
+    line completely and leave the second exactly as loud as before."""
+    marked = 'x = "un hueco que está para nada"  # spanish-is-data: fixture for this test\n'
+    unmarked = 'y = "otro archivo como este, señor"\n'
+    scratch = tmp_path / "marker_scope.py"
+    scratch.write_text(marked + unmarked, encoding="utf-8")
+
+    marked_out, unmarked_out = _strip_data_lines(scratch.read_text(encoding="utf-8")).splitlines()
+
+    assert not ACCENTS.search(marked_out), "the marker did not hide its own accent"
+    assert not GLOSSARY.search(marked_out), "the marker did not hide its own vocabulary"
+    assert not FUNCTION_WORDS.search(marked_out), "the marker did not hide its own function words"
+
+    assert ACCENTS.search(unmarked_out), "stripping reached past the marked line into its neighbor"
+    assert GLOSSARY.search(unmarked_out), "stripping reached past the marked line into its neighbor"
+    assert len(FUNCTION_WORDS.findall(unmarked_out)) >= 2, (
+        "stripping reached past the marked line into its neighbor"
+    )
+
+
+def test_spanish_is_data_needs_a_reason(tmp_path):
+    """A colon with nothing after it is not a reason, so it is not a marker:
+    the line underneath stays exposed, exactly like any other untranslated
+    line. Same throwaway-file discipline as the test above."""
+    scratch = tmp_path / "marker_reason.py"
+    scratch.write_text('x = "un hueco"  # spanish-is-data:\n', encoding="utf-8")
+
+    stripped = _strip_data_lines(scratch.read_text(encoding="utf-8"))
+
+    assert GLOSSARY.search(stripped), "an empty reason exempted the line anyway"
 
 
 def test_pending_only_names_things_that_exist():

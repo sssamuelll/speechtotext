@@ -8,7 +8,7 @@ def _seg(s, e, t):
 
 
 def test_normalize_strips_accents_and_case():
-    assert normalize("Sísmica ÑOÑO") == "sismica nono"
+    assert normalize("Sísmica ÑOÑO") == "sismica nono"  # spanish-is-data: the accents are the input being stripped, not prose
 
 
 def test_search_groups_contiguous_into_one_region():
@@ -40,7 +40,7 @@ def test_search_ranks_denser_region_first():
 
 
 def test_search_accent_and_case_insensitive():
-    regs = search([_seg(0, 1, "la SÍSMICA de hoy")], "sismica", gap=60, top=5)
+    regs = search([_seg(0, 1, "la SÍSMICA de hoy")], "sismica", gap=60, top=5)  # spanish-is-data: accent+case mismatch against the query is exactly what this proves
     assert len(regs) == 1
 
 

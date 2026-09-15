@@ -371,7 +371,10 @@ def test_read_table_migrates_the_old_spanish_keys(tmp_path, monkeypatch):
     old_table = {
         "schema_version": benchmark.SCHEMA_VERSION, "results": _realistic_table(), "skipped": [],
         "recommendations": [
-            {"caso": "conversacion_en_vivo", "que": "algo", "eleccion": None, "motivo": "algo"},
+            # read_table() detects this row by its key spelling ("case" not in recs[0]):
+            # translate these keys and the row starts looking like the new format, and
+            # the migration branch this test exists to cover never runs again.
+            {"caso": "conversacion_en_vivo", "que": "algo", "eleccion": None, "motivo": "algo"},  # spanish-is-data: pre-rename bench.json keys, matched by exact spelling
         ],
     }
     benchmark.bench_path().parent.mkdir(parents=True, exist_ok=True)
