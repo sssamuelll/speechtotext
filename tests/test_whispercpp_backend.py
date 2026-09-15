@@ -87,7 +87,7 @@ def test_fuera_de_win32_device_native_y_version_sin_pin(monkeypatch):
     monkeypatch.setattr(sys, "platform", "darwin")
     backend = _backend(lambda *a, **k: None)
     assert backend.device == "native"
-    assert backend.engine_version == "whisper.cpp (PATH, sin pin)"
+    assert backend.engine_version == "whisper.cpp (PATH, unpinned)"
     assert backend.model_version == enginepin.MODELS_PIN["large-v3-q5_0"]["sha256"]  # el ggml sí va pinneado
 
 

@@ -276,15 +276,15 @@ def transcribe_file(
     else:
         voice = "[yellow]coverage unknown (duration not measured)[/yellow]"
     if language != "auto":
-        language = f"Language: [bold]{t.language}[/bold] (forced)"
+        language_line = f"Language: [bold]{t.language}[/bold] (forced)"
     else:
-        language = f"Language detected: [bold]{t.language}[/bold]"
+        language_line = f"Language detected: [bold]{t.language}[/bold]"
         if t.language_probability is not None:
-            language += f" (prob={t.language_probability:.2f})"
+            language_line += f" (prob={t.language_probability:.2f})"
             if t.language_probability < 0.5:
-                language += " — uncertain: set it with -l <code>"
+                language_line += " — uncertain: set it with -l <code>"
     console.print(
-        f"{language} · duration {t.duration:.1f}s · "
+        f"{language_line} · duration {t.duration:.1f}s · "
         f"{len(t.segments)} segments · {voice} · engine {route.engine}"
     )
     if t.duration:

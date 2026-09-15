@@ -99,7 +99,7 @@ class WhisperCppBackend:
     @property
     def engine_version(self) -> str:
         if sys.platform != "win32":
-            return "whisper.cpp (PATH, sin pin)"   # system binary: version not guaranteed
+            return "whisper.cpp (PATH, unpinned)"   # system binary: version not guaranteed
         return f"whisper.cpp {enginepin.ENGINE_PIN['version']}"
 
     @property
