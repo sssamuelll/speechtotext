@@ -1,4 +1,4 @@
-"""Segmento de transcripción con hablante opcional."""
+"""Transcription segment with an optional speaker."""
 from __future__ import annotations
 
 import math
@@ -11,31 +11,32 @@ class LabeledSegment:
     end: float
     text: str
     speaker: str | None = None
-    # Extensión del segmento que el ASR emitió, antes de que la diarización recomprima
-    # el span a sus palabras (C-13). Al final y con default: todas las construcciones
-    # existentes son posicionales y no se rompe ninguna. None = "soy el span original".
+    # Extent of the segment emitted by ASR, before diarization recompresses
+    # the span to its words (C-13). At the end and with a default: all existing
+    # constructions are positional and none break. None = "I am the original span."
     src_dur: float | None = None
-    # Señales nativas de faster-whisper (Fase 2, G5): whisper.cpp no las emite -> None
-    # de punta a punta. Al final, mismo patrón que src_dur.
+    # Native signals from faster-whisper (Phase 2, G5): whisper.cpp does not emit them -> None
+    # end to end. At the end, following the same pattern as src_dur.
     no_speech: float | None = None
     avg_logprob: float | None = None
     compression_ratio: float | None = None
 
 
 def _finite(value: float | None) -> float | None:
-    """NaN/inf entran como None. Un no finito no es una medida degradada, es la ausencia
-    de medida: dejarlo pasar escribe los tokens NaN/Infinity en el JSON (que json.dumps
-    acepta y el RFC 8259 no, con lo que jq y JSON.parse revientan) y además apaga
-    is_suspect justo donde más hace falta, porque `NaN > 0.6` es False. La otra ruta del
-    repo ya lo rechaza en asr/types.py::_validate_native_signals; aquí se omite, que es
-    la respuesta de G5 y no obliga a nadie a manejar una excepción a mitad del pipe."""
+    """NaN/inf come in as None. A non-finite value is not a degraded measurement, it is
+    the absence of a measurement: letting it through writes NaN/Infinity tokens to JSON
+    (json.dumps accepts them but RFC 8259 does not, so jq and JSON.parse blow up) and also
+    disables is_suspect exactly where it is needed most, because `NaN > 0.6` is False. The
+    other path through the repo already rejects it in asr/types.py::_validate_native_signals;
+    here it is omitted, which is G5's answer and does not force anyone to handle an exception
+    halfway through the pipeline."""
     return value if value is not None and math.isfinite(value) else None
 
 
 def native_signals(seg) -> tuple[float | None, float | None, float | None]:
-    """Lee (no_speech, avg_logprob, compression_ratio) de un Segment, en sus dos
-    dialectos: el crudo de faster-whisper (no_speech_prob) y el nuestro (no_speech).
-    Ausente en ambos -> None (G5: señal que el motor no emite se omite, no se rellena)."""
+    """Read (no_speech, avg_logprob, compression_ratio) from a Segment, in its two
+    dialects: raw faster-whisper (no_speech_prob) and ours (no_speech).
+    Absent from both -> None (G5: a signal the engine does not emit is omitted, not filled in)."""
     no_speech = getattr(seg, "no_speech_prob", None)
     if no_speech is None:
         no_speech = getattr(seg, "no_speech", None)

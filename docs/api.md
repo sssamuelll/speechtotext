@@ -1,27 +1,27 @@
-# Contrato para consumidores
+# Contract for consumers
 
-Lo que una app que depende de `speechtotext` puede dar por garantizado, y lo que
-no. Si algo de este documento cambia, el cambio se anota en
-[`CHANGELOG.md`](../CHANGELOG.md) y sale en un tag nuevo — nadie pinnea `@main`.
+What an app that depends on `speechtotext` can take as guaranteed, and what it
+can't. If anything in this document changes, the change gets a line in
+[`CHANGELOG.md`](../CHANGELOG.md) and ships in a new tag — nobody pins `@main`.
 
-Lo que no está aquí es implementación: puede cambiar sin aviso.
+What isn't here is implementation: it can change without notice.
 
 ---
 
-## Esquema del JSON
+## JSON schema
 
-Lo produce `speechtotext transcribe -f json` y lo escribe
-`core.formats.write_json`. Las claves opcionales **se omiten** cuando no hay
-valor; ninguna aparece en `null`.
+Produced by `speechtotext transcribe -f json` and written by
+`core.formats.write_json`. Optional keys **are omitted** when there is no
+value; none of them ever appears as `null`.
 
 ```json
 {
-  "language": "es",
+  "language": "en",
   "language_probability": 0.9987,
   "duration": 1843.2,
   "speech_s": 1502.7,
   "gaps": [[312.4, 340.1], [905.0, 913.8]],
-  "speakers": ["Samuel", "Hablante 2"],
+  "speakers": ["Alice", "Speaker 2"],
   "engine": {
     "name": "faster-whisper",
     "version": "1.2.0",
@@ -36,8 +36,8 @@ valor; ninguna aparece en `null`.
       "id": 0,
       "start": 0.0,
       "end": 3.42,
-      "text": "Hola, ¿cómo estás?",
-      "speaker": "Samuel",
+      "text": "Hi, how are you?",
+      "speaker": "Alice",
       "no_speech": 0.0142,
       "avg_logprob": -0.1877,
       "compression_ratio": 1.2044,
@@ -47,91 +47,95 @@ valor; ninguna aparece en `null`.
 }
 ```
 
-### Nivel superior
+### Top level
 
-| Clave | Tipo | Presencia |
+| Key | Type | Presence |
 |---|---|---|
-| `language` | `str` | Siempre. |
-| `language_probability` | `float` | Omitida si el motor no la reporta (pasa con `--language auto` en la ruta troceada). |
-| `duration` | `float` | Siempre. Duración del archivo, en segundos. |
-| `speech_s` | `float` | Siempre. Suma de la duración de los segmentos con voz. |
-| `gaps` | `[[float, float], …]` | Siempre. Huecos sin voz de 5 s o más, como pares `[inicio, fin]`. |
-| `speakers` | `[str, …]` | Solo si la corrida produjo hablantes. |
-| `engine` | `object` | Solo si el CLI lo informa. Incluye `diarization: "segment"` o `"word"` cuando se usó `--diarize`. `selection` es `"auto"` si el motor lo eligió el sondeo (`--engine auto`) y `"explicit"` si lo pidió el usuario. |
-| `segments` | `[object, …]` | Siempre. |
+| `language` | `str` | Always. |
+| `language_probability` | `float` | Omitted if the engine does not report it (happens with `--language auto` on the chunked route). |
+| `duration` | `float` | Always. Duration of the file, in seconds. |
+| `speech_s` | `float` | Always. Sum of the duration of the segments with speech. |
+| `gaps` | `[[float, float], …]` | Always. Gaps with no speech of 5 s or more, as `[start, end]` pairs. |
+| `speakers` | `[str, …]` | Only if the run produced speakers. |
+| `engine` | `object` | Only if the CLI reports it. Includes `diarization: "segment"` or `"word"` when `--diarize` was used. `selection` is `"auto"` if the engine was chosen by the probe (`--engine auto`) and `"explicit"` if the user asked for it. |
+| `segments` | `[object, …]` | Always. |
 
-### Cada segmento
+### Each segment
 
-| Clave | Tipo | Presencia |
+| Key | Type | Presence |
 |---|---|---|
-| `id` | `int` | Siempre. |
-| `start`, `end` | `float` | Siempre. Segundos. |
-| `text` | `str` | Siempre. |
-| `speaker` | `str` | Solo con diarización. |
-| `no_speech` | `float` | Omitida si el motor no la midió. Redondeada a 4 decimales. |
-| `avg_logprob` | `float` | Igual. |
-| `compression_ratio` | `float` | Igual. |
-| `suspect` | `true` | Solo cuando dispara la heurística. **Nunca aparece como `false`.** |
+| `id` | `int` | Always. |
+| `start`, `end` | `float` | Always. Seconds. |
+| `text` | `str` | Always. |
+| `speaker` | `str` | Only with diarization. |
+| `no_speech` | `float` | Omitted if the engine did not measure it. Rounded to 4 decimals. |
+| `avg_logprob` | `float` | Same. |
+| `compression_ratio` | `float` | Same. |
+| `suspect` | `true` | Only when the heuristic fires. **Never appears as `false`.** |
 
-`whisper.cpp` no emite ninguna de las tres señales nativas: bajo
-`--engine whispercpp` esas claves nunca están.
+`whisper.cpp` does not emit any of the three native signals: under
+`--engine whispercpp` those keys are never present.
 
 ### `suspect`
 
-Marca un segmento para que lo revises, no dictamina que esté mal. Dispara si:
+Flags a segment for you to review; it does not rule that it's wrong. It fires if:
 
-- `no_speech > 0.6`, o
-- el segmento dura 10 s o más y tiene **menos de un carácter por segundo**.
+- `no_speech > 0.6`, or
+- the segment lasts 10 s or more and has **fewer than one character per second**.
 
-El segundo criterio es una heurística de densidad sin calibrar. Trátalo como una
-sugerencia de revisión; si necesitas una decisión con precisión medida, usa el
-arnés de evaluación de tu consumidor, no este campo.
+The second criterion is an uncalibrated density heuristic. Treat it as a
+review suggestion; if you need a decision with measured precision, use your
+consumer's evaluation harness, not this field.
 
 ---
 
-## Capa `audio/`: medidas sobre la señal, sin veredicto
+## The `audio/` layer: measurements on the signal, no verdict
 
-`speechtotext.audio` mide y transforma audio; **nunca decide si transcribir**. Todo lo
-que exporta es inmutable, y lo que se construye a mano se valida al construirse: un tipo
-mal formado revienta donde se crea, no tres capas más abajo. Los tipos que solo salen de
-una función (`GainResult`, `PreInferenceDecision`) no validan nada — nadie los arma.
+`speechtotext.audio` measures and transforms audio; **it never decides
+whether to transcribe**. Everything it exports is immutable, and whatever is
+built by hand validates itself at construction: a malformed type blows up
+where it is created, not three layers down. The types that only ever come
+out of a function (`GainResult`, `PreInferenceDecision`) validate nothing —
+nobody builds them by hand.
 
 ```python
 from speechtotext.audio import decode_audio, AudioDecodeError
 
-with open("reunion.m4a", "rb") as stream:
+with open("meeting.m4a", "rb") as stream:
     view = decode_audio(stream, sample_rate=16000)   # -> AudioView
-samples = view.samples                               # float32 mono, de solo lectura
+samples = view.samples                               # float32 mono, read-only
 ```
 
-### Decodificación
+### Decoding
 
-- **`decode_audio(stream, *, sample_rate, av_module=None) -> AudioView`** — entra un
-  stream binario *seekable* (no una ruta: quien abre, cierra), sale un `AudioView` mono
-  float32 al `sample_rate` pedido. `av_module` es el seam de los tests.
-- **`AudioDecodeError(RuntimeError)`** — el archivo no se pudo abrir o no trae audio.
+- **`decode_audio(stream, *, sample_rate, av_module=None) -> AudioView`** — takes a
+  *seekable* binary stream (not a path: whoever opens it, closes it), returns a mono
+  float32 `AudioView` at the requested `sample_rate`. `av_module` is the tests' seam.
+- **`AudioDecodeError(RuntimeError)`** — the file could not be opened or carries no audio.
 
-### Un clip y sus vistas
+### A clip and its views
 
-El mismo audio se mide, se identifica y se transcribe con preprocesados distintos.
-`AudioClip` los guarda juntos con su proveniencia, para que cada número se pueda rastrear
-hasta las muestras de las que salió.
+The same audio is measured, identified and transcribed with different preprocessing.
+`AudioClip` keeps them together with their provenance, so every number can be traced
+back to the samples it came from.
 
 - **`AudioClip(started_at, ended_at, source_id, speech_regions, quality, views)`** —
-  `.view(name)` devuelve la vista pedida y lanza `KeyError` si no está o no existe.
-  Valida al construirse que las duraciones de las vistas y `quality.duration_ms` cuadren
-  con el clip, y que las regiones de habla no se solapen ni se salgan.
-- **`AudioViews(capture, analysis, asr, identity=None, spoof=None)`** — las tres primeras
-  son obligatorias.
+  `.view(name)` returns the requested view and raises `KeyError` if it is missing or
+  does not exist. Validates at construction that the views' durations and
+  `quality.duration_ms` match the clip, and that the speech regions neither overlap
+  nor run past the clip.
+- **`AudioViews(capture, analysis, asr, identity=None, spoof=None)`** — the first
+  three are mandatory.
 - **`AudioViewName`** — `Literal["capture", "analysis", "identity", "spoof", "asr"]`.
-- **`AudioView`** — `samples` (float32 mono, respaldado por `bytes`: no se puede escribir),
-  `sample_rate`, `provenance`. **Sin constructor público**: se crea con
-  `AudioView.capture(samples, sample_rate, *, step)` o con
+- **`AudioView`** — `samples` (float32 mono, backed by `bytes`: cannot be written to),
+  `sample_rate`, `provenance`. **No public constructor**: it is created with
+  `AudioView.capture(samples, sample_rate, *, step)` or with
   `AudioView.derive(parent, samples, *, sample_rate=None, steps, models=(), thresholds=None)`.
-  Propiedades: `duration_s` y `pipeline_fingerprint`.
-- **`SpeechRegion(start_s, end_s)`** — ordenable; exige tiempos finitos y `0 <= start_s < end_s`.
+  Properties: `duration_s` and `pipeline_fingerprint`.
+- **`SpeechRegion(start_s, end_s)`** — orderable; requires finite times and
+  `0 <= start_s < end_s`.
 
-### Calidad y ganancia
+### Quality and gain
 
 ```python
 from speechtotext.audio import apply_fixed_gain, compute_audio_quality
@@ -145,280 +149,299 @@ report = compute_audio_quality(samples, gain.samples, 16000, regions,
 - **`AudioQualityReport`** — `duration_ms`, `effective_voice_ms`, `input_rms_dbfs`,
   `processed_rms_dbfs`, `peak_dbfs`, `clipping_ratio`, `noise_floor_dbfs`, `snr_db`,
   `requested_gain_db`, `applied_gain_db`, `dropped_frames`, `discontinuities`, `warnings`.
-  `noise_floor_dbfs` es `None` cuando el clip es habla de punta a punta y no queda ni una
-  muestra de silencio que medir; `snr_db` es `None` cuando falta cualquiera de los dos
-  lados de la resta — sin silencio, o sin ninguna región de habla. **`None` no es cero**:
-  la misma regla que gobierna la evidencia de voz.
+  `noise_floor_dbfs` is `None` when the clip is speech end to end and there is not one
+  sample of silence left to measure; `snr_db` is `None` when either side of the
+  subtraction is missing — no silence, or no speech region at all. **`None` is not
+  zero**: the same rule that governs voice evidence.
 - **`apply_fixed_gain(samples, gain_db, *, max_gain_db=18.0, peak_limit_dbfs=-1.0) -> GainResult`**
-- **`GainResult(samples, requested_gain_db, applied_gain_db, limited)`** — `limited` es
-  `True` cuando el limitador tuvo que recortar la ganancia pedida.
+- **`GainResult(samples, requested_gain_db, applied_gain_db, limited)`** — `limited` is
+  `True` when the limiter had to clip the requested gain.
 
-### Puerta de calidad
+### Quality gate
 
-Decide si un clip merece inferencia, contra umbrales que pone quien llama. Los cuatro
-umbrales de señal no traen valor por defecto a propósito — medir es de la librería,
-decidir es de quien la usa. Los dos contadores de transporte sí lo traen, en `0`: un
-fotograma perdido no es aceptable por omisión.
+Decides whether a clip deserves inference, against thresholds the caller sets. The
+four signal thresholds deliberately carry no default — measuring is the library's
+job, deciding is the caller's. The two transport counters do carry one, at `0`: a
+dropped frame is not acceptable by default.
 
 - **`QualityThresholds(min_effective_voice_ms, min_processed_rms_dbfs, min_snr_db, max_clipping_ratio, max_dropped_frames=0, max_discontinuities=0)`**
 - **`evaluate_pre_inference(report, thresholds) -> PreInferenceDecision`**
 - **`PreInferenceDecision(eligible, reason_codes)`**
-- **`QualityReason`** — un `Literal` con ocho códigos:
+- **`QualityReason`** — a `Literal` with eight codes:
   `"silence"`, `"too_short"`, `"level_too_low"`, `"snr_unavailable"`, `"snr_too_low"`,
-  `"clipping"`, `"dropped_audio"`, `"discontinuous_audio"`. La puerta acumula
-  **todas** las razones que aplican, no la primera.
+  `"clipping"`, `"dropped_audio"`, `"discontinuous_audio"`. The gate accumulates
+  **all** the reasons that apply, not just the first.
 
-### Proveniencia
+### Provenance
 
-La huella de un pipeline de audio: qué pasos, qué modelos, qué umbrales. Sirve para afirmar
-que dos resultados salieron del mismo tratamiento sin guardar el audio.
+The fingerprint of an audio pipeline: which steps, which models, which thresholds. Lets
+you assert that two results came out of the same treatment without keeping the audio.
 
-- **`PipelineStep(name, version, parameters)`** — `parameters` tiene que ser JSON
-  serializable; se congela al construirse.
-- **`ModelRef(model_id, fingerprint)`** — `fingerprint` es un sha256 en hex minúsculas de
-  64 caracteres. La proveniencia no sabe de manifiestos ni de sistemas de archivos: quien
-  tenga un modelo verificado lo reduce a esto, y así la huella se puede calcular en
-  cualquier máquina.
+- **`PipelineStep(name, version, parameters)`** — `parameters` has to be JSON
+  serializable; it freezes at construction.
+- **`ModelRef(model_id, fingerprint)`** — `fingerprint` is a sha256 in lowercase hex,
+  64 characters. Provenance knows nothing about manifests or filesystems: whoever
+  has a verified model reduces it to this, and the fingerprint can then be computed
+  on any machine.
 - **`PipelineProvenance`** — `sample_rate`, `parent_fingerprint`, `steps`,
-  `model_fingerprints`, `thresholds`. **Sin constructor público**:
-  `PipelineProvenance.capture(*, sample_rate, step, models=(), thresholds=None)` y
+  `model_fingerprints`, `thresholds`. **No public constructor**:
+  `PipelineProvenance.capture(*, sample_rate, step, models=(), thresholds=None)` and
   `PipelineProvenance.derive(parent, *, sample_rate, steps, models=(), thresholds=None)`.
-  Propiedad `fingerprint` (sha256 del payload ordenado), más `to_dict()` y
+  Property `fingerprint` (sha256 of the sorted payload), plus `to_dict()` and
   `from_dict(data, *, parent, models)`.
 
 ---
 
-## Evidencia de voz
+## Voice evidence
 
-`speechtotext.audio.compute_voice_evidence` describe una señal de audio. **No
-decide nada**: no clasifica voz contra no-voz, no es un VAD, y no combina sus
-propias medidas en un booleano. El umbral y la decisión son de quien llama.
+`speechtotext.audio.compute_voice_evidence` describes an audio signal. **It
+decides nothing**: it does not classify voice against non-voice, it is not a
+VAD, and it does not combine its own measurements into a boolean. The
+threshold and the decision belong to the caller.
 
 ```python
 from speechtotext.audio import compute_voice_evidence
 
-evidencia = compute_voice_evidence(ventana, sample_rate=16000)
+evidence = compute_voice_evidence(window, sample_rate=16000)
 
-if evidencia.voice_band_ratio is None:
-    ...  # no se pudo medir: la ventana está por debajo de -80 dBFS
-elif evidencia.voice_band_ratio >= 0.4:
-    ...  # hay energía donde vive la voz
+if evidence.voice_band_ratio is None:
+    ...  # could not measure: the window is below -80 dBFS
+elif evidence.voice_band_ratio >= 0.4:
+    ...  # there is energy where voice lives
 ```
 
-### Entrada
+### Input
 
 `compute_voice_evidence(samples: np.ndarray, sample_rate: int) -> VoiceEvidence`
 
-- `samples`: mono, 1-D, cualquier dtype convertible a `float64`, todo finito.
-  Estéreo, `NaN` o `inf` levantan `ValueError`.
-- `sample_rate`: entero positivo, y suficientemente alto para resolver F0 en
-  70-350 Hz. Una tasa demasiado baja levanta `ValueError`.
-- Duración mínima: un tramo de 64 ms. Por debajo de eso devuelve todas las
-  medidas en `None` con `frames = 0`, sin error.
+- `samples`: mono, 1-D, any dtype convertible to `float64`, all finite.
+  Stereo, `NaN` or `inf` raise `ValueError`.
+- `sample_rate`: positive integer, high enough to resolve F0 in 70-350 Hz. A
+  rate that is too low raises `ValueError`.
+- Minimum duration: one 64 ms frame. Below that it returns every measurement
+  as `None` with `frames = 0`, no error.
 
-### Campos de `VoiceEvidence`
+### `VoiceEvidence` fields
 
-| Campo | Tipo | Qué mide |
+| Field | Type | What it measures |
 |---|---|---|
-| `voice_band_ratio` | `float \| None` | Energía entre 300 y 3400 Hz sobre la energía total, ponderada por tramo (FFT con ventana de Hann). La banda telefónica donde vive la inteligibilidad. |
-| `voiced_ratio` | `float \| None` | Fracción de **todos** los tramos donde se detectó F0 entre 70 y 350 Hz. |
-| `f0_median_hz` | `float \| None` | Mediana de F0 sobre los tramos sonoros. `None` si ninguno lo fue. |
-| `spectral_flatness` | `float \| None` | Media geométrica sobre media aritmética del espectro. 0 es tonal puro, 1 es ruido blanco. |
-| `frames` | `int` | Tramos analizados. Solo es 0 si el audio dura menos que un tramo. |
+| `voice_band_ratio` | `float \| None` | Energy between 300 and 3400 Hz over total energy, weighted per frame (FFT with a Hann window). The telephone band where intelligibility lives. |
+| `voiced_ratio` | `float \| None` | Fraction of **all** frames where F0 was detected between 70 and 350 Hz. |
+| `f0_median_hz` | `float \| None` | Median F0 over the voiced frames. `None` if none were voiced. |
+| `spectral_flatness` | `float \| None` | Geometric mean over arithmetic mean of the spectrum. 0 is pure tone, 1 is white noise. |
+| `frames` | `int` | Frames analyzed. Only 0 if the audio is shorter than one frame. |
 
-Las tres razones van en `[0, 1]`; `f0_median_hz` es positivo.
+The three ratios fall in `[0, 1]`; `f0_median_hz` is positive.
 
-### `None` no es cero
+### `None` is not zero
 
-Las cuatro medidas son `None` **a la vez** cuando ningún tramo supera -80 dBFS:
-eso es *no pude medir*, y es distinto de *medí y no hay voz*, que se reporta como
-`0.0`. Un consumidor que trate `None` como cero convierte silencio en un veredicto
-negativo, y ese es exactamente el error que el módulo existe para no cometer.
+The four measurements are `None` **all at once** when no frame exceeds -80
+dBFS: that is *could not measure*, and it differs from *measured, and there
+is no voice*, which is reported as `0.0`. A consumer that treats `None` as
+zero turns silence into a negative verdict, and that is exactly the mistake
+this module exists to not make.
 
-### Constantes internas
+### Internal constants
 
-| Constante | Valor |
+| Constant | Value |
 |---|---|
 | `VOICE_BAND_HZ` | `(300, 3400)` |
 | `F0_RANGE_HZ` | `(70, 350)` |
-| `FRAME_S` | `0.064` (cuatro periodos de 70 Hz) |
+| `FRAME_S` | `0.064` (four periods of 70 Hz) |
 | `HOP_S` | `0.016` |
-| `VOICING_THRESHOLD` | `0.5` autocorrelación normalizada |
-| `OCTAVE_COST` | `0.05` por octava de lag |
+| `VOICING_THRESHOLD` | `0.5` normalized autocorrelation |
+| `OCTAVE_COST` | `0.05` per octave of lag |
 | `SILENCE_RMS` | `1e-4` (-80 dBFS) |
 
-Están expuestas para que puedas razonar sobre las medidas, no para que las
-sintonices: cambiarlas cambia el significado de los números que ya guardaste.
+They are exposed so you can reason about the measurements, not so you can
+tune them: changing them changes the meaning of numbers you already stored.
 
-### Límites conocidos
+### Known limits
 
-- **Un tono puro dentro de banda engaña a dos medidas**: da `voice_band_ratio`
-  cercano a 1 y `voiced_ratio` cercano a 1, con un `f0_median_hz` subarmónico
-  inventado. Lo delata `spectral_flatness` por debajo de `1e-6`. Si tu entrada
-  puede traer tonos (timbres, acoples, tonos de llamada), mira la planitud.
-- **F0 sin interpolación**: la resolución es de lag entero, así que la mediana se
-  cuantiza más a frecuencias altas.
-- **Ventana y salto fijos**: 64 ms y 16 ms, no configurables.
-- La ganancia no afecta las razones: medir a -20 dB o a -40 dB da lo mismo.
+- **A pure tone inside the band fools two measurements**: it produces a
+  `voice_band_ratio` close to 1 and a `voiced_ratio` close to 1, with a
+  fabricated subharmonic `f0_median_hz`. `spectral_flatness` below `1e-6`
+  gives it away. If your input can carry tones (ringtones, feedback, dial
+  tones), check the flatness.
+- **F0 without interpolation**: the resolution is integer lag, so the
+  median quantizes more at higher frequencies.
+- **Fixed window and hop**: 64 ms and 16 ms, not configurable.
+- Gain does not affect the ratios: measuring at -20 dB or at -40 dB gives
+  the same result.
 
-### Garantías
+### Guarantees
 
-- **Determinista entre procesos**: los tests fijan valores golden en hexadecimal
-  y los verifican en un proceso distinto, así que hasta un cambio de backend de
-  FFT se detecta.
-- **Memoria acotada por lotes**, no por duración: el pico se mantiene por debajo
-  de 80 MB sobre 20 s, y crece menos de 1.5× al pasar a 120 s.
+- **Deterministic across processes**: the tests pin golden values in hex and
+  verify them in a separate process, so even a change of FFT backend gets
+  caught.
+- **Memory bounded by batch**, not by duration: the peak stays under 80 MB
+  over 20 s, and grows less than 1.5× when moving to 120 s.
 
-> El umbral `voice_band_ratio >= 0.4` que aparece en el ejemplo es el que usa
-> un consumidor en producción para decidir si hubo voz bajo un texto transcrito. Es un
-> valor calibrado contra su micrófono y su caso, no una constante de esta
-> librería. Calibra el tuyo con `scripts/validar_evidencia_de_voz.py`, que compara
-> un tramo de habla real contra uno de cuarto vacío e imprime el solape.
+> The `voice_band_ratio >= 0.4` threshold that appears in the example is
+> what one consumer uses in production to decide whether there was voice
+> under a transcribed text. It is a value calibrated against its microphone
+> and its case, not a constant of this library. Calibrate yours with
+> `scripts/validate_voice_evidence.py`, which compares a real-speech frame
+> against an empty-room one and prints the overlap.
 
 ---
 
-## Registro de voces
+## Voice registry
 
-`speechtotext.speakers.registry`. Vive en `~/.speechtotext` o en lo que apunte
-`SPEECHTOTEXT_HOME`.
+`speechtotext.speakers.registry`. Lives in `~/.speechtotext`, or wherever
+`SPEECHTOTEXT_HOME` points.
 
 ```python
 from speechtotext.speakers import registry
 
-registry.enroll("Samuel", embedding, seconds=12.4, model="pyannote/speaker-diarization-community-1")
-registry.list_voices()                                    # todas, de todos los modelos
-vectores = registry.get_embeddings("pyannote/speaker-diarization-community-1")
-registry.remove("Samuel")                                 # en todos los modelos
+registry.enroll("Alice", embedding, seconds=12.4, model="pyannote/speaker-diarization-community-1")
+registry.list_voices()                                    # all of them, across every model
+vectors = registry.get_embeddings("pyannote/speaker-diarization-community-1")
+registry.remove("Alice")                                 # across every model
 ```
 
-| Función | Contrato |
+| Function | Contract |
 |---|---|
-| `home() -> Path` | `SPEECHTOTEXT_HOME` si está definida; si no, `~/.speechtotext`. |
-| `enroll(name, embedding, *, seconds, model) -> None` | `model` es obligatorio y keyword-only. |
-| `list_voices(model=None) -> list[dict]` | Filas `{"name", "model", **meta}`, ordenadas por nombre. Sin `model`, mezcla todos. |
-| `get_embeddings(model) -> dict[str, np.ndarray]` | `model` es obligatorio y posicional. |
-| `remove(name, *, model=None) -> bool` | Sin `model`, borra esa persona en todos los modelos. |
+| `home() -> Path` | `SPEECHTOTEXT_HOME` if it is set; otherwise `~/.speechtotext`. |
+| `enroll(name, embedding, *, seconds, model) -> None` | `model` is mandatory and keyword-only. |
+| `list_voices(model=None) -> list[dict]` | Rows `{"name", "model", **meta}`, sorted by name. Without `model`, mixes every one. |
+| `get_embeddings(model) -> dict[str, np.ndarray]` | `model` is mandatory and positional. |
+| `remove(name, *, model=None) -> bool` | Without `model`, deletes that person across every model. |
 
-### El modelo es parte de la identidad
+### The model is part of the identity
 
-Cada vector se archiva bajo el modelo que lo produjo y solo se compara contra
-vectores del mismo modelo: el coseno entre dos espacios vectoriales distintos no
-significa nada. Por eso `get_embeddings` exige el modelo y no tiene default.
+Every vector is filed under the model that produced it and is only compared
+against vectors from the same model: the cosine between two different
+vector spaces means nothing. That is why `get_embeddings` requires the
+model and has no default.
 
-**Trampa**: pedir un modelo que no tiene voces enroladas devuelve `{}`, no un
-error. Un nombre de modelo mal escrito se ve igual que un registro vacío — nadie
-identificará a nadie y no habrá ninguna señal de por qué. Si tu app depende de
-identificar, comprueba que el diccionario no venga vacío antes de seguir.
+**Trap**: asking for a model with no enrolled voices returns `{}`, not an
+error. A misspelled model name looks exactly like an empty registry —
+nobody gets identified, and there is no signal telling you why. If your app
+depends on identifying someone, check that the dictionary does not come
+back empty before moving on.
 
-Las entradas cuyo `.npy` ya no existe en disco se ignoran en silencio.
+Entries whose `.npy` no longer exists on disk are silently ignored.
 
-### Formato en disco
+### On-disk format
 
 ```
 ~/.speechtotext/voices/
 ├── manifest.json
 └── pyannote_speaker-diarization-community-1/
-    └── samuel.npy
+    └── alice.npy
 ```
 
-`manifest.json` es un diccionario anidado, `{modelo: {nombre: metadatos}}`, con
-`file`, `seconds` y `enrolled_at` por voz. Las rutas se guardan con `/` fijo para
-que el registro sea portable entre plataformas. Los vectores son `float32`.
+`manifest.json` is a nested dictionary, `{model: {name: metadata}}`, with
+`file`, `seconds` and `enrolled_at` per voice. Paths are stored with a
+fixed `/` so the registry is portable across platforms. Vectors are
+`float32`.
 
-Los manifiestos planos de la `0.4.x` (sin agrupar por modelo) se siguen leyendo:
-se reagrupan en memoria al cargar, y el disco se reescribe al formato nuevo en el
-siguiente `enroll` o `remove`.
+The flat manifests from `0.4.x` (not grouped by model) are still readable:
+they are regrouped in memory on load, and the file on disk is rewritten to
+the new format on the next `enroll` or `remove`.
 
-### Producir embeddings
+### Producing embeddings
 
-Hoy solo hay un productor: `speakers.diarization.embed_voice`, con pyannote, y
-corre el pipeline completo de diarización para sacar un vector — **segundos por
-muestra**. Sirve para lote, no para un camino en vivo.
+Today there is only one producer: `speakers.diarization.embed_voice`, with
+pyannote, and it runs the full diarization pipeline to get one vector out —
+**seconds per sample**. It works for batch, not for a live path.
 
-El registro en cambio sí es agnóstico: `model` es una cadena libre, y archivar
-vectores de otro extractor funciona hoy. Lo que está atado a pyannote es el CLI
-(`enroll` y la ruta de identificación), no el almacén.
-
----
-
-## Identificación
-
-`speechtotext.speakers.identify` es el módulo — el paquete `speakers` no reexporta nada,
-se importa por submódulo. `assign_names(clusters, enrolled, threshold) -> dict[str, str]`
-mapea cada `speaker_id`
-anónimo a un nombre registrado, con un greedy: ordena todos los pares posibles de mayor a
-menor coseno, corta por debajo del umbral, y asigna sin reusar ni un hablante ni un
-nombre. El umbral por defecto del CLI es `0.5`. `cosine` está expuesto pero es
-implementación: puede cambiar sin aviso.
-
-### Diarizar
-
-`speakers.diarization.diarize(samples, sample_rate, num_speakers=None)` devuelve
-`(turns, embeddings)`: `turns` es una lista de `(start, end, speaker_id)` y `embeddings`
-un vector por `speaker_id`, en el mismo espacio que `embed_voice` — comparables contra lo
-registrado. `num_speakers` es una pista; si se omite, el pipeline decide cuántos hay. Un
-hablante cuyo embedding salga con `NaN`, o que el pipeline no devuelva, aparece en `turns`
-pero no en `embeddings`. Requiere el extra `[diarize]`; el pipeline se carga una vez por
-proceso.
+The registry itself, though, is agnostic: `model` is a free-form string,
+and filing vectors from a different extractor works today. What is tied to
+pyannote is the CLI (`enroll` and the identification path), not the store.
 
 ---
 
-## Señales no finitas: dos políticas, a propósito
+## Identification
 
-El mismo trío de señales (`no_speech`, `avg_logprob`, `compression_ratio`) se
-trata distinto según por dónde entre, y la diferencia es deliberada:
+`speechtotext.speakers.identify` is the module — the `speakers` package
+re-exports nothing, it is imported by submodule.
+`assign_names(clusters, enrolled, threshold) -> dict[str, str]` maps each
+anonymous `speaker_id` to a registered name, with a greedy algorithm: it
+sorts every possible pair from highest to lowest cosine, cuts below the
+threshold, and assigns without reusing a speaker or a name twice. The
+CLI's default threshold is `0.5`. `cosine` is exposed but is
+implementation: it can change without notice.
 
-| Camino | Ante `NaN` o `inf` |
+### Diarizing
+
+`speakers.diarization.diarize(samples, sample_rate, num_speakers=None)`
+returns `(turns, embeddings)`: `turns` is a list of
+`(start, end, speaker_id)` and `embeddings` is one vector per
+`speaker_id`, in the same space as `embed_voice` — comparable against
+what is registered. `num_speakers` is a hint; if omitted, the pipeline
+decides how many there are. A speaker whose embedding comes out `NaN`, or
+that the pipeline does not return, shows up in `turns` but not in
+`embeddings`. Requires the `[diarize]` extra; the pipeline loads once per
+process.
+
+---
+
+## Non-finite signals: two policies, on purpose
+
+The same trio of signals (`no_speech`, `avg_logprob`, `compression_ratio`)
+is treated differently depending on where it enters, and the difference is
+deliberate:
+
+| Path | On `NaN` or `inf` |
 |---|---|
-| `core.segments.native_signals` (el del CLI y el JSON) | Lo convierte en ausencia de medida: la clave se omite del JSON. |
-| `asr.types.NativeSignals` / `SegmentNativeSignals` | Levanta `ValueError`. |
+| `core.segments.native_signals` (the CLI's and the JSON's) | Converts it into absence of measurement: the key is omitted from the JSON. |
+| `asr.types.NativeSignals` / `SegmentNativeSignals` | Raises `ValueError`. |
 
-A mitad del pipe, "esta señal no existe" ya es una respuesta correcta, y obligar a
-cada llamador a atrapar una excepción por eso no compra nada. Dentro de un
-`TranscriptionResult`, en cambio, un no-finito es corrupción de datos y debe
-abortar.
+Halfway through the pipe, "this signal does not exist" is already a
+correct answer, and forcing every caller to catch an exception for that
+buys nothing. Inside a `TranscriptionResult`, on the other hand, a
+non-finite value is data corruption and must abort.
 
-Consecuencia práctica: en el JSON del CLI, *ausente* y *inválido* se ven igual; en
-los tipos de `asr/`, lo inválido no llega a existir.
+Practical consequence: in the CLI's JSON, *absent* and *invalid* look the
+same; in the `asr/` types, invalid never gets to exist.
 
 ---
 
-## Capa `asr/`: el único contrato de motor
+## The `asr/` layer: the only engine contract
 
-`speechtotext.asr` define el motor de voz a texto: `AsrBackend`, `Caps`,
-`TranscriptionRequest`, `TranscriptionResult`, `NativeSignals` y compañía, con
-validación estricta y dataclasses inmutables. **Todo camino pasa por aquí**: el CLI,
-`bench`, `find` y `transcribe()` construyen un backend y le hablan igual.
+`speechtotext.asr` defines the speech-to-text engine: `AsrBackend`, `Caps`,
+`TranscriptionRequest`, `TranscriptionResult`, `NativeSignals` and friends,
+with strict validation and immutable dataclasses. **Every path goes through
+here**: the CLI, `bench`, `find` and `transcribe()` build a backend and
+talk to it the same way.
 
 ```python
 class AsrBackend(Protocol):
     backend_id: str          # "faster-whisper" | "whispercpp"
-    caps: Caps               # hotwords / vad / word_timestamps -> honrado | degradado | rechazado
+    caps: Caps               # hotwords / vad / word_timestamps -> honored | degraded | rejected
     model_id: str; model_version: str; engine_version: str; quant: str; device: str
-    def warm(self) -> None                                  # carga (una vez); el objeto es la caché
+    def warm(self) -> None                                  # loads (once); the object is the cache
     def transcribe(self, samples: np.ndarray, request: TranscriptionRequest) -> TranscriptionResult
 ```
 
-`TranscriptionResult.segments` son `TranscriptionSegment(start, end, text, words, native_signals)`,
-y sus `words` son `TranscriptionWord(text, start, end, confidence)` — `confidence` es `None`
-o un número entre 0 y 1, nunca fabricado. `Cap` es el `Literal["honrado", "degradado", "rechazado"]`
-del que se arman los `Caps`.
+`TranscriptionResult.segments` are
+`TranscriptionSegment(start, end, text, words, native_signals)`, and its
+`words` are `TranscriptionWord(text, start, end, confidence)` —
+`confidence` is `None` or a number between 0 and 1, never fabricated.
+`Cap` is the `Literal["honored", "degraded", "rejected"]` that `Caps` is
+built from.
 
-Entra **float32 mono a 16 000 Hz** y nada más; quien llama resamplea (`core.transcribe.load_audio`
-lo hace desde cualquier archivo). El texto de segmentos y palabras se devuelve tal como lo
-emite el motor, con su espacio inicial: recortar es de quien presenta.
+Only **float32 mono at 16,000 Hz** goes in, nothing else; the caller
+resamples (`core.transcribe.load_audio` does it from any file). The text
+of segments and words is returned exactly as the engine emits it, leading
+space included: trimming belongs to whoever presents it.
 
-Dos implementaciones, ninguna reexportada (importar `speechtotext.asr` no carga motores):
+Two implementations, neither re-exported (importing `speechtotext.asr`
+does not load engines):
 
 - `speechtotext.asr.faster_whisper.FasterWhisperBackend(model, config=None, *, model_version="unpinned")`
-  — `model` es un nombre (lo resuelve faster-whisper desde HF Hub) o una ruta a un
-  directorio CTranslate2 (solo local). Honra hotwords, VAD y palabras.
-- `speechtotext.asr.whispercpp.WhisperCppBackend(model)` — binario y modelo GGML pinneados
-  por SHA-256 (`core/enginepin.py`), CUDA siempre, `q5_0`. Rechaza hotwords (el prompt es
-  inerte bajo `-mc 0`), degrada VAD y palabras, y no emite señales nativas.
+  — `model` is a name (faster-whisper resolves it from the HF Hub) or a
+  path to a CTranslate2 directory (local only). Honors hotwords, VAD and
+  words.
+- `speechtotext.asr.whispercpp.WhisperCppBackend(model)` — binary and GGML
+  model pinned by SHA-256 (`core/enginepin.py`), always CUDA, `q5_0`.
+  Rejects hotwords (the prompt is inert under `-mc 0`), degrades VAD and
+  words, and emits no native signals.
 
 `TranscriptionRequest(language="es", hotwords=(), word_timestamps=True, beam_size=5, context=None, vad=False)`;
-`language="auto"` deja detectar. El `fingerprint` incluye `vad`.
+`language="auto"` lets it detect. The `fingerprint` includes `vad`.
 
 ---
 
@@ -427,92 +450,103 @@ Dos implementaciones, ninguna reexportada (importar `speechtotext.asr` no carga 
 ```python
 from speechtotext.core.transcribe import transcribe, Transcript, Progress, AsrError
 
-t = transcribe("reunion.mp4", model="large-v3", on_progress=print)
+t = transcribe("meeting.mp4", model="large-v3", on_progress=print)
 ```
 
-Un archivo (o muestras 16 kHz mono) entra, un `Transcript` sale: `segments` (con hablante y
-señales nativas; la marca `suspect` la calcula el escritor JSON con `is_suspect`), `language`,
-`language_probability`, `duration`, `speech_s`,
-`gaps`, `engine` (un `EngineInfo`, con `.to_dict()` para el JSON), `request` (la efectiva, tras CAPS), `warnings` y `diarization` (un `DiarizationReport` o `None`). Una sola
-decodificación; el archivo corto y el largo son el mismo camino con n trozos; los trozos
-dejan checkpoint por contenido en `~/.speechtotext/chunks`. El núcleo nunca imprime:
-`on_progress` recibe `Progress(stage, done, total, detail)` con etapas
-`decode → load → transcribe → diarize` (con archivo, `decode` se emite dos veces: antes
-con `total=None` y después con `done = total = duración`; `download` la emite
-`models.ensure`); `cancel` es un
-`threading.Event` que se mira entre trozos.
+A file (or 16 kHz mono samples) goes in, a `Transcript` comes out:
+`segments` (with speaker and native signals; the `suspect` mark is
+computed by the JSON writer with `is_suspect`), `language`,
+`language_probability`, `duration`, `speech_s`, `gaps`, `engine` (an
+`EngineInfo`, with `.to_dict()` for the JSON), `request` (the effective
+one, after CAPS), `warnings` and `diarization` (a `DiarizationReport` or
+`None`). A single decode; the short file and the long one are the same
+path with n chunks; chunks leave a checkpoint by content in
+`~/.speechtotext/chunks`. The core never prints: `on_progress` receives
+`Progress(stage, done, total, detail)` with stages
+`decode → load → transcribe → diarize` (with a file, `decode` is emitted
+twice: first with `total=None` and then with `done = total = duration`;
+`download` is emitted by `models.ensure`); `cancel` is a
+`threading.Event` checked between chunks.
 
-Errores: `AsrError(code, recoverable, message)` con `code` en `unsupported_option`,
-`out_of_memory`, `insufficient_resources`, `backend_failed`, `cancelled`, `diarize_unavailable`, `diarize_failed`;
-`AudioDecodeError` si el archivo no se puede abrir. Los avisos del motor (p. ej. `empty_transcript`)
-llegan a `warnings` como `"<motor>: <aviso>"`. `backend=` permite reutilizar un
-modelo caliente entre llamadas. `route=` recibe una `Route` ya resuelta (el CLI sondea,
-imprime la razón y la pasa: la máquina se mira una sola vez).
+Errors: `AsrError(code, recoverable, message)` with `code` in
+`unsupported_option`, `out_of_memory`, `insufficient_resources`,
+`backend_failed`, `cancelled`, `diarize_unavailable`, `diarize_failed`;
+`AudioDecodeError` if the file cannot be opened. The engine's warnings
+(e.g. `empty_transcript`) land in `warnings` as `"<engine>: <warning>"`.
+`backend=` lets you reuse a warm model across calls. `route=` takes an
+already-resolved `Route` (the CLI probes, prints the reason and passes it
+in: the machine gets looked at exactly once).
 
 ---
 
-## Sondeo y modelos
+## Probe and models
 
 ```python
 from speechtotext.core import probe, models
 
-m = probe.machine()                       # < 1 s, sin cargar modelos
+m = probe.machine()                       # < 1 s, no models loaded
 r = probe.choose_route(m, "large-v3")     # engine="auto", device="auto", compute_type="auto"
 ```
 
-`Machine(platform, cpu_count, ram_gb, cuda, gpu_name, vram_free_gb, whispercpp)`: lo que
-hay, con `None` donde no se pudo medir.
-`Route(engine, device, compute_type, reason, eta_factor, estimated)`: la elección;
-`reason` es una frase para imprimir (vacía si no
-hay nada que avisar); `eta_factor` multiplica la duración del audio (`None` = sin medir)
-y `estimated` es `False` solo si salió del `bench.json` de esta máquina. Reglas: lo
-explícito se respeta, el sondeo solo rellena `auto`; **nunca cambia el modelo** — si no
-cabe, `AsrError("insufficient_resources")`. Fuera de Windows, whisper.cpp se etiqueta
-`device="native"`.
+`Machine(platform, cpu_count, ram_gb, cuda, gpu_name, vram_free_gb, whispercpp)`:
+what is there, with `None` where it could not be measured.
+`Route(engine, device, compute_type, reason, eta_factor, estimated)`: the
+choice; `reason` is a sentence to print (empty if there is nothing to warn
+about); `eta_factor` multiplies the audio's duration (`None` = not
+measured) and `estimated` is `False` only if it came from this machine's
+`bench.json`. Rules: what's explicit is respected, the probe only fills in
+`auto`; **it never changes the model** — if it does not fit,
+`AsrError("insufficient_resources")`. Outside Windows, whisper.cpp is
+labeled `device="native"`.
 
 ```python
-models.data_dir() -> Path                                   # SPEECHTOTEXT_HOME o la ruta del sistema
-models.installed(engine=None) -> list[ModelInfo]            # ModelInfo(engine, name, path, size_bytes, verified)
-models.ensure(engine, name, on_progress=None) -> Path       # baja si falta; Progress("download", …)
-models.remove(engine, name) -> None                         # FileNotFoundError si no está
-models.remote_size(engine, name) -> int | None              # bytes que bajaría ensure; None sin red
+models.data_dir() -> Path                                    # SPEECHTOTEXT_HOME or the system path
+models.installed(engine=None) -> list[ModelInfo]             # ModelInfo(engine, name, path, size_bytes, verified)
+models.ensure(engine, name, on_progress=None) -> Path         # downloads if missing; Progress("download", …)
+models.remove(engine, name) -> None                           # FileNotFoundError if not there
+models.remote_size(engine, name) -> int | None                # bytes ensure would download; None without network
 ```
 
-`verified` es `True` solo para whisper.cpp (sha256 contra el pin); los de faster-whisper
-los verifica Hugging Face por tamaño. Nombres válidos: `tiny`, `base`, `small`, `medium`,
-`large-v3`, `distil-large-v3` (faster-whisper) y `large-v3`, `small` (whisper.cpp).
+`verified` is `True` only for whisper.cpp (sha256 against the pin);
+faster-whisper's models are verified by Hugging Face by size. Valid names:
+`tiny`, `base`, `small`, `medium`, `large-v3`, `distil-large-v3`
+(faster-whisper) and `large-v3`, `small` (whisper.cpp).
 
 ---
 
-## Qué de `core/` es contrato y qué no
+## What in `core/` is contract and what is not
 
-`core/` no se importa como paquete: se importa por submódulo, por ejemplo
-`from speechtotext.core.transcribe import transcribe`. De lo que vive ahí dentro es
-contrato **solo lo que este documento nombra**, y el contrato se dibuja por símbolo, no
-por submódulo:
+`core/` is not imported as a package: it is imported by submodule, for
+example `from speechtotext.core.transcribe import transcribe`. Of what
+lives in there, **only what this document names** is contract, and the
+contract is drawn symbol by symbol, not submodule by submodule:
 
-| Submódulo | Qué es contrato |
+| Submodule | What is contract |
 |---|---|
 | `core.transcribe` | `transcribe`, `Transcript`, `Progress`, `EngineInfo`, `DiarizationReport`, `load_audio` |
 | `core.probe` | `machine`, `choose_route`, `Machine`, `Route` |
 | `core.models` | `data_dir`, `installed`, `ensure`, `remove`, `remote_size`, `ModelInfo` |
-| `core.formats` | `write_json`, `is_suspect` — los demás escritores no |
-| `core.segments` | `native_signals` y nada más |
+| `core.formats` | `write_json`, `is_suspect` — the other writers are not |
+| `core.segments` | `native_signals`, and nothing else |
 
-Esa tabla es exactamente la lista `CONTRATO` de `tests/test_api_contract.py`: si una se
-mueve sin la otra, el test falla. Lo que cambie ahí sale en el `CHANGELOG.md`.
+That table is exactly the `CONTRACT` list in `tests/test_api_contract.py`:
+if one moves without the other, the test fails. Whatever changes there
+goes in `CHANGELOG.md`.
 
-El resto de `core/` es interno — `chunked`, `finder`, `benchmark`, `enginepin`,
-`postprocess`, y `core/audio.py`, que transcodifica con ffmpeg y no tiene nada que ver
-con el paquete `speechtotext.audio` de más arriba pese al nombre. Úsalo si te sirve, pero
-puede moverse entre versiones sin aviso y sin entrada en el CHANGELOG.
+The rest of `core/` is internal — `chunked`, `finder`, `benchmark`,
+`enginepin`, `postprocess`, and `core/audio.py`, which transcodes with
+ffmpeg and has nothing to do with the `speechtotext.audio` package above
+despite the name. Use it if it helps you, but it can move between
+versions without notice and without an entry in the CHANGELOG.
 
-`cli/` no es contrato, `cli/mcp_server.py` incluido. Las cuatro herramientas que sirve
-`speechtotext mcp` son envoltorios delgados de `core.transcribe`, `core.finder`,
-`speakers.registry` y `core.probe`. Llamarlas desde Python no aporta nada: llama a lo
-envuelto, con las garantías que este documento le dé a cada pieza — `core.finder`, por
-ejemplo, no tiene ninguna.
+`cli/` is not contract, `cli/mcp_server.py` included. The four tools that
+`speechtotext mcp` serves are thin wrappers over `core.transcribe`,
+`core.finder`, `speakers.registry` and `core.probe`. Calling them from
+Python buys you nothing: it calls what they wrap, with whatever
+guarantees this document gives each piece — `core.finder`, for instance,
+has none.
 
-Los paquetes `evaluation/`, `security/`, `models/` y `confidence/` que existían
-hasta la `0.5.1` se extrajeron en la `0.6.0`: eran el arnés de evaluación y la
-cadena de custodia de un consumidor, no parte de transcribir audio.
+The `evaluation/`, `security/`, `models/` and `confidence/` packages that
+existed through `0.5.1` were extracted in `0.6.0`: they were one
+consumer's evaluation harness and chain of custody, not part of
+transcribing audio.

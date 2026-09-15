@@ -1,4 +1,4 @@
-"""Identificación de hablantes: comparar embeddings contra voces registradas."""
+"""Speaker identification: compare embeddings against enrolled voices."""
 from __future__ import annotations
 
 import numpy as np
@@ -16,7 +16,7 @@ def assign_names(
     enrolled: dict[str, np.ndarray],
     threshold: float,
 ) -> dict[str, str]:
-    """Asigna cada speaker_id anónimo a un nombre registrado (greedy por score)."""
+    """Assign each anonymous speaker_id to a registered name (greedy by score)."""
     if not clusters or not enrolled:
         return {}
     candidates = [
@@ -24,7 +24,7 @@ def assign_names(
         for sid, vec in clusters.items()
         for name, ref in enrolled.items()
     ]
-    candidates.sort(reverse=True)  # mayor score primero
+    candidates.sort(reverse=True)  # highest score first
     result: dict[str, str] = {}
     used_names: set[str] = set()
     for score, sid, name in candidates:

@@ -1,12 +1,12 @@
-"""Diarización batch: asignación por solape (pura) + pyannote (perezoso)."""
+"""Batch diarization: overlap-based assignment (pure) + pyannote (lazy)."""
 from __future__ import annotations
 
 from speechtotext.core.segments import LabeledSegment, native_signals
 
-# El checkpoint que se carga y, por lo mismo, el espacio vectorial de los embeddings que
-# produce: el registro de voces los archiva y filtra por esta clave, no por dimensión.
-# Un solo literal a propósito — con dos, quien cambie el checkpoint y olvide la clave deja
-# los vectores ya registrados etiquetados con un espacio que dejó de ser el suyo.
+# The checkpoint that is loaded and, therefore, the vector space of the embeddings it
+# produces: the voice registry archives and filters them by this key, not by dimension.
+# A single literal on purpose — with two, anyone changing the checkpoint and forgetting
+# the key leaves already-enrolled vectors labeled with a space that is no longer theirs.
 EMBEDDING_MODEL = "pyannote/speaker-diarization-community-1"
 
 
@@ -15,9 +15,10 @@ def _overlap(a0: float, a1: float, b0: float, b1: float) -> float:
 
 
 def _best_speaker(start: float, end: float, turns) -> str | None:
-    """Hablante con más solape TOTAL con [start, end]. Agrega por hablante, no por turno:
-    pyannote parte a un mismo hablante en varios turnos, y el turno individual más grande
-    puede ser del minoritario. None si no solapa con ninguno. Empate -> el que apareció antes."""
+    """Speaker with the greatest TOTAL overlap with [start, end]. Aggregate by speaker,
+    not by turn: pyannote splits the same speaker into several turns, and the largest
+    individual turn may belong to the minority speaker. None if there is no overlap.
+    Tie -> whichever appeared first."""
     totals: dict[str, float] = {}
     for t0, t1, spk in turns:
         ov = _overlap(start, end, t0, t1)
@@ -27,15 +28,16 @@ def _best_speaker(start: float, end: float, turns) -> str | None:
 
 
 def assign_segments(segments, turns: list[tuple[float, float, str]]) -> list[LabeledSegment]:
-    """Etiqueta cada segmento con su hablante. Con timestamps de palabra (word_timestamps)
-    parte el segmento en los cambios de hablante internos: sin esto un segmento de Whisper
-    que cruza una frontera de turno se etiqueta entero con un solo hablante y la cola se
-    arrastra al siguiente (corta a mitad de sintagma). Sin palabras cae al modo grueso:
-    un hablante por segmento (máximo solape).
+    """Label each segment with its speaker. With word timestamps (word_timestamps), split
+    the segment at internal speaker changes: without this, a Whisper segment that crosses
+    a turn boundary is labeled entirely with one speaker and the tail carries over to the
+    next one (cutting mid-phrase). Without words, fall back to coarse mode: one speaker per
+    segment (maximum overlap).
 
-    Una palabra sin turno (cae en un hueco entre turnos —pyannote no cubre toda la línea de
-    tiempo— o dura 0s) hereda el hablante del run en curso, no arranca uno nuevo: si no,
-    saldría como 'Hablante ?' de una sola palabra en medio de un monólogo."""
+    A word without a turn (it falls in a gap between turns —pyannote does not cover the
+    entire timeline—or lasts 0s) inherits the speaker of the current run instead of
+    starting a new one: otherwise, it would appear as a one-word 'Speaker ?' in the middle
+    of a monologue."""
     out: list[LabeledSegment] = []
     for s in segments:
         no_speech, avg_logprob, compression_ratio = native_signals(s)
@@ -48,20 +50,20 @@ def assign_segments(segments, turns: list[tuple[float, float, str]]) -> list[Lab
         run_spk: str | None = None
         run_words: list[str] = []
         run_start = run_end = None
-        # Los N runs de un mismo segmento heredan el mismo src_dur (la extensión del
-        # segmento que el ASR emitió): es la aproximación correcta —vienen de la misma
-        # ventana de decodificación— y sin ella el gate de is_suspect se apaga bajo
-        # --diarize, porque cada run se recomprime a la extensión de sus palabras. Las
-        # señales nativas viajan igual: mismo origen, misma ventana.
+        # The N runs from the same segment inherit the same src_dur (the span of the
+        # segment emitted by ASR): this is the correct approximation —they come from the
+        # same decoding window—and without it the is_suspect gate turns off under
+        # --diarize, because each run is recompressed to the span of its words. The native
+        # signals travel the same way: same origin, same window.
         src_dur = s.end - s.start
         for w in words:
             spk = _best_speaker(w.start, w.end, turns)
             if not run_words:
                 run_start, run_spk = w.start, spk
             elif spk is None or spk == run_spk:
-                pass  # hereda: palabra sin turno o mismo hablante -> sigue el run
+                pass  # inherit: word without turn or same speaker -> continue the run
             elif run_spk is None:
-                run_spk = spk  # el run venía sin hablante -> adopta el primero real
+                run_spk = spk  # the run had no speaker -> adopt the first real one
             else:
                 out.append(LabeledSegment(run_start, run_end, "".join(run_words), run_spk,
                                           src_dur=src_dur, no_speech=no_speech,
@@ -81,7 +83,7 @@ def humanize_speaker(speaker_id: str) -> str:
         n = int(speaker_id.rsplit("_", 1)[-1])
     except (ValueError, IndexError):
         return speaker_id
-    return f"Hablante {n + 1}"
+    return f"Speaker {n + 1}"
 
 
 def apply_names(
@@ -99,25 +101,25 @@ def apply_names(
     return out
 
 
-# --- Parte con modelos (pyannote 4.x). Imports perezosos a propósito: torch/pyannote
-# pesan y este módulo debe poder importarse en el venv base (sin el extra [diarize])
-# para usar las funciones puras de arriba. El pipeline community-1 devuelve, en una
-# sola pasada, la diarización Y un embedding por hablante. La transcripción ya trae las
-# muestras en memoria; `enroll` las lee de un wav con `wave`. ---
+# --- Model-backed part (pyannote 4.x). Lazy imports on purpose: torch/pyannote are
+# heavy, and this module must remain importable in the base venv (without the [diarize]
+# extra) to use the pure functions above. The community-1 pipeline returns, in one pass,
+# diarization AND one embedding per speaker. The transcription already has the samples
+# in memory; `enroll` reads them from a wav with `wave`. ---
 
 _PIPELINE = None
-# El 32 con el que corre por defecto no es el default de pyannote (que es 1): sale del
-# config.yaml del checkpoint community-1. A 32 el pico son 2620 MB; a 8, 1369 MB (-48%)
-# por +7% de reloj sobre 180 s, con salida idéntica. En una máquina de escritorio el pico
-# de RAM es el recurso escaso, no los 7 s.
-# ponytail: constante, no opción de config. Techo: si algún día esto corre en GPU con VRAM
-# de sobra, sube a parámetro.
+# The default 32 is not pyannote's default (which is 1): it comes from the community-1
+# checkpoint's config.yaml. At 32 the peak is 2620 MB; at 8, 1369 MB (-48%) for +7% wall
+# clock over 180 s, with identical output. On a desktop machine, peak RAM is the scarce
+# resource, not the 7 s.
+# ponytail: constant, not a config option. Ceiling: if this ever runs on a GPU with ample
+# VRAM, promote it to a parameter.
 _BATCH = 8
 
 
 def read_wav(wav_path) -> tuple["np.ndarray", int]:
-    """Lee un wav PCM16 a float32 mono en [-1, 1] con su tasa nativa. Es la entrada de
-    `enroll` (una muestra de voz en disco); la transcripción ya trae las muestras."""
+    """Read a PCM16 wav as float32 mono in [-1, 1] at its native rate. This is the input
+    to `enroll` (a voice sample on disk); the transcription already has the samples."""
     import wave
 
     import numpy as np
@@ -133,7 +135,7 @@ def read_wav(wav_path) -> tuple["np.ndarray", int]:
 
 
 def _waveform(samples, sample_rate: int) -> dict:
-    """{waveform, sample_rate} para pyannote, en memoria (evita torchcodec)."""
+    """{waveform, sample_rate} for pyannote, in memory (avoids torchcodec)."""
     import numpy as np
     import torch
 
@@ -148,23 +150,23 @@ def _get_pipeline():
         import warnings
 
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore")  # silencia el aviso de torchcodec al importar
+            warnings.simplefilter("ignore")  # silence the torchcodec warning on import
             from pyannote.audio import Pipeline
 
         _PIPELINE = Pipeline.from_pretrained(
             EMBEDDING_MODEL, token=os.environ.get("HF_TOKEN")
         )
-        # Ambos se leen en tiempo de llamada, así que asignarlos aquí basta.
+        # Both are read at call time, so assigning them here is enough.
         _PIPELINE.embedding_batch_size = _BATCH
         _PIPELINE.segmentation_batch_size = _BATCH
     return _PIPELINE
 
 
 def diarize(samples, sample_rate: int, num_speakers: int | None = None):
-    """Diariza muestras float32 mono. Devuelve (turns, embeddings).
+    """Diarize float32 mono samples. Return (turns, embeddings).
 
     turns: list[(start, end, speaker_id)]. embeddings: dict[speaker_id, np.ndarray]
-    (un vector por hablante, en el mismo espacio que embed_voice → comparables).
+    (one vector per speaker, in the same space as embed_voice → comparable).
     """
     import warnings
 
@@ -189,11 +191,11 @@ def diarize(samples, sample_rate: int, num_speakers: int | None = None):
 
 
 def embed_voice(wav_path):
-    """Embedding de una sola voz (para enroll): fuerza 1 hablante y devuelve su vector."""
+    """Single-voice embedding (for enroll): force 1 speaker and return its vector."""
     samples, sample_rate = read_wav(wav_path)
     _, embeddings = diarize(samples, sample_rate, num_speakers=1)
     if not embeddings:
         raise ValueError(
-            "no se pudo extraer un embedding de voz (audio muy corto o sin voz)"
+            "could not extract a voice embedding (audio too short or no speech)"
         )
     return next(iter(embeddings.values()))

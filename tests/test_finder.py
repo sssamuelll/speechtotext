@@ -8,24 +8,24 @@ def _seg(s, e, t):
 
 
 def test_normalize_strips_accents_and_case():
-    assert normalize("Sísmica ÑOÑO") == "sismica nono"
+    assert normalize("Sísmica ÑOÑO") == "sismica nono"  # spanish-is-data: the accents are the input being stripped, not prose
 
 
 def test_search_groups_contiguous_into_one_region():
     segs = [
         _seg(0, 1, "hola"),
-        _seg(1, 2, "la vulnerabilidad sismica"),
-        _seg(2, 3, "sismica otra vez"),
-        _seg(500, 501, "nada"),
+        _seg(1, 2, "the seismic vulnerability"),
+        _seg(2, 3, "seismic again"),
+        _seg(500, 501, "nothing"),
     ]
-    regs = search(segs, "vulnerabilidad sismica", gap=60, top=5)
+    regs = search(segs, "seismic vulnerability", gap=60, top=5)
     assert len(regs) == 1
     assert regs[0].start == 1 and regs[0].end == 3
     assert regs[0].hits == 2
 
 
 def test_search_splits_on_large_gap():
-    segs = [_seg(0, 1, "sismica"), _seg(200, 201, "sismica")]  # hueco 199 > 60
+    segs = [_seg(0, 1, "sismica"), _seg(200, 201, "sismica")]  # gap 199 > 60
     regs = search(segs, "sismica", gap=60, top=5)
     assert len(regs) == 2
 
@@ -36,11 +36,11 @@ def test_search_ranks_denser_region_first():
         _seg(500, 501, "sismica"), _seg(501, 502, "sismica"), _seg(502, 503, "sismica"),
     ]
     regs = search(segs, "sismica", gap=60, top=5)
-    assert regs[0].start == 500  # la región densa va primero
+    assert regs[0].start == 500  # The denser region comes first.
 
 
 def test_search_accent_and_case_insensitive():
-    regs = search([_seg(0, 1, "la SÍSMICA de hoy")], "sismica", gap=60, top=5)
+    regs = search([_seg(0, 1, "la SÍSMICA de hoy")], "sismica", gap=60, top=5)  # spanish-is-data: accent+case mismatch against the query is exactly what this proves
     assert len(regs) == 1
 
 
@@ -50,4 +50,4 @@ def test_search_no_match_is_empty():
 
 def test_clip_window_clamps_and_pads():
     assert clip_window(100.0, 160.0, 10.0) == (90.0, 80.0)
-    assert clip_window(5.0, 15.0, 10.0) == (0.0, 30.0)  # no baja de 0
+    assert clip_window(5.0, 15.0, 10.0) == (0.0, 30.0)  # Does not go below 0.

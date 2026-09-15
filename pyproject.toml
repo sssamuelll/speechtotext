@@ -1,7 +1,7 @@
 [project]
 name = "speechtotext"
 version = "0.6.0.dev0"
-description = "Transcripción offline con faster-whisper: audio, ASR y hablantes, todo local."
+description = "Offline speech to text with faster-whisper: audio, ASR and speakers, all local."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -31,8 +31,8 @@ dev = [
     "pytest>=9,<10",
 ]
 mcp = [
-    # SDK oficial. La v2 cambio el import (mcp.server.MCPServer, no
-    # mcp.server.fastmcp.FastMCP): el tope mayor no es decorativo.
+    # Official SDK. v2 moved the import (mcp.server.MCPServer, not
+    # mcp.server.fastmcp.FastMCP): the major-version ceiling is not decorative.
     "mcp>=2.2,<3",
 ]
 
@@ -51,5 +51,5 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 markers = [
-    "real_machine: no stubbea core.probe.machine(); el test stubbea nvidia-smi y compañía",
+    "real_machine: does not stub core.probe.machine(); the test stubs nvidia-smi and friends",
 ]

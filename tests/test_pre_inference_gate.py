@@ -33,13 +33,13 @@ def _thresholds():
     )
 
 
-def test_gate_acepta_audio_util():
+def test_gate_accepts_usable_audio():
     decision = evaluate_pre_inference(_report(), _thresholds())
     assert decision.eligible is True
     assert decision.reason_codes == ()
 
 
-def test_gate_bloquea_silencio_sin_llamarlo_voz_corta():
+def test_gate_blocks_silence_without_classifying_it_as_too_short():
     decision = evaluate_pre_inference(
         replace(_report(), effective_voice_ms=0, snr_db=None),
         _thresholds(),
@@ -49,7 +49,7 @@ def test_gate_bloquea_silencio_sin_llamarlo_voz_corta():
     assert "too_short" not in decision.reason_codes
 
 
-def test_gate_acumula_razones_en_orden_estable():
+def test_gate_accumulates_reasons_in_stable_order():
     bad = replace(
         _report(),
         effective_voice_ms=100,
@@ -78,7 +78,7 @@ def test_gate_acumula_razones_en_orden_estable():
         ("max_clipping_ratio", math.nan),
     ],
 )
-def test_thresholds_rechazan_valores_no_finitos(field, value):
+def test_thresholds_reject_non_finite_values(field, value):
     values = {
         "min_effective_voice_ms": 160,
         "min_processed_rms_dbfs": -45.0,

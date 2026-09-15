@@ -1,28 +1,28 @@
-"""Post-proceso del texto transcrito: normalización de horas (item #3 del backlog)."""
+"""Postprocessing of transcribed text: time normalization (backlog item #3)."""
 from speechtotext.core.postprocess import normalize_hours
 
 
-def test_convierte_hora_con_punto_a_dos_puntos():
-    assert normalize_hours("empezó a las 8.33 de la mañana") == "empezó a las 8:33 de la mañana"
+def test_converts_time_with_period_to_colon():
+    assert normalize_hours("it started at 8.33 in the morning") == "it started at 8:33 in the morning"
 
 
-def test_convierte_varias_horas_en_una_linea():
-    assert normalize_hours("8.13 y 8.33") == "8:13 y 8:33"
+def test_converts_multiple_times_on_one_line():
+    assert normalize_hours("8.13 and 8.33") == "8:13 and 8:33"
 
 
-def test_preserva_magnitudes_sismicas():
-    # Un solo decimal = magnitud sísmica, no hora: se conserva como dígito.
-    assert normalize_hours("un sismo de 7.2 y otro de 7.5") == "un sismo de 7.2 y otro de 7.5"
+def test_preserves_seismic_magnitudes():
+    # A single decimal = seismic magnitude, not a time: it remains a digit.
+    assert normalize_hours("a tremor of 7.2 and another of 7.5") == "a tremor of 7.2 and another of 7.5"
 
 
-def test_minutos_invalidos_no_se_tocan():
-    # 8.99 no son minutos válidos (00-59): no es hora, se conserva.
-    assert normalize_hours("valor 8.99 medido") == "valor 8.99 medido"
+def test_invalid_minutes_are_left_unchanged():
+    # 8.99 is not a valid minute value (00-59): it is not a time, so it is preserved.
+    assert normalize_hours("measured value 8.99") == "measured value 8.99"
 
 
-def test_horas_de_dos_digitos():
-    assert normalize_hours("a las 18.45") == "a las 18:45"
+def test_two_digit_hours_are_converted():
+    assert normalize_hours("at 18.45") == "at 18:45"
 
 
-def test_texto_sin_numeros_intacto():
-    assert normalize_hours("hola mundo") == "hola mundo"
+def test_text_without_numbers_is_unchanged():
+    assert normalize_hours("hello world") == "hello world"

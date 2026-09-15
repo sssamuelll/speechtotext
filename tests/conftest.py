@@ -1,11 +1,11 @@
-"""Fixtures globales: la suite entera corre sin GPU, sin red, sin modelos y sin tocar la
-máquina.
+"""Global fixtures: the entire suite runs without a GPU, network, or models and without
+touching the machine.
 
-Cada test recibe un SPEECHTOTEXT_HOME vacío (voces, chunks, índice, bench.json y modelos
-viven ahí) y una máquina sondeada FIJA (sin GPU, sin whisper.cpp, platform="win32" en
-todos los sistemas) para que la ruta 'auto' sea la misma en la máquina de desarrollo y en
-CI. Un test que quiera el sondeo real se marca @pytest.mark.real_machine y stubbea él
-mismo nvidia-smi y compañía (tests/test_probe.py)."""
+Each test gets an empty SPEECHTOTEXT_HOME (voices, chunks, index, bench.json, and models
+live there) and a FIXED probed machine (no GPU, no whisper.cpp, platform="win32" on all
+systems) so the 'auto' route is the same on the development machine and in CI. A test
+that needs the real probe is marked @pytest.mark.real_machine and stubs nvidia-smi and
+related tools itself (tests/test_probe.py)."""
 import pytest
 
 from speechtotext.core import probe
@@ -15,7 +15,7 @@ CPU_MACHINE = probe.Machine(platform="win32", cpu_count=8, ram_gb=32.0, cuda=Fal
 
 
 @pytest.fixture(autouse=True)
-def _hermetico(request, monkeypatch, tmp_path):
+def _hermetic(request, monkeypatch, tmp_path):
     monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path / "home"))
     if request.node.get_closest_marker("real_machine") is None:
         monkeypatch.setattr(probe, "machine", lambda: CPU_MACHINE)

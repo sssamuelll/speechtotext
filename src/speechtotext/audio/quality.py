@@ -25,9 +25,9 @@ def _merge_regions(
     merged: list[SpeechRegion] = []
     for region in ordered:
         if region.end_s > duration_s:
-            raise ValueError("speech region fuera de la duracion del audio")
+            raise ValueError("speech region exceeds the audio duration")
         if merged and region.start_s < merged[-1].end_s:
-            raise ValueError("speech regions no pueden solaparse")
+            raise ValueError("speech regions cannot overlap")
         merged.append(region)
     return tuple(merged)
 
@@ -85,11 +85,11 @@ def compute_audio_quality(
     raw = np.asarray(capture, dtype=np.float32)
     cooked = np.asarray(processed, dtype=np.float32)
     if raw.ndim != 1 or cooked.ndim != 1 or len(raw) != len(cooked):
-        raise ValueError("capture y processed deben ser mono y tener igual longitud")
+        raise ValueError("capture and processed must be mono and equal length")
     if sample_rate <= 0 or not np.isfinite(raw).all() or not np.isfinite(cooked).all():
-        raise ValueError("audio y sample_rate deben ser validos")
+        raise ValueError("audio and sample_rate must be valid")
     if dropped_frames < 0 or discontinuities < 0:
-        raise ValueError("contadores de transporte no pueden ser negativos")
+        raise ValueError("transport counters cannot be negative")
     duration_s = len(raw) / sample_rate
     regions = _merge_regions(speech_regions, duration_s)
     speech = _region_samples(cooked, sample_rate, regions)

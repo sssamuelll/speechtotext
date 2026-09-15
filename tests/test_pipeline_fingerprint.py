@@ -6,7 +6,7 @@ from hypothesis import HealthCheck, given, settings, strategies as st
 from speechtotext.audio.fingerprint import ModelRef, PipelineProvenance, PipelineStep
 
 
-def test_fingerprint_es_determinista_ante_orden_de_claves():
+def test_fingerprint_is_deterministic_regardless_of_key_order():
     first = PipelineProvenance.capture(
         sample_rate=16000,
         step=PipelineStep("gain", "1", {"max_db": 18.0, "mode": "profile"}),
@@ -23,7 +23,7 @@ def test_fingerprint_es_determinista_ante_orden_de_claves():
     assert len(first.fingerprint) == 64
 
 
-def test_fingerprint_cambia_si_cambia_orden_o_threshold():
+def test_fingerprint_changes_if_step_order_or_a_threshold_changes():
     gain = PipelineStep("gain", "1", {"db": 6.0})
     resample = PipelineStep("resample", "1", {"to": 16000})
     parent = PipelineProvenance.capture(sample_rate=16000, step=gain)
@@ -39,20 +39,20 @@ def test_fingerprint_cambia_si_cambia_orden_o_threshold():
     assert reordered.fingerprint != base.fingerprint
 
 
-def test_fingerprint_rechaza_nan():
-    with pytest.raises(ValueError, match="JSON finito"):
+def test_fingerprint_rejects_nan():
+    with pytest.raises(ValueError, match="finite JSON"):
         PipelineProvenance.capture(
             sample_rate=16000,
             step=PipelineStep("gain", "1", {"db": math.nan}),
         )
 
 
-# too_slow mide cuánto tarda Hypothesis en GENERAR entradas, no la propiedad. Bajo la
-# suite entera (y en los runners de CI, más lentos que cualquier portátil) el generador de
-# `st.text()` sin alfabeto acotado se pasa del presupuesto y tumba el test sin que nada
-# esté mal: llegó a fallar en 2 de cada 3 corridas completas aquí. La propiedad que se
-# comprueba —la huella no depende del orden de las claves— es la misma con el health check
-# encendido o apagado.
+# too_slow measures how long Hypothesis takes to GENERATE inputs, not the property. In
+# the full suite (and on CI runners, which are slower than any laptop), the `st.text()`
+# generator without a bounded alphabet exceeds the budget and fails the test even though
+# nothing is wrong: it once failed in 2 out of 3 full runs here. The property being
+# checked—the fingerprint does not depend on key order—is the same whether the health
+# check is enabled or disabled.
 @settings(suppress_health_check=[HealthCheck.too_slow])
 @given(
     st.dictionaries(
@@ -67,7 +67,7 @@ def test_fingerprint_rechaza_nan():
         max_size=12,
     )
 )
-def test_fingerprint_es_determinista_para_json_finito(parameters):
+def test_fingerprint_is_deterministic_for_finite_json(parameters):
     step = PipelineStep("property", "1", parameters)
     assert PipelineProvenance.capture(
         sample_rate=16000, step=step
@@ -76,13 +76,13 @@ def test_fingerprint_es_determinista_para_json_finito(parameters):
     ).fingerprint
 
 
-def test_from_dict_rechaza_fingerprint_autoafirmado():
+def test_from_dict_rejects_a_self_asserted_fingerprint():
     provenance = PipelineProvenance.capture(
         sample_rate=16000, step=PipelineStep("decode", "1", {"mono": True})
     )
     payload = provenance.to_dict()
     payload["fingerprint"] = "0" * 64
-    with pytest.raises(ValueError, match="no coincide"):
+    with pytest.raises(ValueError, match="does not match"):
         PipelineProvenance.from_dict(payload, parent=None, models=())
 
 
@@ -94,7 +94,7 @@ def test_from_dict_rechaza_fingerprint_autoafirmado():
         lambda payload: payload.__setitem__("fingerprint", 7),
     ],
 )
-def test_from_dict_rechaza_coercion_o_campos_de_step(mutation):
+def test_from_dict_rejects_coercion_or_step_fields(mutation):
     provenance = PipelineProvenance.capture(
         sample_rate=16000, step=PipelineStep("decode", "1", {"mono": True})
     )
@@ -105,7 +105,7 @@ def test_from_dict_rechaza_coercion_o_campos_de_step(mutation):
 
 
 @pytest.mark.parametrize("sample_rate", [True, 0, -1, 16000.5, "16000"])
-def test_pipeline_rechaza_sample_rate_no_entero_positivo(sample_rate):
+def test_pipeline_rejects_a_sample_rate_that_is_not_a_positive_integer(sample_rate):
     with pytest.raises(ValueError, match="sample_rate"):
         PipelineProvenance.capture(
             sample_rate=sample_rate,
@@ -113,7 +113,7 @@ def test_pipeline_rechaza_sample_rate_no_entero_positivo(sample_rate):
         )
 
 
-def test_pipeline_rechaza_modelo_que_no_es_model_ref():
+def test_pipeline_rejects_a_model_that_is_not_a_model_ref():
     class Impostor:
         model_id = "denoise"
         fingerprint = "0" * 64
@@ -126,7 +126,7 @@ def test_pipeline_rechaza_modelo_que_no_es_model_ref():
         )
 
 
-def test_pipeline_rechaza_step_y_parent_simulados():
+def test_pipeline_rejects_mocked_step_and_parent_objects():
     fake_step = type("FakeStep", (), {"to_dict": lambda self: {}})()
     fake_parent = type("FakeParent", (), {"fingerprint": "0" * 64})()
     with pytest.raises(TypeError, match="PipelineStep"):
@@ -139,7 +139,7 @@ def test_pipeline_rechaza_step_y_parent_simulados():
         )
 
 
-def test_pipeline_factory_privado_no_es_una_ruta_publica():
+def test_pipeline_private_factory_is_not_a_public_entry_point():
     with pytest.raises(TypeError, match="factory"):
         PipelineProvenance._create(
             16000,
@@ -150,7 +150,7 @@ def test_pipeline_factory_privado_no_es_una_ruta_publica():
         )
 
 
-def test_fingerprint_desacopla_y_congela_json_anidado():
+def test_fingerprint_decouples_and_freezes_nested_json():
     parameters = {"frontend": {"bands": [1, 2]}}
     thresholds = {"vad": {"start": 0.6}}
     provenance = PipelineProvenance.capture(
@@ -170,7 +170,7 @@ def test_fingerprint_desacopla_y_congela_json_anidado():
         provenance.steps[0].parameters["frontend"]["bands"].append(5)
 
 
-def test_pipeline_provenance_no_tiene_constructor_publico():
+def test_pipeline_provenance_has_no_public_constructor():
     with pytest.raises(TypeError):
         PipelineProvenance(
             16000,
@@ -181,7 +181,7 @@ def test_pipeline_provenance_no_tiene_constructor_publico():
         )
 
 
-def test_model_ref_exige_id_y_fingerprint_hex_de_64():
+def test_model_ref_requires_an_id_and_a_64_character_hex_fingerprint():
     with pytest.raises(ValueError, match="fingerprint"):
         ModelRef("denoise", "abc")
     with pytest.raises(ValueError, match="fingerprint"):
@@ -190,7 +190,7 @@ def test_model_ref_exige_id_y_fingerprint_hex_de_64():
         ModelRef("  ", "0" * 64)
 
 
-def test_modelo_referenciado_cambia_el_fingerprint():
+def test_a_referenced_model_changes_the_fingerprint():
     step = PipelineStep("denoise", "1", {})
     without_model = PipelineProvenance.capture(sample_rate=16000, step=step)
     with_model = PipelineProvenance.capture(

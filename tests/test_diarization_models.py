@@ -1,9 +1,10 @@
-"""Tests de la diarización con pyannote.
+"""Tests for diarization with pyannote.
 
-El de integración se salta salvo que haya HF_TOKEN (y los modelos gated aceptados):
-verifica que el camino real (importar pyannote perezosamente, cargar audio en memoria,
-correr el pipeline y desempaquetar la salida 4.x) no explota y devuelve los tipos
-esperados. El de configuración corre siempre, con un doble en sys.modules.
+The integration test is skipped unless HF_TOKEN is available (and the gated models have
+been accepted): it verifies that the real path (lazily importing pyannote, loading audio
+into memory, running the pipeline, and unpacking the 4.x output) does not crash and
+returns the expected types. The configuration test always runs with a double in
+sys.modules.
 """
 import importlib.util
 import os
@@ -14,12 +15,13 @@ import types
 import pytest
 
 
-# La guarda pide las DOS cosas. Con solo HF_TOKEN el test arrancaba en un entorno sin el
-# extra [diarize] y moría importando pyannote: un fallo que no dice nada del código.
+# The guard requires BOTH things. With only HF_TOKEN, the test started in an environment
+# without the [diarize] extra and died while importing pyannote: a failure unrelated to
+# the code.
 @pytest.mark.skipif(
     not os.environ.get("HF_TOKEN")
     or importlib.util.find_spec("pyannote.audio") is None,
-    reason="requiere HF_TOKEN + modelos gated aceptados + el extra [diarize]",
+    reason="requires HF_TOKEN + accepted gated models + the [diarize] extra",
 )
 def test_diarize_returns_turns_and_embeddings(tmp_path):
     from speechtotext.speakers.diarization import diarize
@@ -41,62 +43,62 @@ def test_diarize_returns_turns_and_embeddings(tmp_path):
     assert isinstance(embeddings, dict)
 
 
-def test_get_pipeline_baja_los_batch_sizes(monkeypatch):
-    """El pico de RAM de pyannote lo manda el batch, y el checkpoint trae 32 en su
-    config.yaml. Si alguien borra las dos asignaciones el pico se duplica en silencio:
-    no falla ningún test de salida, sólo se come 1.2 GB más. Este test es el guardián."""
+def test_get_pipeline_reduces_the_batch_sizes(monkeypatch):
+    """The batch controls pyannote's peak RAM, and the checkpoint specifies 32 in its
+    config.yaml. If someone deletes both assignments, the peak quietly doubles: no
+    output test fails, but it consumes another 1.2 GB. This test is the guardrail."""
     from speechtotext.speakers import diarization
 
-    creado = []
+    created = []
 
-    class _PipelineDoble:
+    class _PipelineDouble:
         @staticmethod
         def from_pretrained(name, token=None):
-            # El doble no trae los atributos: si _get_pipeline no los asigna, el assert
-            # de abajo revienta con AttributeError en vez de pasar por casualidad.
+            # The double lacks the attributes: if _get_pipeline does not assign them, the
+            # assertion below raises AttributeError instead of passing by accident.
             obj = types.SimpleNamespace()
-            creado.append((name, token))
+            created.append((name, token))
             return obj
 
     fake = types.ModuleType("pyannote.audio")
-    fake.Pipeline = _PipelineDoble
-    # El import de pyannote.audio es perezoso (dentro de _get_pipeline), así que sembrar
-    # sys.modules antes de la llamada evita cargar torch/pyannote de verdad.
+    fake.Pipeline = _PipelineDouble
+    # Importing pyannote.audio is lazy (inside _get_pipeline), so seeding sys.modules
+    # before the call avoids loading the real torch/pyannote.
     monkeypatch.setitem(sys.modules, "pyannote.audio", fake)
-    # El singleton es global: monkeypatch lo restaura y no contamina los demás tests.
+    # The singleton is global: monkeypatch restores it and does not contaminate other tests.
     monkeypatch.setattr(diarization, "_PIPELINE", None)
 
     pipe = diarization._get_pipeline()
 
-    assert creado == [(diarization.EMBEDDING_MODEL, os.environ.get("HF_TOKEN"))]
+    assert created == [(diarization.EMBEDDING_MODEL, os.environ.get("HF_TOKEN"))]
     assert pipe.embedding_batch_size == diarization._BATCH == 8
     assert pipe.segmentation_batch_size == diarization._BATCH == 8
-    assert diarization._get_pipeline() is pipe  # sigue siendo singleton
-    assert len(creado) == 1
+    assert diarization._get_pipeline() is pipe  # It remains a singleton.
+    assert len(created) == 1
 
 
-def test_read_wav_promedia_canales_y_normaliza(tmp_path):
+def test_read_wav_averages_channels_and_normalizes(tmp_path):
     import wave
 
     import numpy as np
 
     from speechtotext.speakers.diarization import read_wav
 
-    izq = np.full(100, 16384, dtype="<i2")
-    der = np.full(100, -16384, dtype="<i2")
-    estereo = np.column_stack([izq, der]).reshape(-1)
+    left = np.full(100, 16384, dtype="<i2")
+    right = np.full(100, -16384, dtype="<i2")
+    stereo = np.column_stack([left, right]).reshape(-1)
     wav = tmp_path / "st.wav"
     with wave.open(str(wav), "wb") as w:
         w.setnchannels(2)
         w.setsampwidth(2)
         w.setframerate(8000)
-        w.writeframes(estereo.tobytes())
+        w.writeframes(stereo.tobytes())
     samples, rate = read_wav(wav)
     assert rate == 8000 and samples.dtype == np.float32 and samples.shape == (100,)
-    assert float(np.abs(samples).max()) == 0.0  # la media de +0.5 y -0.5
+    assert float(np.abs(samples).max()) == 0.0  # The average of +0.5 and -0.5.
 
 
-def test_waveform_para_pyannote_es_un_tensor_1xN():
+def test_waveform_for_pyannote_is_a_1xN_tensor():
     torch = pytest.importorskip("torch")
     import numpy as np
 

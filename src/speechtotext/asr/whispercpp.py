@@ -1,8 +1,8 @@
-"""Backend whisper.cpp: subprocess sobre whisper-cli (prebuilt CUDA pinneado en enginepin).
+"""whisper.cpp backend: subprocess over whisper-cli (prebuilt CUDA pinned in enginepin).
 
-El wav de entrada lo escribe este backend desde las muestras (16 kHz mono PCM16) en un
-temporal ASCII: el path del audio del usuario jamas viaja en argv, porque whisper-cli es
-main(char**) y una ruta no-ASCII llega corrupta en silencio.
+This backend writes the input WAV from the samples (16 kHz mono PCM16) to an ASCII
+temporary file: the user's audio path never travels in argv because whisper-cli is
+main(char**), and a non-ASCII path arrives silently corrupted.
 """
 from __future__ import annotations
 
@@ -33,16 +33,16 @@ _NO_SIGNALS = SegmentNativeSignals(None, None, None)
 
 
 def parse_ojf(data: dict) -> tuple[list[TranscriptionSegment], str | None]:
-    """Parser del JSON de `-ojf` (fixture real: tests/fixtures/whispercpp_ojf.json).
+    """Parser for `-ojf` JSON (real fixture: tests/fixtures/whispercpp_ojf.json).
 
-    Usa offsets (ms enteros -> segundos) y text; ignora tokens. El texto se conserva tal
-    cual (espacio inicial incluido), paridad con faster-whisper. Senales que el motor no
-    emite se OMITEN, jamas se rellenan: sin palabras, sin no_speech/avg_logprob.
+    Uses offsets (integer ms -> seconds) and text; ignores tokens. Text is preserved as-is
+    (including leading space), for parity with faster-whisper. Native signals the engine
+    does not emit are OMITTED, never filled in: no words, no no_speech/avg_logprob.
     """
     segments = []
     for entry in data["transcription"]:
         if not entry["text"].strip():
-            continue  # segmentos vacios no aportan texto y ensucian la cobertura
+            continue  # empty segments add no text and muddy coverage
         segments.append(TranscriptionSegment(
             entry["offsets"]["from"] / 1000.0, entry["offsets"]["to"] / 1000.0,
             entry["text"], (), _NO_SIGNALS,
@@ -61,10 +61,11 @@ def _write_wav(path: str, samples: np.ndarray) -> None:
 
 class WhisperCppBackend:
     backend_id = "whispercpp"
-    # --prompt es INERTE bajo -mc 0 (bit-identico en 7 corridas, medido 2026-07-27);
-    # sin -mc 0 contamina la ortografia global. Avisar "degradado" sobre un knob inerte
-    # fabricaria un efecto que no ocurrio: rechazo. VAD y palabras: el motor no los trae.
-    caps = Caps(hotwords="rechazado", vad="degradado", word_timestamps="degradado")
+    # --prompt is INERT under -mc 0 (bit-identical across 7 runs, measured 2026-07-27);
+    # without -mc 0 it contaminates the global spelling. Labeling an inert knob
+    # "degraded" would fabricate an effect that never happened: reject it instead.
+    # VAD and words: the engine doesn't provide them.
+    caps = Caps(hotwords="rejected", vad="degraded", word_timestamps="degraded")
     quant = "q5_0"
 
     def __init__(
@@ -78,7 +79,7 @@ class WhisperCppBackend:
     ) -> None:
         if model not in enginepin._MODEL_ALIAS:
             raise ValueError(
-                f"modelo {model!r} no está pinneado para whispercpp; disponibles: "
+                f"model {model!r} is not pinned for whispercpp; available: "
                 f"{', '.join(sorted(enginepin._MODEL_ALIAS))}"
             )
         self._model = model
@@ -98,13 +99,13 @@ class WhisperCppBackend:
     @property
     def engine_version(self) -> str:
         if sys.platform != "win32":
-            return "whisper.cpp (PATH, sin pin)"   # binario del sistema: versión no garantizada
+            return "whisper.cpp (PATH, unpinned)"   # system binary: version not guaranteed
         return f"whisper.cpp {enginepin.ENGINE_PIN['version']}"
 
     @property
     def device(self) -> str:
-        # win32: build CUDA pinneado, corre en la GPU siempre. Fuera: el binario del PATH
-        # decide según su build (Metal, CUDA, CPU) y no lo dice. Misma etiqueta que core.probe.
+        # win32: pinned CUDA build, always runs on the GPU. Elsewhere: the binary on PATH
+        # decides based on its build (Metal, CUDA, CPU) and does not say. Same label as core.probe.
         return "cuda" if sys.platform == "win32" else "native"
 
     def warm(self) -> None:
@@ -115,22 +116,22 @@ class WhisperCppBackend:
 
     def transcribe(self, samples: np.ndarray, request: TranscriptionRequest) -> TranscriptionResult:
         if request.hotwords:
-            # No degradacion: avisar sobre un knob inerte fabricaria un efecto que no ocurrio.
+            # No degradation: warning about an inert knob would fabricate an effect that never happened.
             raise AsrError("unsupported_option", False,
-                           "--hotwords no tiene efecto con whispercpp (--prompt es inerte con "
-                           "-mc 0, medido 2026-07-27); usa --engine faster-whisper")
+                           "--hotwords has no effect with whispercpp (--prompt is inert with "
+                           "-mc 0, measured 2026-07-27); use --engine faster-whisper")
         self.warm()
         started = self._clock()
         fd, wav = tempfile.mkstemp(suffix=".wav")
         os.close(fd)
-        fd, base = tempfile.mkstemp(prefix="wcpp-")  # base SIN extension; el CLI escribe base+".json"
+        fd, base = tempfile.mkstemp(prefix="wcpp-")  # extensionless base; CLI writes base+".json"
         os.close(fd)
         json_path = base + ".json"
         try:
             for p in (wav, base):
                 if not p.isascii():
                     raise RuntimeError(
-                        f"ruta con caracteres no ASCII; whisper-cli no la soporta: {p}"
+                        f"path has non-ASCII characters; whisper-cli does not support it: {p}"
                     )
             _write_wav(wav, samples)
             cmd = [
@@ -139,12 +140,12 @@ class WhisperCppBackend:
                 "-f", wav,
                 "-l", "auto" if request.language == "auto" else request.language,
                 "-bs", str(request.beam_size),
-                # -mc 0 HARDCODEADO: paridad con condition_on_previous_text=False.
+                # -mc 0 HARDCODED: parity with condition_on_previous_text=False.
                 "-mc", "0",
                 "-np", "-ojf", "-of", base,
             ]
-            # 4x cubre 17 veces el caso caliente medido (19.3x tiempo real); piso 120 s
-            # para el JIT frio.
+            # 4x covers the measured warm case 17 times (19.3x real time); 120 s floor
+            # for cold JIT.
             timeout = max(120, 4 * len(samples) / SAMPLE_RATE)
             proc = self._run(cmd, capture_output=True, timeout=timeout)
             if proc.returncode != 0:
@@ -157,7 +158,7 @@ class WhisperCppBackend:
                 segments, language = parse_ojf(data)
             except (OSError, ValueError, KeyError, TypeError) as exc:
                 raise RuntimeError(
-                    f"whisper-cli termino bien pero su JSON no sirve ({json_path}): {exc}"
+                    f"whisper-cli exited cleanly but its JSON is unusable ({json_path}): {exc}"
                 ) from exc
         finally:
             for p in (wav, base, json_path):

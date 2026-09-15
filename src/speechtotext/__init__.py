@@ -1,3 +1,3 @@
-"""Voz a texto 100% local: transcripción, medidas sobre el audio y hablantes."""
+"""Speech to text, 100% local: transcription, audio measurements, and speakers."""
 
 __version__ = "0.6.0.dev0"

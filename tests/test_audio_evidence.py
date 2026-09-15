@@ -1,14 +1,12 @@
-"""Evidencia de voz por DSP: medidas deterministas de senal, no la opinion de un
-modelo. La pregunta no es «que dijo» sino «habia una fuente de voz humana aqui».
+"""DSP voice evidence: deterministic signal measurements, not a model's opinion.
+The question is not "what did it say" but "was there a human voice source here."
 
-Medido (2026-09-11) sobre audio real del telefono: el `no_speech`
-de whisper salio con el signo al reves (cortaba habla y dejaba pasar inventos);
-la energia en banda de voz separo conversacion de cuarto vacio con 0 % de
-solape intercuartilico.
+Measured (2026-09-11) on real phone audio: Whisper's `no_speech` had the sign
+backward (it cut speech and let fabrications through); voice-band energy separated
+conversation from an empty room with 0% interquartile overlap.
 
-Los tests de aqui nacieron de una revision adversarial en la que 24 de 33
-mutaciones SOBREVIVIERON a la suite anterior. Cada test nuevo nombra la
-mutacion que mata.
+The tests here came from an adversarial review in which 24 of 33 mutations
+SURVIVED the previous suite. Each new test names the mutation it kills.
 """
 import math
 import subprocess
@@ -24,65 +22,65 @@ from speechtotext.audio.evidence import _normalized_autocorrelation
 SR = 16000
 
 
-def _voz_sintetica(f0=140.0, segundos=1.0, sr=SR, amplitud=0.2):
-    """Serie armonica en F0 con energia concentrada donde viven las vocales.
+def _synthetic_voice(f0=140.0, seconds=1.0, sr=SR, amplitude=0.2):
+    """Harmonic series at F0 with energy concentrated where vowels live.
 
-    Cinco armonicos ponderados hacia 400-1200 Hz (F1/F2 de una vocal abierta),
-    con envolvente lenta para que no sea un tono de laboratorio.
+    Five harmonics weighted toward 400-1200 Hz (F1/F2 of an open vowel),
+    with a slow envelope so it is not a laboratory tone.
     """
-    t = np.arange(int(segundos * sr)) / sr
-    pesos = {1: 0.5, 2: 0.9, 3: 1.0, 4: 0.8, 5: 0.5, 6: 0.3, 8: 0.2}
-    x = sum(w * np.sin(2 * np.pi * f0 * k * t) for k, w in pesos.items())
-    envolvente = 0.6 + 0.4 * np.sin(2 * np.pi * 4.0 * t)   # tasa silabica
-    return (amplitud * x / np.max(np.abs(x)) * envolvente).astype(np.float32)
+    t = np.arange(int(seconds * sr)) / sr
+    weights = {1: 0.5, 2: 0.9, 3: 1.0, 4: 0.8, 5: 0.5, 6: 0.3, 8: 0.2}
+    x = sum(w * np.sin(2 * np.pi * f0 * k * t) for k, w in weights.items())
+    envelope = 0.6 + 0.4 * np.sin(2 * np.pi * 4.0 * t)   # syllabic rate
+    return (amplitude * x / np.max(np.abs(x)) * envelope).astype(np.float32)
 
 
-def _ruido_blanco(segundos=1.0, sr=SR, semilla=7, amplitud=0.05):
-    rng = np.random.default_rng(semilla)
-    return (amplitud * rng.standard_normal(int(segundos * sr))).astype(np.float32)
+def _white_noise(seconds=1.0, sr=SR, seed=7, amplitude=0.05):
+    rng = np.random.default_rng(seed)
+    return (amplitude * rng.standard_normal(int(seconds * sr))).astype(np.float32)
 
 
-def _tono(hz, segundos=1.0, sr=SR, amplitud=0.2):
-    t = np.arange(int(segundos * sr)) / sr
-    return (amplitud * np.sin(2 * np.pi * hz * t)).astype(np.float32)
+def _tone(hz, seconds=1.0, sr=SR, amplitude=0.2):
+    t = np.arange(int(seconds * sr)) / sr
+    return (amplitude * np.sin(2 * np.pi * hz * t)).astype(np.float32)
 
 
 # ----------------------------------------------------------------------------
-# lo que una voz deja, lo que no
+# what a voice leaves behind, and what it does not
 # ----------------------------------------------------------------------------
 
-def test_una_voz_sintetica_deja_evidencia_de_voz():
-    e = compute_voice_evidence(_voz_sintetica(f0=140.0), SR)
+def test_a_synthetic_voice_leaves_voice_evidence():
+    e = compute_voice_evidence(_synthetic_voice(f0=140.0), SR)
     assert e.frames > 0
     assert e.voice_band_ratio > 0.6
     assert e.voiced_ratio > 0.8
     assert e.spectral_flatness < 0.1
 
 
-def test_el_ruido_blanco_NO_deja_evidencia_de_voz():
-    e = compute_voice_evidence(_ruido_blanco(), SR)
+def test_white_noise_does_NOT_leave_voice_evidence():
+    e = compute_voice_evidence(_white_noise(), SR)
     assert e.voiced_ratio < 0.2
-    # ruido plano: la banda 300-3400 de un espectro de 0-8000 pesa ~0.39
+    # flat noise: the 300-3400 band of a 0-8000 spectrum weighs ~0.39
     assert e.voice_band_ratio < 0.5
     assert e.spectral_flatness > 0.5
 
 
-def test_un_zumbido_tonal_por_debajo_de_la_banda_NO_es_voz():
-    """El HNR clasico premiaba el zumbido de la nevera porque es MAS armonico
-    que el habla. Aqui el zumbido cae fuera de la banda de voz y fuera del
-    rango de F0, y no cuenta como sonoro."""
-    e = compute_voice_evidence(_tono(50.0), SR)
+def test_a_tonal_hum_below_the_band_is_NOT_voice():
+    """Classic HNR rewarded a refrigerator hum because it is MORE harmonic than
+    speech. Here the hum falls outside the voice band and the F0 range, so it
+    does not count as voiced."""
+    e = compute_voice_evidence(_tone(50.0), SR)
     assert e.voice_band_ratio < 0.05
     assert e.voiced_ratio < 0.1
 
 
-def test_un_tono_puro_DENTRO_de_la_banda_da_perfil_de_voz_y_eso_se_declara():
-    """Limite conocido, no bug: un timbre, una alarma o un acople a 1 kHz da
-    banda=1 y sonoro=1 con un F0 subarmonico inventado. La autocorrelacion
-    tiene picos en todos los multiplos del periodo y el rango 70-350 Hz los
-    recoge. Lo que SI lo delata es la planitud: una linea espectral sola.
-    El que llama combina las tres medidas; esta libreria no da veredictos."""
-    e = compute_voice_evidence(_tono(1000.0), SR)
+def test_a_pure_tone_INSIDE_the_band_gives_a_voice_profile_and_that_is_declared():
+    """Known limitation, not a bug: a doorbell, alarm, or 1 kHz feedback gives
+    band=1 and voiced=1 with an invented subharmonic F0. Autocorrelation has
+    peaks at every multiple of the period, and the 70-350 Hz range catches them.
+    What DOES reveal it is flatness: a single spectral line. The caller combines
+    all three measurements; this library does not issue verdicts."""
+    e = compute_voice_evidence(_tone(1000.0), SR)
     assert e.voice_band_ratio > 0.99
     assert e.voiced_ratio > 0.99
     assert e.f0_median_hz is not None and e.f0_median_hz < 350.0
@@ -90,86 +88,86 @@ def test_un_tono_puro_DENTRO_de_la_banda_da_perfil_de_voz_y_eso_se_declara():
 
 
 # ----------------------------------------------------------------------------
-# invariancias: las que la revision encontro rotas
+# invariances: the ones the review found broken
 # ----------------------------------------------------------------------------
 
-@pytest.mark.parametrize("ganancia_db", [-20.0, -40.0])
-def test_las_medidas_NO_dependen_de_la_ganancia(ganancia_db):
-    """La revision midio spectral_flatness moviendose 4e9x entre 0 y -40 dB por
-    un EPS absoluto. El audio real del telefono vive a -48..-60 LUFS: justo
-    ahi. Un descriptor que cambia con el volumen no describe el espectro."""
-    x = _voz_sintetica()
+@pytest.mark.parametrize("gain_db", [-20.0, -40.0])
+def test_the_measurements_do_NOT_depend_on_gain(gain_db):
+    """The review measured spectral_flatness moving 4e9x between 0 and -40 dB
+    because of an absolute EPS. Real phone audio lives at -48..-60 LUFS: right
+    there. A descriptor that changes with volume does not describe the spectrum."""
+    x = _synthetic_voice()
     a = compute_voice_evidence(x, SR)
-    b = compute_voice_evidence(x * 10 ** (ganancia_db / 20), SR)
+    b = compute_voice_evidence(x * 10 ** (gain_db / 20), SR)
     assert b.voice_band_ratio == pytest.approx(a.voice_band_ratio, rel=1e-6)
     assert b.spectral_flatness == pytest.approx(a.spectral_flatness, rel=1e-3)
     assert b.voiced_ratio == pytest.approx(a.voiced_ratio, abs=0.02)
     assert b.f0_median_hz == pytest.approx(a.f0_median_hz, rel=1e-6)
 
 
-def test_la_planitud_describe_el_espectro_y_NO_la_fraccion_de_pausa():
-    """Media sin ponderar sobre tramos: la planitud seguia la fraccion de
-    silencio (0.00 -> 0.25 -> 0.49 con 0/50/90 % de pausa con dither). Los
-    tramos pesan por su energia, como ya hacia voice_band_ratio."""
-    voz = _voz_sintetica(segundos=1.0)
-    pausa = _ruido_blanco(segundos=1.0, amplitud=1e-5)       # dither, no ceros exactos
-    sola = compute_voice_evidence(voz, SR).spectral_flatness
-    con_pausa = compute_voice_evidence(np.concatenate([voz, pausa]), SR).spectral_flatness
-    assert con_pausa == pytest.approx(sola, abs=0.01)
+def test_flatness_describes_the_spectrum_and_NOT_the_pause_fraction():
+    """Unweighted mean across frames: flatness followed the silence fraction
+    (0.00 -> 0.25 -> 0.49 with a 0/50/90% dithered pause). Frames are weighted
+    by their energy, as voice_band_ratio already was."""
+    voice = _synthetic_voice(seconds=1.0)
+    pause = _white_noise(seconds=1.0, amplitude=1e-5)       # dither, not exact zeros
+    alone = compute_voice_evidence(voice, SR).spectral_flatness
+    with_pause = compute_voice_evidence(np.concatenate([voice, pause]), SR).spectral_flatness
+    assert with_pause == pytest.approx(alone, abs=0.01)
 
 
 # ----------------------------------------------------------------------------
-# F0: la aritmetica, sin holgura donde se esconde un off-by-one
+# F0: the arithmetic, with no slack for an off-by-one to hide in
 # ----------------------------------------------------------------------------
 
-def test_la_normalizacion_de_praat_da_uno_en_el_periodo_aunque_el_lag_sea_largo():
-    """Dividir por r[0] castiga los lags largos: a 70 Hz (lag 229 de 1024) da
-    0.78 y sesga el F0 hacia arriba. Con la energia de cada mitad da ~1.
-    Mata la mutacion «r[0] en vez de Praat», que la suite anterior dejaba pasar."""
+def test_praat_normalization_is_one_at_the_period_even_when_the_lag_is_long():
+    """Dividing by r[0] penalizes long lags: at 70 Hz (lag 229 of 1024) it gives
+    0.78 and biases F0 upward. Using the energy of each half gives ~1. This kills
+    the "r[0] instead of Praat" mutation that the previous suite let through."""
     frame = round(SR * 0.064)
-    x = _tono(70.0, segundos=frame / SR)[None, :].astype(np.float64)
+    x = _tone(70.0, seconds=frame / SR)[None, :].astype(np.float64)
     r = _normalized_autocorrelation(x)
     lag = round(SR / 70.0)
     assert r[0, lag] > 0.99
-    assert r[0, lag] > r[0, 0] * 0.99   # y NO cae con el lag
+    assert r[0, lag] > r[0, 0] * 0.99   # and it does NOT fall with the lag
 
 
 @pytest.mark.parametrize("f0", [90.0, 140.0, 220.0, 300.0])
-def test_el_f0_es_EXACTAMENTE_el_lag_entero_mas_cercano(f0):
-    """Sin interpolacion parabolica, el F0 correcto es sr/round(sr/f0). Una
-    tolerancia relativa del 3 % dejaba pasar un lag de mas (+1): a 300 Hz eso
-    son 290.9 Hz y nadie lo veia. Tambien mata la caida de octava (sin coste
-    de octava, 300 -> 100)."""
-    e = compute_voice_evidence(_voz_sintetica(f0=f0), SR)
+def test_f0_is_EXACTLY_the_nearest_integer_lag(f0):
+    """Without parabolic interpolation, the correct F0 is sr/round(sr/f0). A 3%
+    relative tolerance let an extra lag (+1) through: at 300 Hz that is 290.9 Hz
+    and nobody noticed. It also kills the octave drop (without octave cost,
+    300 -> 100)."""
+    e = compute_voice_evidence(_synthetic_voice(f0=f0), SR)
     assert e.f0_median_hz == pytest.approx(SR / round(SR / f0), rel=1e-9)
 
 
-def test_voiced_ratio_es_una_FRACCION_no_un_maximo():
-    """Todas las senales de la suite anterior daban 0.0 o 1.0 exactos, asi que
-    `mean -> max` sobrevivia. Media voz, media silencio: ~0.5."""
-    x = np.concatenate([_voz_sintetica(segundos=0.5), np.zeros(SR // 2, dtype=np.float32)])
+def test_voiced_ratio_is_a_FRACTION_not_a_maximum():
+    """Every signal in the previous suite gave exactly 0.0 or 1.0, so
+    `mean -> max` survived. Half voice, half silence: ~0.5."""
+    x = np.concatenate([_synthetic_voice(seconds=0.5), np.zeros(SR // 2, dtype=np.float32)])
     e = compute_voice_evidence(x, SR)
     assert 0.35 < e.voiced_ratio < 0.65
 
 
 # ----------------------------------------------------------------------------
-# los bordes de la banda son la definicion del descriptor
+# the band edges are the descriptor's definition
 # ----------------------------------------------------------------------------
 
-@pytest.mark.parametrize("hz, dentro", [(250.0, False), (350.0, True), (3300.0, True), (3600.0, False)])
-def test_los_bordes_de_la_banda_de_voz_son_300_y_3400(hz, dentro):
-    """Ningun test fijaba 300/3400; mover la banda a 200-4000 pasaba la suite.
-    Un tono a 50 Hz de cada borde cae entero de un lado."""
-    e = compute_voice_evidence(_tono(hz), SR)
-    assert (e.voice_band_ratio > 0.98) is dentro
-    assert (e.voice_band_ratio < 0.02) is (not dentro)
+@pytest.mark.parametrize("hz, inside", [(250.0, False), (350.0, True), (3300.0, True), (3600.0, False)])
+def test_the_voice_band_edges_are_300_and_3400(hz, inside):
+    """No test pinned 300/3400; moving the band to 200-4000 passed the suite.
+    A tone 50 Hz from either edge falls entirely on one side."""
+    e = compute_voice_evidence(_tone(hz), SR)
+    assert (e.voice_band_ratio > 0.98) is inside
+    assert (e.voice_band_ratio < 0.02) is (not inside)
 
 
 # ----------------------------------------------------------------------------
-# «no pude medir» no es «no hay voz»
+# "could not measure" is not "there is no voice"
 # ----------------------------------------------------------------------------
 
-def test_el_silencio_no_inventa_evidencia():
+def test_silence_does_not_invent_evidence():
     e = compute_voice_evidence(np.zeros(SR, dtype=np.float32), SR)
     assert e.frames > 0
     assert e.voice_band_ratio is None
@@ -178,23 +176,23 @@ def test_el_silencio_no_inventa_evidencia():
     assert e.f0_median_hz is None
 
 
-def test_demasiado_bajo_para_medir_es_None_en_TODAS_las_medidas():
-    """Antes voice_band_ratio era None solo con ceros digitales exactos
-    (-190 dBFS) y voiced_ratio salia 0.0 tanto sin voz como con voz a -100 dB.
-    Un 0.0 que significa dos cosas es un veredicto escondido. La regla es UNA:
-    si ningun tramo supera SILENCE_RMS, no se midio nada."""
-    e = compute_voice_evidence(_voz_sintetica(amplitud=1e-5), SR)   # -100 dBFS
+def test_too_low_to_measure_is_None_for_ALL_measurements():
+    """Previously voice_band_ratio was None only for exact digital zeros
+    (-190 dBFS), while voiced_ratio was 0.0 both without voice and with voice at
+    -100 dB. A 0.0 that means two things is a hidden verdict. There is ONE rule:
+    if no frame exceeds SILENCE_RMS, nothing was measured."""
+    e = compute_voice_evidence(_synthetic_voice(amplitude=1e-5), SR)   # -100 dBFS
     assert e.frames > 0
     assert e == VoiceEvidence(None, None, None, None, e.frames)
 
 
-def test_ruido_audible_sin_voz_es_CERO_medido_no_None():
-    e = compute_voice_evidence(_ruido_blanco(), SR)
+def test_audible_noise_without_voice_is_measured_ZERO_not_None():
+    e = compute_voice_evidence(_white_noise(), SR)
     assert e.voiced_ratio == 0.0
     assert e.voice_band_ratio is not None
 
 
-def test_audio_mas_corto_que_un_tramo_no_tiene_evidencia():
+def test_audio_shorter_than_one_frame_has_no_evidence():
     e = compute_voice_evidence(np.zeros(100, dtype=np.float32), SR)
     assert e == VoiceEvidence(
         voice_band_ratio=None, voiced_ratio=None, f0_median_hz=None,
@@ -203,94 +201,94 @@ def test_audio_mas_corto_que_un_tramo_no_tiene_evidencia():
 
 
 @pytest.mark.parametrize(
-    "muestras, sr",
+    "samples, sr",
     [
-        (np.zeros((2, SR), dtype=np.float32), SR),          # estereo
+        (np.zeros((2, SR), dtype=np.float32), SR),          # stereo
         (np.array([0.0, np.nan], dtype=np.float32), SR),     # NaN
-        (np.zeros(SR, dtype=np.float32), 0),                 # sr invalido
-        (np.zeros(SR, dtype=np.float32), 300),               # sr por debajo del rango de F0
+        (np.zeros(SR, dtype=np.float32), 0),                 # invalid sr
+        (np.zeros(SR, dtype=np.float32), 300),               # sr below the F0 range
     ],
 )
-def test_la_entrada_invalida_se_rechaza(muestras, sr):
+def test_invalid_input_is_rejected(samples, sr):
     with pytest.raises(ValueError):
-        compute_voice_evidence(muestras, sr)
+        compute_voice_evidence(samples, sr)
 
 
 @pytest.mark.parametrize(
-    "campos",
+    "fields",
     [
         dict(voice_band_ratio=-0.1), dict(voice_band_ratio=1.5), dict(voiced_ratio=2.0),
         dict(f0_median_hz=-1.0), dict(f0_median_hz=float("nan")),
         dict(spectral_flatness=float("inf")), dict(frames=-1),
     ],
 )
-def test_el_dataclass_valida_como_sus_vecinos(campos):
+def test_the_dataclass_validates_like_its_neighbors(fields):
     base = dict(voice_band_ratio=0.5, voiced_ratio=0.5, f0_median_hz=120.0,
                 spectral_flatness=0.1, frames=10)
     with pytest.raises(ValueError):
-        VoiceEvidence(**{**base, **campos})
+        VoiceEvidence(**{**base, **fields})
 
 
 # ----------------------------------------------------------------------------
-# determinismo de verdad, y memoria acotada
+# actual determinism, and bounded memory
 # ----------------------------------------------------------------------------
 
-# Valores clavados de `_voz_sintetica()` a 16 kHz (numpy pocketfft, 2026-09-11, en
-# Windows x86-64). Si cambian sin que cambie la definicion de la medida, cambio el
-# backend o la aritmetica — y eso es lo que este test existe para gritar.
+# Pinned values for `_synthetic_voice()` at 16 kHz (numpy pocketfft, 2026-09-11,
+# on Windows x86-64). If they change without a change to the measurement definition,
+# the backend or arithmetic changed — and that is what this test exists to flag.
 #
-# Pero NO se comparan bit a bit. La primera corrida de CI fuera de Windows lo dejo
-# claro: pocketfft despacha por SIMD segun la maquina y el ultimo bit no viaja. Medido
-# 2026-09-14 con estos mismos valores: Linux x86-64 da `band` a 1 ULP del valor de
-# Windows, y macOS arm64 da `flat` a 3 ULP. No es una regresion; es que la igualdad
-# exacta de floats entre plataformas nunca fue una propiedad que este codigo pudiera
-# prometer. La tolerancia de abajo deja pasar ese ruido y sigue gritando ante cualquier
-# cambio que importe: un backend o una formula distintos mueven digitos, no bits.
+# But they are NOT compared bit for bit. The first CI run outside Windows made that
+# clear: pocketfft dispatches SIMD by machine, and the last bit does not carry over.
+# Measured on 2026-09-14 with these same values: Linux x86-64 gives `band` 1 ULP from
+# the Windows value, and macOS arm64 gives `flat` 3 ULP away. This is not a regression;
+# exact cross-platform float equality was never a property this code could promise.
+# The tolerance below admits that noise while still flagging any meaningful change:
+# a different backend or formula moves digits, not bits.
 #
-# Lo que si se compara bit a bit es el otro proceso contra este: misma maquina, misma
-# build, y ahi la igualdad exacta es exigible. Esa es la mitad del test que de verdad
-# comprueba determinismo, y la que caza un mutante que dependa de time.time_ns().
+# What is compared bit for bit is the other process against this one: same machine,
+# same build, where exact equality is required. That is the half of the test that
+# truly checks determinism and catches a mutant that depends on time.time_ns().
 GOLDEN = {
     "band": 0.6558522702500179,
     "voiced": 1.0,
     "f0": 140.35087719298247,   # 16000 / 114
     "flat": 2.1362539235000618e-09,
 }
-TOLERANCIA = 1e-12   # ~6000 veces el ruido de plataforma medido
+TOLERANCE = 1e-12   # ~6000 times the measured platform noise
 
-_CODIGO_OTRO_PROCESO = (
+_OTHER_PROCESS_CODE = (
     "import sys; sys.path.insert(0, 'tests');"
-    "from test_audio_evidence import _voz_sintetica, SR;"
+    "from test_audio_evidence import _synthetic_voice, SR;"
     "from speechtotext.audio import compute_voice_evidence;"
-    "e = compute_voice_evidence(_voz_sintetica(), SR);"
+    "e = compute_voice_evidence(_synthetic_voice(), SR);"
     "print(e.voice_band_ratio.hex(), e.voiced_ratio.hex(), "
     "e.f0_median_hz.hex(), e.spectral_flatness.hex(), e.frames)"
 )
 
 
-def test_la_evidencia_es_determinista_ENTRE_PROCESOS_y_esta_clavada():
-    """Comparar dos llamadas en el mismo proceso es una tautologia: la revision
-    construyo un mutante que dependia de time.time_ns() y lo pasaba. Aqui otro
-    proceso calcula lo mismo y los bytes tienen que coincidir con un valor
-    clavado — que ademas detecta un cambio de backend de FFT."""
-    e = compute_voice_evidence(_voz_sintetica(), SR)
-    otro = subprocess.run([sys.executable, "-c", _CODIGO_OTRO_PROCESO],
-                          capture_output=True, text=True, check=True)
-    assert otro.stdout.split() == [
+def test_evidence_is_deterministic_ACROSS_PROCESSES_and_pinned():
+    """Comparing two calls in the same process is a tautology: the review built
+    a mutant that depended on time.time_ns() and passed it. Here another process
+    computes the same result, and the bytes must match a pinned value — which also
+    detects a change to the FFT backend."""
+    e = compute_voice_evidence(_synthetic_voice(), SR)
+    other = subprocess.run([sys.executable, "-c", _OTHER_PROCESS_CODE],
+                           capture_output=True, text=True, check=True)
+    assert other.stdout.split() == [
         e.voice_band_ratio.hex(), e.voiced_ratio.hex(), e.f0_median_hz.hex(),
         e.spectral_flatness.hex(), str(e.frames),
     ]
-    medido = {"band": e.voice_band_ratio, "voiced": e.voiced_ratio,
-              "f0": e.f0_median_hz, "flat": e.spectral_flatness}
-    lejos = {
-        clave: (valor, GOLDEN[clave])
-        for clave, valor in medido.items()
-        if not math.isclose(valor, GOLDEN[clave], rel_tol=TOLERANCIA)
+    measured = {"band": e.voice_band_ratio, "voiced": e.voiced_ratio,
+                "f0": e.f0_median_hz, "flat": e.spectral_flatness}
+    far = {
+        key: (value, GOLDEN[key])
+        for key, value in measured.items()
+        if not math.isclose(value, GOLDEN[key], rel_tol=TOLERANCE)
     }
-    assert not lejos, f"la medida se movio mas que el ruido de plataforma: {lejos}"
+    assert not far, f"measurement moved farther than the platform noise: {far}"
 
 
-def _pico_mb(x):
+def _peak_mb(x):
     tracemalloc.start()
     try:
         compute_voice_evidence(x, SR)
@@ -299,11 +297,11 @@ def _pico_mb(x):
         tracemalloc.stop()
 
 
-def test_la_memoria_esta_ACOTADA_y_no_crece_con_la_duracion():
-    """La revision midio 88-90x el buffer: 330 MB por 60 s, 19 GB por una hora,
-    en una libreria que dice procesar grabaciones de horas. Los tramos son una
-    vista (sin copia) y se procesan por lotes: el pico no depende de la duracion."""
-    corto = _pico_mb(_voz_sintetica(segundos=20.0))
-    largo = _pico_mb(_voz_sintetica(segundos=120.0))
-    assert corto < 80.0, f"pico {corto:.0f} MB por 20 s"
-    assert largo < corto * 1.5, f"20 s: {corto:.0f} MB, 120 s: {largo:.0f} MB"
+def test_memory_is_BOUNDED_and_does_not_grow_with_duration():
+    """The review measured 88-90x the buffer: 330 MB for 60 s, 19 GB for one hour,
+    in a library that claims to process hours-long recordings. Frames are a view
+    (without a copy) and are processed in batches: the peak does not depend on duration."""
+    short = _peak_mb(_synthetic_voice(seconds=20.0))
+    long = _peak_mb(_synthetic_voice(seconds=120.0))
+    assert short < 80.0, f"peak {short:.0f} MB for 20 s"
+    assert long < short * 1.5, f"20 s: {short:.0f} MB, 120 s: {long:.0f} MB"

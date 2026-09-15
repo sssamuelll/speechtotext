@@ -32,7 +32,7 @@ def _samples(seconds: float = 1.0) -> np.ndarray:
     return np.zeros(int(seconds * 16000), dtype=np.float32)
 
 
-def test_backend_extrae_palabras_senales_y_opciones():
+def test_the_backend_extracts_words_native_signals_and_options():
     words = [SimpleNamespace(start=0.1, end=0.4, word=" hola", probability=0.91)]
     segments = [
         SimpleNamespace(start=0.0, end=1.0, text=" hola", words=words,
@@ -48,10 +48,10 @@ def test_backend_extrae_palabras_senales_y_opciones():
     samples = _samples()
     result = backend.transcribe(
         samples,
-        TranscriptionRequest(language="es", hotwords=("Bézier",), context="reunión"),
+        TranscriptionRequest(language="es", hotwords=("Bézier",), context="meeting"),
     )
     assert result.text == "hola mundo"
-    assert result.segments[0].text == " hola"          # crudo: el espacio inicial es del motor
+    assert result.segments[0].text == " hola"          # raw: the leading space comes from the engine
     assert result.words[0].text == " hola"
     assert calls["audio"] is samples
     assert calls["kwargs"]["vad_filter"] is False
@@ -65,10 +65,10 @@ def test_backend_extrae_palabras_senales_y_opciones():
     assert result.latency_ms == 125
     assert calls["kwargs"]["condition_on_previous_text"] is False
     assert calls["kwargs"]["hotwords"] == "Bézier"
-    assert calls["kwargs"]["initial_prompt"] == "reunión"
+    assert calls["kwargs"]["initial_prompt"] == "meeting"
 
 
-def test_nombre_de_modelo_deja_que_faster_whisper_lo_resuelva():
+def test_a_model_name_lets_faster_whisper_resolve_it():
     calls = {}
     _backend("large-v3", [], _INFO, calls).warm()
     assert calls["factory_path"] == "large-v3"
@@ -77,7 +77,7 @@ def test_nombre_de_modelo_deja_que_faster_whisper_lo_resuelva():
     assert calls["factory_kwargs"]["compute_type"] == "int8"
 
 
-def test_ruta_a_directorio_se_carga_solo_local(tmp_path):
+def test_a_directory_path_loads_local_files_only(tmp_path):
     calls = {}
     backend = _backend(tmp_path, [], _INFO, calls)
     assert backend.model_id == tmp_path.name
@@ -86,14 +86,14 @@ def test_ruta_a_directorio_se_carga_solo_local(tmp_path):
     assert calls["factory_kwargs"]["local_files_only"] is True
 
 
-def test_model_version_es_del_llamador():
+def test_the_model_version_is_supplied_by_the_caller():
     revision = "0123456789abcdef0123456789abcdef01234567"
     backend = _backend("large-v3", [], _INFO, {}, model_version=revision)
     assert backend.model_version == revision
     assert backend.transcribe(_samples(), TranscriptionRequest()).model_version == revision
 
 
-def test_warm_carga_una_sola_vez():
+def test_warm_loads_the_model_only_once():
     calls = {"n": 0}
 
     def factory(path, **kwargs):
@@ -108,7 +108,7 @@ def test_warm_carga_una_sola_vez():
     assert backend.config == FasterWhisperConfig()
 
 
-def test_backend_vacio_no_inventa_senales():
+def test_an_empty_backend_result_does_not_invent_native_signals():
     info = SimpleNamespace(language="es", language_probability=0.8)
     result = _backend("small", [], info, {}).transcribe(_samples(), TranscriptionRequest())
     assert result.text == ""
@@ -117,7 +117,7 @@ def test_backend_vacio_no_inventa_senales():
     assert result.warnings == ("empty_transcript",)
 
 
-def test_modelo_invalido_se_rechaza_al_construir():
+def test_an_invalid_model_is_rejected_during_construction():
     with pytest.raises(TypeError, match="model"):
         FasterWhisperBackend(123)
     with pytest.raises(ValueError, match="model"):
@@ -126,7 +126,7 @@ def test_modelo_invalido_se_rechaza_al_construir():
         FasterWhisperBackend("small", model_version="")
 
 
-def test_config_fingerprint_liga_todos_los_parametros_efectivos():
+def test_the_config_fingerprint_binds_all_effective_parameters():
     base = FasterWhisperConfig()
     assert base.fingerprint == FasterWhisperConfig().fingerprint
     assert base.fingerprint != FasterWhisperConfig(compute_type="float32").fingerprint
@@ -135,15 +135,15 @@ def test_config_fingerprint_liga_todos_los_parametros_efectivos():
         FasterWhisperConfig(cpu_threads=True)
 
 
-def test_backend_declara_caps_y_version_del_motor():
+def test_the_backend_declares_caps_and_the_engine_version():
     backend = _backend("large-v3", [], _INFO, {})
     assert isinstance(backend, AsrBackend)
-    assert backend.caps == Caps("honrado", "honrado", "honrado")
+    assert backend.caps == Caps("honored", "honored", "honored")
     assert backend.engine_version.startswith("faster-whisper")
     assert (backend.quant, backend.device) == ("int8", "cpu")
 
 
-def test_vad_y_auto_viajan_al_motor():
+def test_vad_and_auto_are_sent_to_the_engine():
     calls = {}
     _backend("large-v3", [], _INFO, calls).transcribe(
         _samples(), TranscriptionRequest(language="auto", vad=True),
