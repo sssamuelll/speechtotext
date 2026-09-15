@@ -19,55 +19,55 @@
     {
       "timestamps": { "from": "00:00:00,000", "to": "00:00:19,920" },
       "offsets": { "from": 0, "to": 19920 },
-      "text": " Segmento uno de la pista de prueba.",
+      "text": " Segment one of the test track.",
       "tokens": [
         { "text": "[_BEG_]", "timestamps": { "from": "00:00:00,000", "to": "00:00:00,000" }, "offsets": { "from": 0, "to": 0 }, "id": 50365, "p": 0.400058, "t_dtw": -1 },
-        { "text": " Segmento", "timestamps": { "from": "00:00:00,000", "to": "00:00:03,200" }, "offsets": { "from": 0, "to": 3200 }, "id": 9081, "p": 0.921144, "t_dtw": -1 }
+        { "text": " Segment", "timestamps": { "from": "00:00:00,000", "to": "00:00:03,200" }, "offsets": { "from": 0, "to": 3200 }, "id": 9081, "p": 0.921144, "t_dtw": -1 }
       ]
     },
     {
       "timestamps": { "from": "00:00:19,920", "to": "00:00:33,440" },
       "offsets": { "from": 19920, "to": 33440 },
-      "text": " Segmento dos, tono de mil hercios.",
+      "text": " Segment two, a 1000 Hz tone.",
       "tokens": [
         { "text": "[_BEG_]", "timestamps": { "from": "00:00:19,920", "to": "00:00:19,920" }, "offsets": { "from": 19920, "to": 19920 }, "id": 50365, "p": 0.512300, "t_dtw": -1 },
-        { "text": " Segmento", "timestamps": { "from": "00:00:19,920", "to": "00:00:22,400" }, "offsets": { "from": 19920, "to": 22400 }, "id": 9081, "p": 0.887012, "t_dtw": -1 }
+        { "text": " Segment", "timestamps": { "from": "00:00:19,920", "to": "00:00:22,400" }, "offsets": { "from": 19920, "to": 22400 }, "id": 9081, "p": 0.887012, "t_dtw": -1 }
       ]
     },
     {
       "timestamps": { "from": "00:00:33,440", "to": "00:00:47,000" },
       "offsets": { "from": 33440, "to": 47000 },
-      "text": " Segmento tres, silencio y ruido rosa.",
+      "text": " Segment three, silence and pink noise.",
       "tokens": [
         { "text": "[_BEG_]", "timestamps": { "from": "00:00:33,440", "to": "00:00:33,440" }, "offsets": { "from": 33440, "to": 33440 }, "id": 50365, "p": 0.478900, "t_dtw": -1 },
-        { "text": " Segmento", "timestamps": { "from": "00:00:33,440", "to": "00:00:36,100" }, "offsets": { "from": 33440, "to": 36100 }, "id": 9081, "p": 0.903771, "t_dtw": -1 }
+        { "text": " Segment", "timestamps": { "from": "00:00:33,440", "to": "00:00:36,100" }, "offsets": { "from": 33440, "to": 36100 }, "id": 9081, "p": 0.903771, "t_dtw": -1 }
       ]
     },
     {
       "timestamps": { "from": "00:00:47,000", "to": "00:00:58,120" },
       "offsets": { "from": 47000, "to": 58120 },
-      "text": " Segmento cuatro, barrido de frecuencia.",
+      "text": " Segment four, a frequency sweep.",
       "tokens": [
         { "text": "[_BEG_]", "timestamps": { "from": "00:00:47,000", "to": "00:00:47,000" }, "offsets": { "from": 47000, "to": 47000 }, "id": 50365, "p": 0.533412, "t_dtw": -1 },
-        { "text": " Segmento", "timestamps": { "from": "00:00:47,000", "to": "00:00:49,640" }, "offsets": { "from": 47000, "to": 49640 }, "id": 9081, "p": 0.914005, "t_dtw": -1 }
+        { "text": " Segment", "timestamps": { "from": "00:00:47,000", "to": "00:00:49,640" }, "offsets": { "from": 47000, "to": 49640 }, "id": 9081, "p": 0.914005, "t_dtw": -1 }
       ]
     },
     {
       "timestamps": { "from": "00:00:58,120", "to": "00:01:11,600" },
       "offsets": { "from": 58120, "to": 71600 },
-      "text": " Segmento cinco, tono de cuatrocientos cuarenta hercios.",
+      "text": " Segment five, a 440 Hz tone.",
       "tokens": [
         { "text": "[_BEG_]", "timestamps": { "from": "00:00:58,120", "to": "00:00:58,120" }, "offsets": { "from": 58120, "to": 58120 }, "id": 50365, "p": 0.461277, "t_dtw": -1 },
-        { "text": " Segmento", "timestamps": { "from": "00:00:58,120", "to": "00:01:00,900" }, "offsets": { "from": 58120, "to": 60900 }, "id": 9081, "p": 0.896430, "t_dtw": -1 }
+        { "text": " Segment", "timestamps": { "from": "00:00:58,120", "to": "00:01:00,900" }, "offsets": { "from": 58120, "to": 60900 }, "id": 9081, "p": 0.896430, "t_dtw": -1 }
       ]
     },
     {
       "timestamps": { "from": "00:01:11,600", "to": "00:01:24,000" },
       "offsets": { "from": 71600, "to": 84000 },
-      "text": " Segmento seis, fin de la pista.",
+      "text": " Segment six, end of the track.",
       "tokens": [
         { "text": "[_BEG_]", "timestamps": { "from": "00:01:11,600", "to": "00:01:11,600" }, "offsets": { "from": 71600, "to": 71600 }, "id": 50365, "p": 0.502844, "t_dtw": -1 },
-        { "text": " Segmento", "timestamps": { "from": "00:01:11,600", "to": "00:01:14,300" }, "offsets": { "from": 71600, "to": 74300 }, "id": 9081, "p": 0.908912, "t_dtw": -1 }
+        { "text": " Segment", "timestamps": { "from": "00:01:11,600", "to": "00:01:14,300" }, "offsets": { "from": 71600, "to": 74300 }, "id": 9081, "p": 0.908912, "t_dtw": -1 }
       ]
     }
   ]

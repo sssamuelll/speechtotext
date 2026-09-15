@@ -16,7 +16,7 @@ from speechtotext.asr import (
 )
 
 
-def test_asr_publico_no_importa_faster_whisper():
+def test_the_public_asr_api_does_not_import_faster_whisper():
     assert AsrBackend.__name__ == "AsrBackend"
     proc = subprocess.run(
         [
@@ -32,7 +32,7 @@ def test_asr_publico_no_importa_faster_whisper():
     assert proc.returncode == 0
 
 
-def test_resultado_conserva_senales_y_palabras():
+def test_the_result_preserves_native_signals_and_words():
     word = TranscriptionWord("hola", 0.1, 0.4, 0.92)
     segment = TranscriptionSegment(
         0.1,
@@ -56,14 +56,14 @@ def test_resultado_conserva_senales_y_palabras():
     assert result.segments[0].native_signals.no_speech == pytest.approx(0.02)
 
 
-def test_asr_error_expone_codigo_y_recuperabilidad():
-    error = AsrError("model_unavailable", False, "modelo ausente")
-    assert str(error) == "modelo ausente"
+def test_asr_error_exposes_its_code_and_recoverability():
+    error = AsrError("model_unavailable", False, "model missing")
+    assert str(error) == "model missing"
     assert error.code == "model_unavailable"
     assert error.recoverable is False
 
 
-def test_request_fingerprint_es_determinista_y_sensible_al_contexto():
+def test_the_request_fingerprint_is_deterministic_and_context_sensitive():
     base = TranscriptionRequest(language="es", context="catalog-v1")
     assert base.fingerprint == TranscriptionRequest(
         language="es", context="catalog-v1"
@@ -74,7 +74,7 @@ def test_request_fingerprint_es_determinista_y_sensible_al_contexto():
 
 
 @pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf])
-def test_asr_rechaza_timestamps_y_senales_no_finitas(value):
+def test_asr_rejects_nonfinite_timestamps_and_signals(value):
     with pytest.raises(ValueError):
         TranscriptionWord("hola", value, 1.0, 0.9)
     with pytest.raises(ValueError):
@@ -91,7 +91,7 @@ def test_asr_rechaza_timestamps_y_senales_no_finitas(value):
         NativeSignals(0.1, value, 1.0, 0.9)
 
 
-def test_resultado_exige_identidad_lenguaje_y_latencia_entera():
+def test_the_result_requires_identity_language_and_integer_latency():
     base = dict(
         text="",
         language="es",
@@ -111,7 +111,7 @@ def test_resultado_exige_identidad_lenguaje_y_latencia_entera():
         TranscriptionResult(**{**base, "latency_ms": 1.5})
 
 
-def test_tipos_asr_rechazan_coerciones_y_contenedores_mutables():
+def test_asr_types_reject_coercions_and_mutable_containers():
     base = dict(
         text="",
         language="es",
@@ -142,7 +142,7 @@ def test_tipos_asr_rechazan_coerciones_y_contenedores_mutables():
         TranscriptionResult(**{**base, "warnings": ["mutable"]})
 
 
-def test_resultado_no_tiene_campos_de_calibracion():
+def test_the_result_has_no_calibration_fields():
     from dataclasses import fields
 
     from speechtotext.asr.types import TranscriptionResult
@@ -154,7 +154,7 @@ def test_resultado_no_tiene_campos_de_calibracion():
     }
 
 
-def test_request_valida_vad_como_bool_y_lo_lleva_al_fingerprint():
+def test_the_request_validates_vad_as_a_bool_and_includes_it_in_the_fingerprint():
     from speechtotext.asr.types import TranscriptionRequest
 
     assert TranscriptionRequest().vad is False
@@ -164,7 +164,7 @@ def test_request_valida_vad_como_bool_y_lo_lleva_al_fingerprint():
         TranscriptionRequest(vad=1)
 
 
-def test_request_admite_auto_como_idioma():
+def test_the_request_accepts_auto_as_the_language():
     from speechtotext.asr.types import TranscriptionRequest
 
     assert TranscriptionRequest(language="auto").language == "auto"

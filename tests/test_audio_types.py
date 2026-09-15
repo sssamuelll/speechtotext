@@ -42,7 +42,7 @@ def _quality(duration_ms=1000):
     )
 
 
-def test_audio_view_normaliza_float32_mono_contiguo_e_inmutable():
+def test_audio_view_normalizes_to_contiguous_immutable_mono_float32():
     original = np.array([0.0, 0.25, -0.25], dtype=np.float64)
     view = AudioView.capture(
         original, 16000, step=PipelineStep("decode", "1", {"layout": "mono"})
@@ -63,14 +63,14 @@ def test_audio_view_normaliza_float32_mono_contiguo_e_inmutable():
     "samples",
     [np.zeros((2, 2), dtype=np.float32), np.array([0.0, np.nan], dtype=np.float32)],
 )
-def test_audio_view_rechaza_multicanal_o_no_finito(samples):
+def test_audio_view_rejects_multichannel_or_nonfinite_samples(samples):
     with pytest.raises(ValueError):
         AudioView.capture(
             samples, 16000, step=PipelineStep("decode", "1", {"layout": "mono"})
         )
 
 
-def test_audio_view_rechaza_parent_y_provenance_simulados():
+def test_audio_view_rejects_mocked_parent_and_provenance():
     fake_provenance = type("FakeProvenance", (), {"sample_rate": 16000})()
     with pytest.raises(TypeError, match="PipelineProvenance"):
         AudioView._create([0.0], 16000, fake_provenance)
@@ -82,7 +82,7 @@ def test_audio_view_rechaza_parent_y_provenance_simulados():
         )
 
 
-def test_audio_view_factory_privado_no_es_una_ruta_publica():
+def test_audio_view_private_factory_is_not_a_public_entry_point():
     provenance = PipelineProvenance.capture(
         sample_rate=16000,
         step=PipelineStep("capture", "1", {}),
@@ -91,7 +91,7 @@ def test_audio_view_factory_privado_no_es_una_ruta_publica():
         AudioView._create([0.0], 16000, provenance)
 
 
-def test_audio_view_no_tiene_constructor_publico():
+def test_audio_view_has_no_public_constructor():
     provenance = PipelineProvenance.capture(
         sample_rate=16000,
         step=PipelineStep("capture", "1", {}),
@@ -100,7 +100,7 @@ def test_audio_view_no_tiene_constructor_publico():
         AudioView(np.zeros(1, dtype=np.float32), 16000, provenance)
 
 
-def test_audio_clip_conserva_pausas_y_resuelve_vistas():
+def test_audio_clip_preserves_pauses_and_resolves_views():
     view = _view(np.zeros(32_000, dtype=np.float32))
     clip = AudioClip(
         started_at=10.0,
@@ -121,7 +121,7 @@ def test_audio_clip_conserva_pausas_y_resuelve_vistas():
         clip.view("raw")
 
 
-def test_audio_clip_rechaza_region_fuera_de_su_duracion():
+def test_audio_clip_rejects_a_region_outside_its_duration():
     view = _view()
     with pytest.raises(ValueError, match="speech region"):
         AudioClip(
@@ -134,7 +134,7 @@ def test_audio_clip_rechaza_region_fuera_de_su_duracion():
         )
 
 
-def test_audio_view_derive_representa_resample_48k_a_16k():
+def test_audio_view_derive_represents_resampling_from_48k_to_16k():
     capture = _view(np.zeros(480, dtype=np.float32), rate=48000)
     asr = AudioView.derive(
         capture,
@@ -148,7 +148,7 @@ def test_audio_view_derive_representa_resample_48k_a_16k():
 
 
 @pytest.mark.parametrize("sample_rate", [True, 0, -1, 16000.5])
-def test_audio_view_rechaza_sample_rate_no_entero_positivo(sample_rate):
+def test_audio_view_rejects_a_sample_rate_that_is_not_a_positive_integer(sample_rate):
     with pytest.raises(ValueError, match="sample_rate"):
         AudioView.capture(
             [0.0], sample_rate,
@@ -157,7 +157,7 @@ def test_audio_view_rechaza_sample_rate_no_entero_positivo(sample_rate):
 
 
 @pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf])
-def test_contratos_rechazan_tiempos_y_metricas_no_finitas(value):
+def test_contracts_reject_nonfinite_times_and_metrics(value):
     with pytest.raises(ValueError):
         SpeechRegion(value, 1.0)
     with pytest.raises(ValueError):
@@ -169,7 +169,7 @@ def test_contratos_rechazan_tiempos_y_metricas_no_finitas(value):
         )
 
 
-def test_quality_rechaza_conteos_rangos_e_inconsistencia():
+def test_quality_rejects_counts_ranges_and_inconsistency():
     with pytest.raises(ValueError):
         replace(_quality(), effective_voice_ms=2000)
     with pytest.raises(ValueError):
@@ -182,7 +182,7 @@ def test_quality_rechaza_conteos_rangos_e_inconsistencia():
         replace(_quality(), dropped_frames=0.5)
 
 
-def test_audio_views_rechaza_duck_types_y_clip_rechaza_duraciones_divergentes():
+def test_audio_views_rejects_duck_types_and_clip_rejects_divergent_durations():
     one_second = _view()
     half_second = _view(np.zeros(8_000, dtype=np.float32))
     with pytest.raises(TypeError, match="AudioView"):
@@ -200,7 +200,7 @@ def test_audio_views_rechaza_duck_types_y_clip_rechaza_duraciones_divergentes():
 
 
 @pytest.mark.parametrize("bad", [True, object(), "warning"])
-def test_quality_rechaza_metricas_o_warnings_con_tipo_incorrecto(bad):
+def test_quality_rejects_metrics_or_warnings_with_the_wrong_type(bad):
     if bad == "warning":
         with pytest.raises(ValueError, match="warnings"):
             replace(_quality(), warnings=bad)

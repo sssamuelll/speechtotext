@@ -17,12 +17,12 @@ def test_assign_names_matches_closest_above_threshold():
 
 def test_assign_names_below_threshold_unmatched():
     enrolled = {"Alice": np.array([1.0, 0.0])}
-    clusters = {"SPEAKER_00": np.array([0.0, 1.0])}  # ortogonal -> coseno 0
+    clusters = {"SPEAKER_00": np.array([0.0, 1.0])}  # orthogonal -> cosine 0
     assert assign_names(clusters, enrolled, threshold=0.5) == {}
 
 
 def test_assign_names_no_collision_same_name():
-    # dos clusters parecidos a Alice: solo el mejor se lleva el nombre
+    # Two clusters similar to Alice: only the best one gets the name.
     enrolled = {"Alice": np.array([1.0, 0.0])}
     clusters = {"SPEAKER_00": np.array([1.0, 0.0]), "SPEAKER_01": np.array([0.8, 0.2])}
     got = assign_names(clusters, enrolled, threshold=0.5)

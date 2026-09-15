@@ -5,7 +5,7 @@ from speechtotext.audio import SpeechRegion
 from speechtotext.audio.quality import compute_audio_quality
 
 
-def test_quality_mide_voz_ruido_y_snr():
+def test_quality_measures_voice_noise_and_snr():
     sample_rate = 1000
     capture = np.full(1000, 0.01, dtype=np.float32)
     capture[200:700] = 0.1
@@ -24,7 +24,7 @@ def test_quality_mide_voz_ruido_y_snr():
     assert report.clipping_ratio == 0.0
 
 
-def test_quality_reporta_raw_y_procesado_por_separado():
+def test_quality_reports_raw_and_processed_separately():
     raw = np.full(100, 0.01, dtype=np.float32)
     processed = np.full(100, 0.1, dtype=np.float32)
     report = compute_audio_quality(
@@ -43,7 +43,7 @@ def test_quality_reporta_raw_y_procesado_por_separado():
     assert report.discontinuities == 1
 
 
-def test_quality_detecta_clipping_y_silencio():
+def test_quality_detects_clipping_and_silence():
     samples = np.array([1.0, -1.0, 0.0, 0.0], dtype=np.float32)
     report = compute_audio_quality(
         samples,

@@ -1,4 +1,4 @@
-"""Checks del léxico de hotwords y de los defaults de entorno HF en Windows."""
+"""Checks for the hotword lexicon and HF environment defaults on Windows."""
 import os
 import re
 import sys
@@ -12,42 +12,42 @@ import numpy as np
 runner = CliRunner()
 
 
-def test_load_hotwords_file_lineas_y_comas(tmp_path):
+def test_load_hotwords_file_handles_lines_and_commas(tmp_path):
     p = tmp_path / "lex.txt"
-    p.write_text("Táchira\nLa Guaira, Sofitasa\n\n  Boconó  \n", encoding="utf-8")
-    assert _load_hotwords_file(p) == "Táchira, La Guaira, Sofitasa, Boconó"
+    p.write_text("Tachira\nLa Guaira, Sofitasa\n\n  Bocono  \n", encoding="utf-8")
+    assert _load_hotwords_file(p) == "Tachira, La Guaira, Sofitasa, Bocono"
 
 
-def test_load_hotwords_file_tolera_bom(tmp_path):
+def test_load_hotwords_file_tolerates_a_bom(tmp_path):
     p = tmp_path / "lex.txt"
-    p.write_text("Boconó, Cúcuta", encoding="utf-8-sig")  # editor de Windows con BOM
-    assert _load_hotwords_file(p) == "Boconó, Cúcuta"
+    p.write_text("Bocono, Cucuta", encoding="utf-8-sig")  # Windows editor with a BOM
+    assert _load_hotwords_file(p) == "Bocono, Cucuta"
 
 
-def test_resolve_sin_nada_es_none(tmp_path):
-    # Sin flags no hay hotwords: nada de defaults globales que envenenen otro audio.
+def test_resolve_with_nothing_returns_none(tmp_path):
+    # Without flags there are no hotwords: no global defaults that poison another audio file.
     assert _resolve_hotwords(None, None) is None
     assert _resolve_hotwords("   ", None) is None
 
 
-def test_resolve_combina_archivo_e_inline(tmp_path):
+def test_resolve_combines_file_and_inline_hotwords(tmp_path):
     p = tmp_path / "lex.txt"
-    p.write_text("Boconó", encoding="utf-8")
-    assert _resolve_hotwords("Sofitasa", p) == "Boconó, Sofitasa"
+    p.write_text("Bocono", encoding="utf-8")
+    assert _resolve_hotwords("Sofitasa", p) == "Bocono, Sofitasa"
 
 
-def test_env_defaults_hf_en_windows():
-    # Importar el CLI (arriba) ya debió setear estas env vars vía setdefault.
+def test_hf_environment_defaults_are_set_on_windows():
+    # Importing the CLI above should already have set these environment variables via setdefault.
     if sys.platform == "win32":
         assert os.environ.get("HF_HUB_DISABLE_SYMLINKS") == "1"
         assert os.environ.get("HF_HUB_DISABLE_XET") == "1"
 
 
-# --- 5.2.2 · la prosa dice el mecanismo real y la lista larga avisa --------------------
+# --- 5.2.2 · The prose states the actual mechanism and the long list warns ---------------
 
 
 def _fake_transcribe(monkeypatch, tmp_path):
-    """Corta el camino justo antes del motor: el audio nunca se abre."""
+    """Stop execution just before the engine: the audio is never opened."""
     from speechtotext.asr import Caps
     from speechtotext.asr.types import (
         NativeSignals, SegmentNativeSignals, TranscriptionResult, TranscriptionSegment,
@@ -82,43 +82,43 @@ def _invoke(audio, tmp_path, *extra):
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
-def _plana(salida: str) -> str:
-    # rich envuelve a 80 columnas bajo CliRunner y, cuando hay color, mete escapes dentro
-    # de los tokens. Lo renderizado no es contrato: se limpia antes de asertar.
-    return " ".join(_ANSI.sub("", salida).split())
+def _plain(output: str) -> str:
+    # Rich wraps at 80 columns under CliRunner and, when color is enabled, inserts escape
+    # sequences inside tokens. The rendered output is not the contract, so clean it first.
+    return " ".join(_ANSI.sub("", output).split())
 
 
-def test_docstring_de_resolve_hotwords_no_dice_sesgo():
-    # El defecto de este ciclo FUE un docstring que afirmaba un mecanismo falso
-    # ("sesgo probabilístico", §4 del plan): la prosa se testea como el código.
+def test_resolve_hotwords_docstring_does_not_contain_the_old_spanish_term_for_bias():
+    # This cycle's defect WAS a docstring that claimed a false mechanism
+    # ("probabilistic bias," plan §4): prose is tested like code.
     assert "sesgo" not in _resolve_hotwords.__doc__
 
 
-def test_help_de_transcribe_no_dice_sesgar():
+def test_transcribe_help_does_not_contain_the_old_spanish_term_for_bias():
     result = runner.invoke(app, ["transcribe", "--help"])
     assert result.exit_code == 0
     assert "sesgar" not in result.stdout
 
 
-def test_lista_larga_de_hotwords_imprime_conteo_y_aviso(tmp_path, monkeypatch):
-    # La lista del caso real: 25 términos. Debe salir el conteo y la advertencia con
-    # la medición (9 puntos de cobertura perdidos, 2026-08-03).
+def test_long_hotword_list_prints_the_count_and_warning(tmp_path, monkeypatch):
+    # The real-case list: 25 terms. It must print the count and the warning with
+    # the measurement (9 coverage points lost, 2026-08-03).
     audio = _fake_transcribe(monkeypatch, tmp_path)
-    lista = ", ".join(f"Término Propio {i:02d}" for i in range(25))
-    result = _invoke(audio, tmp_path, "--hotwords", lista)
+    hotword_list = ", ".join(f"Proper Noun {i:02d}" for i in range(25))
+    result = _invoke(audio, tmp_path, "--hotwords", hotword_list)
     assert result.exit_code == 0
-    salida = _plana(result.stdout)
-    assert "25 terms" in salida
-    assert "characters" in salida
-    assert "degraded coverage by 9 points" in salida
-    assert "prior text" in salida
+    plain_output = _plain(result.stdout)
+    assert "25 terms" in plain_output
+    assert "characters" in plain_output
+    assert "degraded coverage by 9 points" in plain_output
+    assert "prior text" in plain_output
 
 
-def test_lista_corta_de_hotwords_no_avisa(tmp_path, monkeypatch):
-    # Con 3 términos la ablación no midió pérdida: el conteo sale, la advertencia no.
+def test_short_hotword_list_does_not_warn(tmp_path, monkeypatch):
+    # With 3 terms, the blackout measured no loss: the count is printed, but no warning.
     audio = _fake_transcribe(monkeypatch, tmp_path)
-    result = _invoke(audio, tmp_path, "--hotwords", "Sofitasa, Boconó, Táchira")
+    result = _invoke(audio, tmp_path, "--hotwords", "Sofitasa, Bocono, Tachira")
     assert result.exit_code == 0
-    salida = _plana(result.stdout)
-    assert "3 terms" in salida
-    assert "degraded" not in salida
+    plain_output = _plain(result.stdout)
+    assert "3 terms" in plain_output
+    assert "degraded" not in plain_output

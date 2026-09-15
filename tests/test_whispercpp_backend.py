@@ -1,4 +1,4 @@
-"""WhisperCppBackend: el subprocess jamas corre en tests; se stubbea `run`."""
+"""WhisperCppBackend: the subprocess never runs in tests; `run` is stubbed."""
 import itertools
 import json
 import os
@@ -19,21 +19,21 @@ from speechtotext.core import enginepin
 FIXTURE = Path(__file__).parent / "fixtures" / "whispercpp_ojf.json"
 
 
-def test_la_fixture_es_sintetica_y_sin_rutas_de_maquina():
-    """Guarda de lanzamiento: esta fixture viaja al repo público. Si alguien la regenera
-    pegando una salida real de su máquina, se entera aquí y no en el filter-repo."""
-    crudo = FIXTURE.read_text(encoding="utf-8")
-    assert "\\" not in crudo, "ruta de Windows en la fixture"
-    assert "Users" not in crudo, "ruta de máquina en la fixture"
-    payload = json.loads(crudo)
-    textos = [s["text"].strip() for s in payload["transcription"]]
-    assert len(textos) == 6
-    assert all(t.startswith("Segmento ") for t in textos), textos
+def test_the_fixture_is_synthetic_and_contains_no_machine_paths():
+    """Release guard: this fixture ships in the public repo. If someone regenerates it
+    by pasting real output from their machine, they find out here, not in filter-repo."""
+    raw = FIXTURE.read_text(encoding="utf-8")
+    assert "\\" not in raw, "Windows path in the fixture"
+    assert "Users" not in raw, "machine path in the fixture"
+    payload = json.loads(raw)
+    texts = [s["text"].strip() for s in payload["transcription"]]
+    assert len(texts) == 6
+    assert all(t.startswith("Segment ") for t in texts), texts
 
 
 def _run_stub(write="fixture", rc=0, stderr=b""):
-    """`write`: 'fixture' copia la fixture sintética; un dict escribe ese JSON; None no
-    escribe nada; un str crudo escribe basura. Devuelve (run, seen)."""
+    """`write`: 'fixture' copies the synthetic fixture; a dict writes that JSON; None
+    writes nothing; a raw str writes garbage. Returns (run, seen)."""
     seen = {}
 
     def fake_run(cmd, capture_output=None, timeout=None):
@@ -55,8 +55,8 @@ def _run_stub(write="fixture", rc=0, stderr=b""):
 
 
 def _backend(run, **kw):
-    # cycle, no iter: test_timeout_proporcional_con_piso llama transcribe() dos veces
-    # sobre el mismo backend (4 lecturas de reloj), un iter([...]) de 2 se agotaria.
+    # cycle, not iter: test_timeout_scales_proportionally_with_a_floor calls transcribe()
+    # twice on the same backend (4 wall-clock reads); a two-item iter([...]) would run out.
     ticks = itertools.cycle([10.0, 10.5])
     return WhisperCppBackend(
         "large-v3", exe=Path("C:/wcpp/Release/whisper-cli.exe"),
@@ -68,7 +68,7 @@ def _samples(seconds=100.0):
     return np.zeros(int(seconds * 16000), dtype=np.float32)
 
 
-def test_contrato_caps_e_identidad(monkeypatch):
+def test_caps_and_identity_match_the_contract(monkeypatch):
     monkeypatch.setattr(sys, "platform", "win32")
     backend = _backend(lambda *a, **k: None)
     assert isinstance(backend, AsrBackend)
@@ -81,22 +81,22 @@ def test_contrato_caps_e_identidad(monkeypatch):
     assert backend.engine_version == f"whisper.cpp {enginepin.ENGINE_PIN['version']}"
 
 
-def test_fuera_de_win32_device_native_y_version_sin_pin(monkeypatch):
-    # El binario del PATH decide el dispositivo según su build y no lo dice; etiquetar
-    # cuda en macOS sería mentir en el JSON. Misma etiqueta que core.probe.choose_route.
+def test_outside_win32_uses_native_for_device_and_an_unpinned_version(monkeypatch):
+    # The PATH binary determines the device based on its build but does not report it;
+    # labeling it cuda on macOS would lie in the JSON. Same label as core.probe.choose_route.
     monkeypatch.setattr(sys, "platform", "darwin")
     backend = _backend(lambda *a, **k: None)
     assert backend.device == "native"
     assert backend.engine_version == "whisper.cpp (PATH, unpinned)"
-    assert backend.model_version == enginepin.MODELS_PIN["large-v3-q5_0"]["sha256"]  # el ggml sí va pinneado
+    assert backend.model_version == enginepin.MODELS_PIN["large-v3-q5_0"]["sha256"]  # The ggml is pinned.
 
 
-def test_modelo_no_pinneado_se_rechaza_al_construir():
+def test_an_unpinned_model_is_rejected_during_construction():
     with pytest.raises(ValueError, match="is not pinned"):
         WhisperCppBackend("medium")
 
 
-def test_warm_resuelve_exe_y_modelo_por_el_pin(monkeypatch, tmp_path):
+def test_warm_resolves_the_exe_and_model_from_the_pins(monkeypatch, tmp_path):
     monkeypatch.setattr(enginepin, "ensure_engine", lambda: tmp_path / "whisper-cli.exe")
     monkeypatch.setattr(enginepin, "ensure_model", lambda name: tmp_path / f"{name}.bin")
     backend = WhisperCppBackend("small")
@@ -105,12 +105,12 @@ def test_warm_resuelve_exe_y_modelo_por_el_pin(monkeypatch, tmp_path):
     assert backend._model_path == tmp_path / "small.bin"
 
 
-def test_transcribe_parsea_la_fixture():
+def test_transcribe_parses_the_fixture():
     run, seen = _run_stub()
     result = _backend(run).transcribe(_samples(), TranscriptionRequest(language="es"))
     assert len(result.segments) == 6
     assert (result.segments[0].start, result.segments[0].end) == (0.0, 19.92)
-    assert result.segments[0].text == " Segmento uno de la pista de prueba."
+    assert result.segments[0].text == " Segment one of the test track."
     assert result.segments[0].words == ()
     assert result.segments[0].native_signals.no_speech is None
     assert result.language == "es"
@@ -122,44 +122,44 @@ def test_transcribe_parsea_la_fixture():
     assert cmd[cmd.index("-m") + 1] == str(Path("C:/wcpp/models/ggml.bin"))
     assert cmd[cmd.index("-l") + 1] == "es"
     assert cmd[cmd.index("-bs") + 1] == "5"
-    assert cmd[cmd.index("-mc") + 1] == "0"  # sin el: loops y 3x tiempo (medido 2026-07-27)
+    assert cmd[cmd.index("-mc") + 1] == "0"  # Without it: loops and 3x wall time (measured 2026-07-27).
     assert "-np" in cmd and "-ojf" in cmd
 
 
-def test_el_wav_temporal_es_pcm16_mono_16k_y_se_borra():
+def test_the_temp_wav_is_pcm16_mono_16k_and_gets_deleted():
     run, seen = _run_stub()
     samples = np.full(16000, 0.5, dtype=np.float32)
-    grabado = {}
+    recorded = {}
 
-    def espia(cmd, **kw):
+    def spy(cmd, **kw):
         with wave.open(cmd[cmd.index("-f") + 1]) as w:
-            grabado.update(rate=w.getframerate(), ch=w.getnchannels(), width=w.getsampwidth(),
+            recorded.update(rate=w.getframerate(), ch=w.getnchannels(), width=w.getsampwidth(),
                            n=w.getnframes())
         return run(cmd, **kw)
 
-    _backend(espia).transcribe(samples, TranscriptionRequest())
-    assert grabado == {"rate": 16000, "ch": 1, "width": 2, "n": 16000}
+    _backend(spy).transcribe(samples, TranscriptionRequest())
+    assert recorded == {"rate": 16000, "ch": 1, "width": 2, "n": 16000}
     assert seen["wav_existia"] is True
     assert not os.path.exists(seen["wav"])
     assert not os.path.exists(seen["base"]) and not os.path.exists(seen["base"] + ".json")
 
 
-def test_auto_viaja_como_auto():
+def test_auto_is_passed_as_auto():
     run, seen = _run_stub()
     _backend(run).transcribe(_samples(), TranscriptionRequest(language="auto"))
     assert seen["cmd"][seen["cmd"].index("-l") + 1] == "auto"
 
 
-def test_timeout_proporcional_con_piso():
+def test_timeout_scales_proportionally_with_a_floor():
     run, seen = _run_stub()
     backend = _backend(run)
     backend.transcribe(_samples(100.0), TranscriptionRequest())
-    assert seen["timeout"] == 400  # 4x duracion
+    assert seen["timeout"] == 400  # 4x duration.
     backend.transcribe(_samples(10.0), TranscriptionRequest())
-    assert seen["timeout"] == 120  # piso para el JIT frio
+    assert seen["timeout"] == 120  # Floor for a cold JIT.
 
 
-def test_rc_no_cero_revienta_con_cola_de_stderr():
+def test_a_nonzero_rc_fails_with_the_tail_of_stderr():
     stderr = "\n".join(f"linea {i}" for i in range(20)).encode()
     run, seen = _run_stub(write=None, rc=3, stderr=stderr)
     with pytest.raises(RuntimeError) as ei:
@@ -169,7 +169,7 @@ def test_rc_no_cero_revienta_con_cola_de_stderr():
     assert not os.path.exists(seen["base"] + ".json")
 
 
-def test_json_ausente_o_malformado_revienta_con_causa():
+def test_missing_or_malformed_json_fails_with_a_cause():
     run, _ = _run_stub(write=None)
     with pytest.raises(RuntimeError, match="JSON"):
         _backend(run).transcribe(_samples(), TranscriptionRequest())
@@ -179,7 +179,7 @@ def test_json_ausente_o_malformado_revienta_con_causa():
     assert not os.path.exists(seen["base"] + ".json")
 
 
-def test_parser_filtra_segmentos_de_texto_vacio():
+def test_the_parser_filters_empty_text_segments():
     payload = {
         "result": {"language": "es"},
         "transcription": [
@@ -192,24 +192,24 @@ def test_parser_filtra_segmentos_de_texto_vacio():
     assert lang == "es"
 
 
-def test_hotwords_se_rechazan_antes_de_correr():
+def test_hotwords_are_rejected_before_running():
     from speechtotext.asr import AsrError
 
-    backend = _backend(lambda *a, **k: pytest.fail("no debe correr"))
+    backend = _backend(lambda *a, **k: pytest.fail("must not run"))
     with pytest.raises(AsrError) as ei:
         backend.transcribe(_samples(1.0), TranscriptionRequest(hotwords=("Bézier",)))
     assert ei.value.code == "unsupported_option"
 
 
-def test_base_temporal_no_ascii_falla_antes_de_correr(monkeypatch, tmp_path):
-    base = tmp_path / "salida-ñ"
+def test_a_non_ascii_temp_base_fails_before_running(monkeypatch, tmp_path):
+    base = tmp_path / "output-ø"
 
     def fake_mkstemp(**kw):
         return os.open(str(base), os.O_CREAT | os.O_RDWR), str(base)
 
     monkeypatch.setattr(whispercpp.tempfile, "mkstemp", fake_mkstemp)
     with pytest.raises(RuntimeError, match="non-ASCII"):
-        _backend(lambda *a, **k: pytest.fail("no debe correr")).transcribe(
+        _backend(lambda *a, **k: pytest.fail("must not run")).transcribe(
             _samples(), TranscriptionRequest(),
         )
     assert not base.exists()

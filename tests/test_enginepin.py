@@ -22,7 +22,7 @@ def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-# --- pines literales del contrato -------------------------------------------------
+# --- Literal contract pins --------------------------------------------------------
 
 def test_engine_pin_literal():
     assert ENGINE_PIN["version"] == "v1.9.1"
@@ -44,7 +44,7 @@ def test_models_pin_literal():
     assert small["size_bytes"] == 487_601_967
 
 
-def test_install_root_win32_sin_home_cae_en_localappdata(monkeypatch, tmp_path):
+def test_install_root_win32_without_home_falls_back_to_localappdata(monkeypatch, tmp_path):
     monkeypatch.delenv("SPEECHTOTEXT_HOME", raising=False)
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     monkeypatch.setattr(sys, "platform", "win32")
@@ -64,42 +64,42 @@ def _pin_engine(monkeypatch, zip_bytes=None):
     return pin
 
 
-def _instala_exe(root: Path, content: bytes = EXE) -> Path:
+def _install_exe(root: Path, content: bytes = EXE) -> Path:
     exe = root / "Release" / "whisper-cli.exe"
     exe.parent.mkdir(parents=True, exist_ok=True)
     exe.write_bytes(content)
     return exe
 
 
-def test_ensure_engine_adopta_instalacion_existente_y_marca(monkeypatch, tmp_path):
+def test_ensure_engine_adopts_an_existing_installation_and_marks_it(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "platform", "win32")
     _pin_engine(monkeypatch)
-    exe = _instala_exe(tmp_path)
+    exe = _install_exe(tmp_path)
     assert ensure_engine(root=tmp_path) == exe
     marker = Path(str(exe) + ".verified")
     assert marker.read_text(encoding="utf-8").strip() == _sha(EXE)
 
 
-def test_ensure_engine_marcador_evita_rehash(monkeypatch, tmp_path):
+def test_ensure_engine_marker_avoids_rehashing(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "platform", "win32")
     _pin_engine(monkeypatch)
-    exe = _instala_exe(tmp_path)
+    exe = _install_exe(tmp_path)
     ensure_engine(root=tmp_path)
-    # verificacion por instalacion, no por corrida: con marcador valido no se rehashea
+    # Verification is per installation, not per run: a valid marker avoids rehashing.
     exe.write_bytes(b"cambiado despues de verificar")
     assert ensure_engine(root=tmp_path) == exe
 
 
-def test_ensure_engine_sha_que_no_cuadra_revienta_sin_marcar(monkeypatch, tmp_path):
+def test_ensure_engine_mismatched_sha_fails_without_marking(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "platform", "win32")
     _pin_engine(monkeypatch)
-    exe = _instala_exe(tmp_path, b"impostor")
+    exe = _install_exe(tmp_path, b"impostor")
     with pytest.raises(RuntimeError, match="sha256"):
         ensure_engine(root=tmp_path)
     assert not Path(str(exe) + ".verified").exists()
 
 
-def _zip_con_exe(exe_bytes: bytes) -> bytes:
+def _zip_with_exe(exe_bytes: bytes) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         zf.writestr("Release/whisper-cli.exe", exe_bytes)
@@ -107,9 +107,9 @@ def _zip_con_exe(exe_bytes: bytes) -> bytes:
     return buf.getvalue()
 
 
-def test_ensure_engine_descarga_verifica_zip_y_extrae(monkeypatch, tmp_path):
+def test_ensure_engine_downloads_verifies_the_zip_and_extracts_it(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "platform", "win32")
-    zip_bytes = _zip_con_exe(EXE)
+    zip_bytes = _zip_with_exe(EXE)
     pin = _pin_engine(monkeypatch, zip_bytes=zip_bytes)
     urls = []
     monkeypatch.setattr(
@@ -119,26 +119,26 @@ def test_ensure_engine_descarga_verifica_zip_y_extrae(monkeypatch, tmp_path):
     got = ensure_engine(root=tmp_path)
     assert got == tmp_path / "Release" / "whisper-cli.exe"
     assert got.read_bytes() == EXE
-    assert urls == [pin["url"]]  # descarga desde la URL pinneada
-    assert (tmp_path / "Release" / "ggml-cuda.dll").exists()  # prefijo Release/ conservado
-    assert not list(tmp_path.glob("*.zip"))  # el zip temporal se limpio
+    assert urls == [pin["url"]]  # Download from the pinned URL.
+    assert (tmp_path / "Release" / "ggml-cuda.dll").exists()  # Release/ prefix preserved.
+    assert not list(tmp_path.glob("*.zip"))  # The temporary zip was removed.
 
 
-def test_ensure_engine_zip_sha_malo_no_extrae_nada(monkeypatch, tmp_path):
+def test_ensure_engine_with_a_bad_zip_sha_extracts_nothing(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "platform", "win32")
-    zip_bytes = _zip_con_exe(EXE)
+    zip_bytes = _zip_with_exe(EXE)
     pin = dict(ENGINE_PIN, exe_sha256=_sha(EXE), zip_sha256="0" * 64)
     monkeypatch.setattr(enginepin, "ENGINE_PIN", pin)
     monkeypatch.setattr(enginepin.urllib.request, "urlopen", lambda url: io.BytesIO(zip_bytes))
     with pytest.raises(RuntimeError, match="zip"):
         ensure_engine(root=tmp_path)
-    assert not (tmp_path / "Release").exists()  # verificacion ANTES de extraer
+    assert not (tmp_path / "Release").exists()  # Verification happens BEFORE extraction.
 
 
-def test_ensure_engine_exe_del_zip_corrupto_revienta(monkeypatch, tmp_path):
+def test_ensure_engine_fails_when_the_exe_in_the_zip_is_corrupt(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "platform", "win32")
-    # el zip cuadra pero el exe adentro no cuadra con exe_sha256: fail-closed igual
-    zip_bytes = _zip_con_exe(b"exe troyano")
+    # The zip matches but the exe inside does not match exe_sha256: still fail closed.
+    zip_bytes = _zip_with_exe(b"exe troyano")
     pin = dict(ENGINE_PIN, exe_sha256=_sha(EXE), zip_sha256=_sha(zip_bytes))
     monkeypatch.setattr(enginepin, "ENGINE_PIN", pin)
     monkeypatch.setattr(enginepin.urllib.request, "urlopen", lambda url: io.BytesIO(zip_bytes))
@@ -146,14 +146,14 @@ def test_ensure_engine_exe_del_zip_corrupto_revienta(monkeypatch, tmp_path):
         ensure_engine(root=tmp_path)
 
 
-def test_ensure_engine_fuera_de_win32_usa_el_path(monkeypatch, tmp_path):
+def test_ensure_engine_outside_win32_uses_the_binary_on_path(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(shutil, "which", lambda name: "/opt/homebrew/bin/whisper-cli")
     assert ensure_engine(root=tmp_path) == Path("/opt/homebrew/bin/whisper-cli")
-    assert not any(tmp_path.iterdir())   # ni descarga ni extrae nada
+    assert not any(tmp_path.iterdir())   # It neither downloads nor extracts anything.
 
 
-def test_ensure_engine_fuera_de_win32_sin_binario_corta_con_instrucciones(monkeypatch, tmp_path):
+def test_ensure_engine_outside_win32_without_a_binary_fails_with_instructions(monkeypatch, tmp_path):
     from speechtotext.asr.base import AsrError
 
     monkeypatch.setattr(sys, "platform", "darwin")
@@ -177,17 +177,17 @@ def _pin_models(monkeypatch):
     monkeypatch.setattr(enginepin, "MODELS_PIN", pins)
 
 
-def test_ensure_model_local_verifica_marca_y_mapea_alias(monkeypatch, tmp_path):
+def test_ensure_model_verifies_marks_and_maps_a_local_alias(monkeypatch, tmp_path):
     _pin_models(monkeypatch)
     dest = tmp_path / "models" / "ggml-large-v3-q5_0.bin"
     dest.parent.mkdir(parents=True)
     dest.write_bytes(GGML)
-    # "large-v3" resuelve al bin q5_0: la quant efectiva manda
+    # "large-v3" resolves to the q5_0 binary: the effective quantization prevails.
     assert ensure_model("large-v3", root=tmp_path) == dest
     assert Path(str(dest) + ".verified").read_text(encoding="utf-8").strip() == _sha(GGML)
 
 
-def test_ensure_model_descarga_via_hf_y_copia(monkeypatch, tmp_path):
+def test_ensure_model_downloads_via_hf_and_copies(monkeypatch, tmp_path):
     _pin_models(monkeypatch)
     src = tmp_path / "cache-hf.bin"
     src.write_bytes(GGML)
@@ -200,12 +200,12 @@ def test_ensure_model_descarga_via_hf_y_copia(monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, "huggingface_hub", SimpleNamespace(hf_hub_download=fake_download))
     got = ensure_model("small", root=tmp_path)
     assert got == tmp_path / "models" / "ggml-small.bin"
-    assert got.read_bytes() == GGML  # COPIA real, no referencia al cache HF
+    assert got.read_bytes() == GGML  # A real COPY, not a reference to the HF cache.
     assert src.exists()
     assert calls == [("ggerganov/whisper.cpp", "ggml-small.bin")]
 
 
-def test_ensure_model_sha_que_no_cuadra_revienta(monkeypatch, tmp_path):
+def test_ensure_model_mismatched_sha_fails(monkeypatch, tmp_path):
     _pin_models(monkeypatch)
     dest = tmp_path / "models" / "ggml-small.bin"
     dest.parent.mkdir(parents=True)
@@ -214,7 +214,7 @@ def test_ensure_model_sha_que_no_cuadra_revienta(monkeypatch, tmp_path):
         ensure_model("small", root=tmp_path)
 
 
-def test_ensure_model_no_pinneado_lista_disponibles(tmp_path):
+def test_ensure_model_when_unpinned_lists_the_available_models(tmp_path):
     with pytest.raises(RuntimeError, match="is not pinned") as ei:
         ensure_model("medium", root=tmp_path)
     assert "large-v3" in str(ei.value) and "small" in str(ei.value)

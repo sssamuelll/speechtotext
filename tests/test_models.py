@@ -1,5 +1,5 @@
-"""core.models: rutas por sistema, inventario, descarga y borrado. huggingface_hub jamás se
-importa de verdad: dobles en sys.modules (mismo patrón que tests/test_enginepin.py)."""
+"""core.models: per-system paths, inventory, download, and deletion. huggingface_hub is
+never actually imported: stubs in sys.modules (same pattern as tests/test_enginepin.py)."""
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,50 +11,50 @@ from speechtotext.core import enginepin, models
 
 # --- data_dir -----------------------------------------------------------------------------
 
-def test_data_dir_honra_speechtotext_home(monkeypatch, tmp_path):
+def test_data_dir_honors_speechtotext_home(monkeypatch, tmp_path):
     monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path / "casa"))
     assert models.data_dir() == tmp_path / "casa"
 
 
-@pytest.mark.parametrize("plataforma, esperado", [
+@pytest.mark.parametrize("platform, expected", [
     ("win32", Path("C:/local") / "speechtotext"),
     ("darwin", "~/Library/Application Support/speechtotext"),
     ("linux", "~/.local/share/speechtotext"),
 ])
-def test_data_dir_por_sistema(monkeypatch, tmp_path, plataforma, esperado):
+def test_data_dir_depends_on_the_operating_system(monkeypatch, tmp_path, platform, expected):
     monkeypatch.delenv("SPEECHTOTEXT_HOME", raising=False)
     monkeypatch.delenv("XDG_DATA_HOME", raising=False)
     monkeypatch.setenv("LOCALAPPDATA", "C:/local")
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
-    monkeypatch.setattr(models.sys, "platform", plataforma)
-    esperado = esperado if isinstance(esperado, Path) else tmp_path / esperado[2:]
-    assert models.data_dir() == esperado
+    monkeypatch.setattr(models.sys, "platform", platform)
+    expected = expected if isinstance(expected, Path) else tmp_path / expected[2:]
+    assert models.data_dir() == expected
 
 
-def test_data_dir_linux_honra_xdg(monkeypatch, tmp_path):
+def test_data_dir_on_linux_honors_xdg(monkeypatch, tmp_path):
     monkeypatch.delenv("SPEECHTOTEXT_HOME", raising=False)
     monkeypatch.setattr(models.sys, "platform", "linux")
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     assert models.data_dir() == tmp_path / "xdg" / "speechtotext"
 
 
-def test_install_root_cuelga_de_data_dir(monkeypatch, tmp_path):
+def test_install_root_is_under_data_dir(monkeypatch, tmp_path):
     monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
     assert enginepin.install_root() == tmp_path / "whisper-cpp" / enginepin.ENGINE_PIN["version"]
 
 
 # --- installed ----------------------------------------------------------------------------
 
-def _hf_doble(monkeypatch, repos):
-    """Doble de huggingface_hub.scan_cache_dir con los repos dados [(repo_id, path, size)];
-    repos=None simula la caché inexistente (CacheNotFound)."""
+def _hf_stub(monkeypatch, repos):
+    """Stub huggingface_hub.scan_cache_dir with the given repos [(repo_id, path, size)];
+    repos=None simulates a nonexistent cache (CacheNotFound)."""
     class CacheNotFound(Exception):
         pass
 
     def scan_cache_dir():
         if repos is None:
-            raise CacheNotFound("sin caché")
+            raise CacheNotFound("no cache")
         return SimpleNamespace(repos=[
             SimpleNamespace(repo_id=r, repo_path=p, size_on_disk=s) for r, p, s in repos])
 
@@ -62,10 +62,10 @@ def _hf_doble(monkeypatch, repos):
     monkeypatch.setitem(sys.modules, "huggingface_hub.errors", SimpleNamespace(CacheNotFound=CacheNotFound))
 
 
-def test_installed_lista_faster_whisper_desde_la_cache_hf(monkeypatch, tmp_path):
-    _hf_doble(monkeypatch, [
+def test_installed_lists_faster_whisper_models_from_the_hf_cache(monkeypatch, tmp_path):
+    _hf_stub(monkeypatch, [
         ("Systran/faster-whisper-small", tmp_path / "models--Systran--faster-whisper-small", 486_212_372),
-        ("pyannote/segmentation-3.0", tmp_path / "otro", 5_905_440),      # no es un modelo nuestro
+        ("pyannote/segmentation-3.0", tmp_path / "otro", 5_905_440),      # not one of our models
         ("Systran/faster-whisper-large-v3", tmp_path / "models--Systran--faster-whisper-large-v3", 3_090_839_273),
     ])
     got = models.installed("faster-whisper")
@@ -75,13 +75,13 @@ def test_installed_lista_faster_whisper_desde_la_cache_hf(monkeypatch, tmp_path)
     assert got[0].engine == "faster-whisper"
 
 
-def test_installed_sin_cache_hf_es_lista_vacia(monkeypatch):
-    _hf_doble(monkeypatch, None)
+def test_installed_without_an_hf_cache_is_an_empty_list(monkeypatch):
+    _hf_stub(monkeypatch, None)
     assert models.installed("faster-whisper") == []
 
 
-def test_installed_lista_whispercpp_con_su_verificacion(monkeypatch):
-    _hf_doble(monkeypatch, [])
+def test_installed_lists_whispercpp_models_with_their_verification_status(monkeypatch):
+    _hf_stub(monkeypatch, [])
     root = enginepin.install_root() / "models"
     root.mkdir(parents=True)
     small = enginepin.MODELS_PIN["small"]
@@ -93,36 +93,36 @@ def test_installed_lista_whispercpp_con_su_verificacion(monkeypatch):
         ("whispercpp", "large-v3", 11, False), ("whispercpp", "small", 4, True)]
 
 
-def test_installed_rechaza_motor_desconocido():
+def test_installed_rejects_an_unknown_engine():
     with pytest.raises(ValueError, match="does not exist"):
         models.installed("chatgpt")
 
 
 # --- ensure -------------------------------------------------------------------------------
 
-def test_ensure_faster_whisper_baja_el_snapshot_y_emite_progreso(monkeypatch, tmp_path):
-    llamadas = []
+def test_ensure_faster_whisper_downloads_the_snapshot_and_emits_progress(monkeypatch, tmp_path):
+    calls = []
 
     def snapshot_download(repo_id, allow_patterns=None):
-        llamadas.append((repo_id, allow_patterns))
+        calls.append((repo_id, allow_patterns))
         return str(tmp_path / "snap")
 
     monkeypatch.setitem(sys.modules, "huggingface_hub", SimpleNamespace(snapshot_download=snapshot_download))
-    eventos = []
-    got = models.ensure("faster-whisper", "small", on_progress=eventos.append)
+    events = []
+    got = models.ensure("faster-whisper", "small", on_progress=events.append)
     assert got == tmp_path / "snap"
-    assert llamadas == [("Systran/faster-whisper-small", models._FW_FILES)]
-    assert [(e.stage, e.done, e.total) for e in eventos] == [("download", 0, None), ("download", 1, 1)]
+    assert calls == [("Systran/faster-whisper-small", models._FW_FILES)]
+    assert [(e.stage, e.done, e.total) for e in events] == [("download", 0, None), ("download", 1, 1)]
 
 
-def test_ensure_whispercpp_delega_en_enginepin(monkeypatch, tmp_path):
+def test_ensure_whispercpp_delegates_to_enginepin(monkeypatch, tmp_path):
     monkeypatch.setattr(enginepin, "ensure_model", lambda name: tmp_path / f"{name}.bin")
-    eventos = []
-    assert models.ensure("whispercpp", "large-v3", on_progress=eventos.append) == tmp_path / "large-v3.bin"
-    assert eventos[0].detail == "ggml-large-v3-q5_0.bin" and eventos[-1].done == 1
+    events = []
+    assert models.ensure("whispercpp", "large-v3", on_progress=events.append) == tmp_path / "large-v3.bin"
+    assert events[0].detail == "ggml-large-v3-q5_0.bin" and events[-1].done == 1
 
 
-def test_ensure_nombre_desconocido_lista_los_disponibles():
+def test_ensure_with_an_unknown_name_lists_the_available_models():
     with pytest.raises(ValueError, match="available") as ei:
         models.ensure("faster-whisper", "gigante")
     assert "large-v3" in str(ei.value)
@@ -134,12 +134,12 @@ def test_ensure_nombre_desconocido_lista_los_disponibles():
 
 # --- remote_size --------------------------------------------------------------------------
 
-def test_remote_size_whispercpp_sale_del_pin():
+def test_remote_size_for_whispercpp_comes_from_the_pin():
     assert models.remote_size("whispercpp", "small") == enginepin.MODELS_PIN["small"]["size_bytes"] == 487_601_967
     assert models.remote_size("whispercpp", "large-v3") == 1_081_140_203
 
 
-def test_remote_size_faster_whisper_suma_solo_lo_que_se_baja(monkeypatch):
+def test_remote_size_for_faster_whisper_sums_only_what_gets_downloaded(monkeypatch):
     siblings = [
         SimpleNamespace(rfilename="README.md", size=2052),
         SimpleNamespace(rfilename="model.bin", size=3_087_284_237),
@@ -156,7 +156,7 @@ def test_remote_size_faster_whisper_suma_solo_lo_que_se_baja(monkeypatch):
     assert models.remote_size("faster-whisper", "large-v3") == 3_087_284_237 + 1_068_114
 
 
-def test_remote_size_sin_red_es_none(monkeypatch):
+def test_remote_size_without_a_network_is_none(monkeypatch):
     class HfApi:
         def model_info(self, *a, **k):
             raise ConnectionError("sin red")
@@ -167,16 +167,16 @@ def test_remote_size_sin_red_es_none(monkeypatch):
 
 # --- remove -------------------------------------------------------------------------------
 
-def test_remove_faster_whisper_borra_el_repo_de_la_cache(monkeypatch, tmp_path):
+def test_remove_faster_whisper_deletes_the_repository_from_the_cache(monkeypatch, tmp_path):
     repo = tmp_path / "models--Systran--faster-whisper-small"
     (repo / "snapshots").mkdir(parents=True)
-    _hf_doble(monkeypatch, [("Systran/faster-whisper-small", repo, 10)])
+    _hf_stub(monkeypatch, [("Systran/faster-whisper-small", repo, 10)])
     models.remove("faster-whisper", "small")
     assert not repo.exists()
 
 
-def test_remove_whispercpp_borra_bin_y_marcador(monkeypatch):
-    _hf_doble(monkeypatch, [])
+def test_remove_whispercpp_deletes_the_binary_and_marker(monkeypatch):
+    _hf_stub(monkeypatch, [])
     root = enginepin.install_root() / "models"
     root.mkdir(parents=True)
     fn = enginepin.MODELS_PIN["small"]["filename"]
@@ -186,7 +186,7 @@ def test_remove_whispercpp_borra_bin_y_marcador(monkeypatch):
     assert not (root / fn).exists() and not (root / (fn + ".verified")).exists()
 
 
-def test_remove_lo_que_no_esta_revienta_con_nombre(monkeypatch):
-    _hf_doble(monkeypatch, [])
+def test_remove_for_a_missing_model_fails_loudly_with_its_name(monkeypatch):
+    _hf_stub(monkeypatch, [])
     with pytest.raises(FileNotFoundError, match="small"):
         models.remove("whispercpp", "small")

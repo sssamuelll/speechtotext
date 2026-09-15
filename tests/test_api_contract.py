@@ -1,27 +1,27 @@
-"""El mapa se rompe con ruido: si `docs/api.md` y el código se separan, esto lo dice.
+"""The map fails loudly: if `docs/api.md` and the code diverge, this says so.
 
-Dos direcciones, ninguna con parser de firmas:
+Two directions, neither with a signature parser:
 
-  (a) mecánica — todo nombre exportado en un `__all__` público aparece en api.md.
-  (b) curada   — toda ruta de CONTRATO importa y aparece en api.md.
+  (a) mechanical — every name exported by a public `__all__` appears in api.md.
+  (b) curated    — every path in CONTRATO imports and appears in api.md.
 
-La (a) caza el modo de fallo que de verdad ocurrió (exportar algo y no documentarlo:
-llegaron a ser 17 de 20 en `audio`). La (b) caza el inverso, documentar lo que ya no
-existe. Un parser de firmas Markdown se pudriría más rápido que lo que vigila.
+Direction (a) catches the failure mode that actually occurred (exporting something without
+documenting it: only 17 of 20 names in `audio` were documented). Direction (b) catches the
+inverse, documenting something that no longer exists. A Markdown signature parser would rot
+faster than what it monitors.
 
-`core/` y `speakers/` no tienen `__all__` — se importan por submódulo — así que su
-superficie pública vive en CONTRATO, nombre a nombre. Añadir algo ahí es declararlo
-contrato: sale en el CHANGELOG cuando cambie.
+`core/` and `speakers/` have no `__all__` — they are imported by submodule — so their public
+surface lives in CONTRATO, name by name. Adding something there declares it part of the
+contract: it goes in the CHANGELOG when it changes.
 
-Límite conocido, a propósito. La dirección (b) compara el nombre DESNUDO contra los
-tokens del documento entero, sin atarlo a su módulo, y eso deja dos huecos. Uno: dos
-rutas con el mismo último segmento (`core.models.remove` y `speakers.registry.remove`)
-se tapan entre sí — si una pierde su documentación, el token de la otra la sigue
-cubriendo. Dos: un token puede venir de una mención que no documenta nada; durante un
-commit, `speakers.diarization.diarize` pasó en verde porque el documento nombraba la
-flag `--diarize` y la etapa de progreso `diarize`, no la función. Exigir la mención
-calificada arreglaría ambos y rompería las menciones legítimas del propio documento, así
-que se queda el chequeo desnudo y el aviso escrito.
+Known limitation, by design. Direction (b) compares the BARE name against tokens from the
+entire document without tying it to its module, leaving two gaps. First, two paths with the
+same final segment (`core.models.remove` and `speakers.registry.remove`) mask each other — if
+one loses its documentation, the other's token still covers it. Second, a token can come from
+a mention that documents nothing; during one commit, `speakers.diarization.diarize` passed
+because the document named the `--diarize` flag and the `diarize` progress stage, not the
+function. Requiring a qualified mention would fix both problems and break legitimate mentions
+within the document itself, so the bare check and this written warning remain.
 """
 import importlib
 import re
@@ -31,7 +31,7 @@ import pytest
 
 API_MD = Path(__file__).resolve().parents[1] / "docs" / "api.md"
 
-MODULOS_CON_ALL = ("speechtotext.asr", "speechtotext.audio")
+MODULES_WITH_ALL = ("speechtotext.asr", "speechtotext.audio")
 
 CONTRATO = (
     "speechtotext.core.transcribe.transcribe",
@@ -65,98 +65,106 @@ CONTRATO = (
     "speechtotext.asr.whispercpp.WhisperCppBackend",
 )
 
-_BLOQUE = re.compile(r"```.*?```", re.S)
+_BLOCK = re.compile(r"```.*?```", re.S)
 
 
-def _nombrados(texto: str) -> set[str]:
-    """Identificadores que api.md nombra en código o en un encabezado.
+def _named_identifiers(text: str) -> set[str]:
+    """Identifiers that api.md names in code or in a heading.
 
-    Cuenta los bloques cercados, los `code span` sueltos y los encabezados; la prosa
-    no cuenta, porque nombrar algo de pasada no es documentarlo. Se tokeniza en vez
-    de buscar la subcadena: si no, `AudioView` pasaría gratis porque existe
-    `AudioViewName`.
+    Count fenced blocks, individual `code spans`, and headings; prose does not count,
+    because mentioning something in passing does not document it. Tokenize instead of
+    searching for a substring; otherwise, `AudioView` would pass for free because
+    `AudioViewName` exists.
     """
-    bloques = _BLOQUE.findall(texto)
-    resto = _BLOQUE.sub("\n", texto)
-    trozos = (bloques
-              + re.findall(r"`([^`\n]+)`", resto)
-              + re.findall(r"^#{1,6}\s+(.+)$", resto, re.M))
-    return {t for trozo in trozos for t in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", trozo)}
+    blocks = _BLOCK.findall(text)
+    remainder = _BLOCK.sub("\n", text)
+    pieces = (blocks
+              + re.findall(r"`([^`\n]+)`", remainder)
+              + re.findall(r"^#{1,6}\s+(.+)$", remainder, re.M))
+    return {token for piece in pieces
+            for token in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", piece)}
 
 
 @pytest.fixture(scope="module")
-def nombrados() -> set[str]:
-    return _nombrados(API_MD.read_text(encoding="utf-8"))
+def named_identifiers() -> set[str]:
+    return _named_identifiers(API_MD.read_text(encoding="utf-8"))
 
 
-@pytest.mark.parametrize("modulo", MODULOS_CON_ALL)
-def test_todo_lo_exportado_esta_documentado(modulo, nombrados):
-    exportados = importlib.import_module(modulo).__all__
-    faltan = sorted(n for n in exportados if n not in nombrados)
-    assert not faltan, (
-        f"{modulo}.__all__ exporta {len(faltan)} nombres que docs/api.md no menciona: "
-        f"{', '.join(faltan)}. Documéntalos, o sácalos de __all__ si no son contrato."
+@pytest.mark.parametrize("module", MODULES_WITH_ALL)
+def test_every_exported_name_is_documented(module, named_identifiers):
+    exported_names = importlib.import_module(module).__all__
+    missing = sorted(name for name in exported_names if name not in named_identifiers)
+    assert not missing, (
+        f"{module}.__all__ exports {len(missing)} names that docs/api.md does not mention: "
+        f"{', '.join(missing)}. Document them, or remove them from __all__ if they are not "
+        f"part of the contract."
     )
 
 
-@pytest.mark.parametrize("ruta", CONTRATO)
-def test_lo_documentado_existe_y_se_importa(ruta, nombrados):
-    modulo, _, nombre = ruta.rpartition(".")
-    objeto = importlib.import_module(modulo)
-    assert hasattr(objeto, nombre), (
-        f"docs/api.md promete {ruta} y no existe. Si se renombró, renómbralo también "
-        f"en el documento y en el CHANGELOG (rompe)."
+@pytest.mark.parametrize("dotted_path", CONTRATO)
+def test_every_documented_name_exists_and_imports(dotted_path, named_identifiers):
+    module, _, name = dotted_path.rpartition(".")
+    target = importlib.import_module(module)
+    assert hasattr(target, name), (
+        f"docs/api.md promises {dotted_path}, but it does not exist. If it was renamed, "
+        f"rename it in the document and the CHANGELOG as well (breaking change)."
     )
-    assert nombre in nombrados, f"{ruta} es contrato y docs/api.md no lo nombra"
+    assert name in named_identifiers, (
+        f"{dotted_path} is part of the contract, but docs/api.md does not name it"
+    )
 
 
-def test_el_tokenizador_no_regala_prefijos():
-    """La trampa que hay que evitar: `AudioViewName` no puede documentar `AudioView`."""
-    tokens = _nombrados("Ver `AudioViewName` para las vistas.")
+def test_the_tokenizer_does_not_accept_prefixes_for_free():
+    """The trap to avoid: `AudioViewName` cannot document `AudioView`."""
+    tokens = _named_identifiers("See `AudioViewName` for the views.")
     assert "AudioViewName" in tokens
     assert "AudioView" not in tokens
 
 
-def test_la_prosa_no_documenta():
-    """Nombrar algo en una frase no es documentarlo: tiene que estar en código."""
-    assert _nombrados("AudioClip es la entrada por clip.") == set()
-    assert "AudioClip" in _nombrados("- **`AudioClip(started_at, ...)`** — la entrada.")
+def test_prose_does_not_count_as_documentation():
+    """Naming something in a sentence does not document it: it must be in code."""
+    assert _named_identifiers("AudioClip is the entry for a clip.") == set()
+    assert "AudioClip" in _named_identifiers("- **`AudioClip(started_at, ...)`** — the entry.")
 
 
-def test_ningun_code_span_cruza_un_salto_de_linea():
-    """Un span partido en dos líneas no lo ve `[^`\\n]+`: el símbolo que nombra deja de
-    contar como documentado y, peor, descoloca el emparejamiento del resto de la línea.
-    Así fue como `TranscriptionRequest` y `Route` dejaron de contar desde su propia firma
-    y pasaron solo porque se nombraban en otra parte. Se vigila aquí, no en la cabeza de
-    quien edite el documento."""
-    dentro = False
-    partidas = []
-    for numero, linea in enumerate(API_MD.read_text(encoding="utf-8").split("\n"), 1):
-        if linea.lstrip().startswith("```"):
-            dentro = not dentro
-        elif not dentro and linea.count("`") % 2:
-            partidas.append(numero)
-    assert not partidas, (
-        f"docs/api.md tiene code spans que cruzan un salto de línea, en las líneas "
-        f"{partidas}. Reajusta el salto para que el span quepa entero en una: partido "
-        f"no cuenta como documentación."
+def test_no_code_span_crosses_a_line_break():
+    """A span split across two lines is not seen by `[^`\\n]+`: the symbol it names no
+    longer counts as documented and, worse, it throws off matching for the rest of the
+    line. This is how `TranscriptionRequest` and `Route` stopped counting from their own
+    signatures and passed only because they were named elsewhere. Monitor this here, not
+    in the mind of whoever edits the document."""
+    inside_code_block = False
+    split_spans = []
+    for line_number, line in enumerate(API_MD.read_text(encoding="utf-8").split("\n"), 1):
+        if line.lstrip().startswith("```"):
+            inside_code_block = not inside_code_block
+        elif not inside_code_block and line.count("`") % 2:
+            split_spans.append(line_number)
+    assert not split_spans, (
+        f"docs/api.md has code spans that cross a line break, on lines {split_spans}. "
+        f"Adjust the break so the entire span fits on one line: a split span does not "
+        f"count as documentation."
     )
 
 
-def test_el_documento_no_llama_interno_a_lo_que_vigila():
-    """La contradicción que ya apareció dos veces en este mismo documento: api.md
-    declarando interno un submódulo del que CONTRATO vigila un símbolo. Las dos veces
-    la escribió alguien con cuidado; por eso ahora la vigila un test."""
-    texto = API_MD.read_text(encoding="utf-8")
-    assert "El resto de `core/` es interno" in texto, (
-        "cambió la frase que marca la lista de submódulos internos de core/; "
-        "ajusta este test a la nueva o el aviso deja de existir"
+def test_the_document_does_not_call_monitored_code_internal():
+    """A contradiction that has already appeared twice in this document: api.md
+    declaring a submodule internal while CONTRATO monitors one of its symbols. Both
+    times, someone wrote it carefully; that is why a test monitors it now."""
+    text = API_MD.read_text(encoding="utf-8")
+    assert "El resto de `core/` es interno" in text, (
+        "the sentence that marks the list of internal core/ submodules changed; "
+        "adjust this test to the new sentence or the warning will cease to exist"
     )
-    parrafo = texto.split("El resto de `core/` es interno", 1)[1].split("\n\n", 1)[0]
-    internos = set(re.findall(r"`([a-z_]+)`", parrafo))
-    vigilados = {r.split(".")[2] for r in CONTRATO if r.startswith("speechtotext.core.")}
-    choque = internos & vigilados
-    assert not choque, (
-        f"docs/api.md llama internos a submódulos de los que CONTRATO vigila un "
-        f"símbolo: {sorted(choque)}. Decide cuál de las dos cosas es cierta."
+    paragraph = text.split("El resto de `core/` es interno", 1)[1].split("\n\n", 1)[0]
+    internal_modules = set(re.findall(r"`([a-z_]+)`", paragraph))
+    monitored_modules = {
+        dotted_path.split(".")[2]
+        for dotted_path in CONTRATO
+        if dotted_path.startswith("speechtotext.core.")
+    }
+    conflict = internal_modules & monitored_modules
+    assert not conflict, (
+        f"docs/api.md calls submodules internal while CONTRATO monitors one of their "
+        f"symbols: {sorted(conflict)}. Decide which statement is true."
     )

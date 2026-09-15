@@ -54,7 +54,7 @@ def _av(frames, has_audio=True):
     )
 
 
-def test_decode_audio_concatena_float32_mono():
+def test_decode_audio_concatenates_float32_mono():
     lease = io.BytesIO(b"leased-audio")
     av_module = _av([FakeFrame([0.1, 0.2]), FakeFrame([0.3])])
     view = decode_audio(
@@ -68,7 +68,7 @@ def test_decode_audio_concatena_float32_mono():
     assert view.provenance.steps[0].name == "pyav-decode"
 
 
-def test_decode_audio_rechaza_archivo_sin_stream():
+def test_decode_audio_rejects_file_without_audio_stream():
     with pytest.raises(AudioDecodeError, match="no audio stream"):
         decode_audio(
             io.BytesIO(b"leased-video"),
@@ -77,7 +77,7 @@ def test_decode_audio_rechaza_archivo_sin_stream():
         )
 
 
-def test_decode_audio_rechaza_decode_vacio():
+def test_decode_audio_rejects_empty_decode():
     with pytest.raises(AudioDecodeError, match="no samples"):
         decode_audio(
             io.BytesIO(b"leased-empty"),
@@ -90,7 +90,7 @@ def test_decode_audio_rechaza_decode_vacio():
     "invalid_stream",
     ["sample.wav", Path("sample.wav"), io.StringIO("not-binary")],
 )
-def test_decode_audio_rechaza_paths_y_texto_antes_de_av_open(invalid_stream):
+def test_decode_audio_rejects_paths_and_text_before_av_open(invalid_stream):
     av_module = _av([])
     with pytest.raises(TypeError, match="leased, seekable binary stream"):
         decode_audio(invalid_stream, sample_rate=16000, av_module=av_module)

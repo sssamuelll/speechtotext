@@ -41,27 +41,27 @@ def test_get_embeddings_skips_missing_file(tmp_path, monkeypatch):
     assert registry.get_embeddings(PYANNOTE) == {}
 
 
-def test_get_embeddings_solo_devuelve_las_voces_de_ese_modelo(tmp_path, monkeypatch):
-    """Un embedding de sherpa-onnx y uno de pyannote viven en espacios vectoriales
-    distintos: el coseno entre ellos no significa nada, y si las dimensiones coinciden
-    ni siquiera falla — puntúa basura. El registro no puede devolverlos mezclados."""
+def test_get_embeddings_only_returns_voices_for_that_model(tmp_path, monkeypatch):
+    """A sherpa-onnx embedding and a pyannote embedding live in different vector spaces:
+    the cosine between them is meaningless, and if their dimensions match it does not
+    even fail—it produces a garbage score. The registry cannot return them mixed."""
     monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
     registry.enroll("Alice", np.array([1.0, 0.0], dtype=np.float32), seconds=10.0, model=PYANNOTE)
     registry.enroll("Bob", np.array([0.0, 1.0], dtype=np.float32), seconds=10.0, model=SHERPA)
 
     assert list(registry.get_embeddings(PYANNOTE)) == ["Alice"]
     assert list(registry.get_embeddings(SHERPA)) == ["Bob"]
-    assert registry.get_embeddings("otro/modelo") == {}
+    assert registry.get_embeddings("other/model") == {}
 
 
-def test_get_embeddings_exige_el_modelo(tmp_path, monkeypatch):
-    """Si el modelo vuelve a ser opcional, vuelve el bug: quien llama compara a ciegas."""
+def test_get_embeddings_requires_the_model(tmp_path, monkeypatch):
+    """If the model becomes optional again, the bug returns: callers compare blindly."""
     monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
     with pytest.raises(TypeError):
         registry.get_embeddings()
 
 
-def test_la_misma_persona_en_dos_modelos_no_se_pisa(tmp_path, monkeypatch):
+def test_enrolling_the_same_voice_in_two_models_preserves_both_embeddings(tmp_path, monkeypatch):
     monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
     pyannote_vec = np.array([1.0, 2.0, 3.0], dtype=np.float32)
     sherpa_vec = np.array([9.0, 8.0], dtype=np.float32)
@@ -73,7 +73,7 @@ def test_la_misma_persona_en_dos_modelos_no_se_pisa(tmp_path, monkeypatch):
     assert np.allclose(registry.get_embeddings(SHERPA)["Alice"], sherpa_vec)
 
 
-def test_list_voices_filtra_por_modelo(tmp_path, monkeypatch):
+def test_list_voices_filters_by_model(tmp_path, monkeypatch):
     monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
     registry.enroll("Alice", np.array([1.0], dtype=np.float32), seconds=10.0, model=PYANNOTE)
     registry.enroll("Bob", np.array([1.0], dtype=np.float32), seconds=10.0, model=SHERPA)
@@ -82,7 +82,7 @@ def test_list_voices_filtra_por_modelo(tmp_path, monkeypatch):
     assert [v["name"] for v in registry.list_voices(SHERPA)] == ["Bob"]
 
 
-def test_remove_borra_solo_el_modelo_pedido(tmp_path, monkeypatch):
+def test_remove_deletes_only_the_enrollment_for_the_requested_model(tmp_path, monkeypatch):
     monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
     registry.enroll("Alice", np.array([1.0], dtype=np.float32), seconds=10.0, model=PYANNOTE)
     registry.enroll("Alice", np.array([2.0], dtype=np.float32), seconds=10.0, model=SHERPA)
@@ -92,9 +92,9 @@ def test_remove_borra_solo_el_modelo_pedido(tmp_path, monkeypatch):
     assert list(registry.get_embeddings(PYANNOTE)) == ["Alice"]
 
 
-def test_lee_el_manifiesto_plano_de_v0_4(tmp_path, monkeypatch):
-    """Las voces ya registradas con v0.4 no se pierden al actualizar: el formato plano
-    se lee bajo el modelo que cada entrada ya declaraba."""
+def test_reads_the_flat_v0_4_manifest(tmp_path, monkeypatch):
+    """Voices already enrolled with v0.4 are not lost during an upgrade: the flat format
+    is read under the model already declared by each entry."""
     monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
     voices = tmp_path / "voices"
     voices.mkdir(parents=True)
