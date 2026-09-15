@@ -1,9 +1,10 @@
-"""Smoke manual de diarización.
+"""Manual diarization smoke test.
 
-Uso: python scripts/smoke_diarize.py <audio> [num_speakers]
+Usage: python scripts/smoke_diarize.py <audio> [num_speakers]
 
-Transcodea el audio a 16 kHz mono, lo diariza e imprime los turnos por hablante.
-Requiere el extra [diarize] instalado, HF_TOKEN y los modelos gated aceptados.
+Transcodes the audio to 16 kHz mono, diarizes it, and prints the turns per
+speaker. Requires the [diarize] extra installed, HF_TOKEN, and the gated
+models accepted.
 """
 import sys
 from pathlib import Path
@@ -21,4 +22,4 @@ finally:
 
 for t0, t1, spk in turns:
     print(f"{t0:6.2f} - {t1:6.2f}  {spk}")
-print(f"\n{len(embeddings)} hablantes con embedding, {len(turns)} turnos")
+print(f"\n{len(embeddings)} speakers with embedding, {len(turns)} turns")

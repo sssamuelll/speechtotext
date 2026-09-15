@@ -26,7 +26,7 @@ src/static/*.srt
 src/static/*.json
 *.log
 
-# Modelos descargados por faster-whisper (caché Hugging Face)
-# Anclado a la raíz para no barrer un `models/` que apareciera dentro del paquete.
+# Models downloaded by faster-whisper (Hugging Face cache)
+# Anchored to the root so it doesn't sweep up a `models/` that shows up inside the package.
 .cache/
 /models/

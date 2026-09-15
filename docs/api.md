@@ -272,7 +272,7 @@ sintonices: cambiarlas cambia el significado de los números que ya guardaste.
 > El umbral `voice_band_ratio >= 0.4` que aparece en el ejemplo es el que usa
 > un consumidor en producción para decidir si hubo voz bajo un texto transcrito. Es un
 > valor calibrado contra su micrófono y su caso, no una constante de esta
-> librería. Calibra el tuyo con `scripts/validar_evidencia_de_voz.py`, que compara
+> librería. Calibra el tuyo con `scripts/validate_voice_evidence.py`, que compara
 > un tramo de habla real contra uno de cuarto vacío e imprime el solape.
 
 ---
