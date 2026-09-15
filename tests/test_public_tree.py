@@ -235,6 +235,48 @@ def test_pending_only_names_things_that_exist():
     assert not orphans, f"PENDING names paths that do not exist: {orphans}"
 
 
+# The README links into `docs/api.md` by anchor, and GitHub builds those anchors
+# from the headings. Rename a heading and the link does not break loudly: it
+# lands the reader at the top of a 500-line document and says nothing. Task 6
+# translated the README first and had to write three English anchors before task
+# 7 had written the headings they name -- this is what turns that into a contract
+# instead of a line in a report nobody reads twice. It stays asleep while
+# `docs/api.md` is still Spanish and wakes up in the same commit that takes it
+# off PENDING. The wanted anchors are read out of README.md rather than listed
+# here, so moving a link moves the check with it.
+HEADING = re.compile(r"#{1,6}\s+(\S.*)")
+FENCE = re.compile(r"^\s*(```|~~~)")
+
+
+def _anchors(text: str) -> set[str]:
+    """GitHub's heading slugs: lowercase, drop what is not a letter, digit,
+    space, hyphen or underscore, then spaces to hyphens. Fenced blocks are
+    skipped because a shell comment is not a heading -- and a stray `# JSON
+    schema` inside one would invent the very anchor this test looks for."""
+    found, fenced = set(), False
+    for line in text.splitlines():
+        if FENCE.match(line):
+            fenced = not fenced
+            continue
+        m = None if fenced else HEADING.match(line)
+        if m:
+            slug = re.sub(r"[^a-z0-9 _-]", "", m.group(1).strip().lower())
+            found.add(slug.replace(" ", "-"))
+    return found
+
+
+def test_readme_anchors_into_api_md_resolve():
+    if "docs/api.md" in PENDING:
+        pytest.skip("docs/api.md is still Spanish; the headings these anchors name are task 7's")
+    wanted = set(re.findall(r"\]\(docs/api\.md#([^)\s]+)\)", (ROOT / "README.md").read_text(encoding="utf-8")))
+    missing = sorted(wanted - _anchors((ROOT / "docs/api.md").read_text(encoding="utf-8")))
+    assert not missing, (
+        "README.md links to docs/api.md anchors that no heading there produces: "
+        f"{', '.join('#' + a for a in missing)}. Rename the heading back, or fix the "
+        "link -- a dangling anchor drops the reader at the top of the file in silence"
+    )
+
+
 # Real people. The repo ships with the history of a private project attached to
 # it; these two are the ones who leaked into fixtures and examples. There is no
 # PENDING for this one -- a real name in a published tree is not a translation

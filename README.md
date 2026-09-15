@@ -6,8 +6,8 @@ diarization and speaker identification. No external APIs, no cost per use.
 
 ## Why it is local
 
-This began as a script for a pile of interview recordings that were not allowed
-to leave the machine they sat on. They were other people's words, recorded and
+This began as a script for a pile of interview recordings that could not leave
+the machine they sat on. They were other people's words, recorded and
 not yet published, and a transcription service would have meant handing them to
 a stranger. So the transcription had to run where the audio already was.
 Everything in this library follows from that: no API key, no account, no
@@ -36,7 +36,9 @@ Consumers pin the dependency to a **tag or SHA**
 to a floating `@main`. What they pin against is the contract in
 **[`docs/api.md`](docs/api.md)**: the JSON schema, the public types, and what
 each module guarantees. Changes to that contract are recorded in
-[`CHANGELOG.md`](CHANGELOG.md).
+[`CHANGELOG.md`](CHANGELOG.md). A change you need starts as an issue or a pull
+request here; once it is merged it ships in a tag, and you move your pin to that
+tag.
 
 ---
 
@@ -115,8 +117,8 @@ speechtotext transcribe interview.m4a -o transcripts/ --device cuda
 
 ### Which model
 
-`large-v3` is the default: in int8 it runs on CPU at roughly 1.3× real time and
-about 3.5 GB of RAM, and it was the only one that lost nothing in
+`large-v3` is the default: in int8 it runs on CPU at roughly 1.3× real time,
+using about 3.5 GB of RAM, and it was the only one that lost nothing in
 [what the measurements say](#what-the-measurements-say). `-m small` is the fast
 draft: five times quicker, and it changes what was said. `tiny` and `base` are
 for testing the pipeline, not for reading the result. Before it starts, the CLI
@@ -157,8 +159,13 @@ speechtotext transcribe interview.wav --no-chunk     # force a single pass
 
 Chunking has a [measured](#what-the-measurements-say) price: nothing is lost at
 the seam, but every chunk after the first decodes with its 30 s windows shifted
-and drifts 2-3% from the single pass. Turn VAD on when you chunk, so the chunk
-does not end in silence and Whisper does not invent a goodbye over the padding.
+and drifts 2-3% from the single pass.
+
+A chunked run is the one place `--vad` earns its cost. It still drops short
+sentences, and that cost does not go away here. What a chunk adds is a worse
+failure on the other side: it ends in silence, so Whisper has a run of padding
+to fill, and it fills it with a goodbye nobody said. Between a filter that trims
+too much and a model that invents, take the filter, and only here.
 
 ---
 
@@ -186,7 +193,7 @@ and the words without which it makes no sense.
 | faster-whisper `small` | 22 / 25 | 29.1 | 135 s |
 | whisper.cpp `small` CUDA | 21 / 25 | 27.5 | 55 s |
 
-Errors are counted over the 66 places where the transcriptions disagree and the
+Errors are counted across the 66 places where the transcriptions disagree and the
 answer is objective: a nonsense word that is not Spanish, a term, a number, a
 confirmed omission. The other 100 places in disagreement (one demonstrative
 swapped for another, filler words, commas) are left out on purpose. The chunked
@@ -198,8 +205,9 @@ What this taught:
 
 - **`small` changes what was said.** Seventeen times more errors than
   `large-v3`, and they are not typos: *"todo se desordena"* ("everything falls
-  out of order") came out as *"entonces ordenas"* ("then you tidy up"). It saves
-  nine minutes and costs three or four of the 25 points.
+  out of order") came out as
+  *"entonces ordenas"* ("then you tidy up"). <!-- # spanish-is-data: a quoted transcription is the evidence; translate it and the bullet proves nothing -->
+  It saves nine minutes and costs three or four of the 25 points.
 - **Hotwords fail in blocks.** With 4-5 terms, three blackouts of 28-30 s in two
   recordings — a whole window replaced by *"listo"* ("done") — and no
   improvement in the term they were meant to fix. n = 3, with no counterexample.
@@ -278,7 +286,7 @@ download from Hugging Face and are _gated_:
    ```
 2. Signed in to HF, accept access to the model at
    https://huggingface.co/pyannote/speaker-diarization-community-1
-   (if on first use pyannote asks you to accept a dependent model, accept that one too).
+   (if pyannote asks you to accept a dependent model on first use, accept that one too).
 
 The first run downloads the models to `~/.cache/huggingface`; after that they
 stay cached.
@@ -322,7 +330,7 @@ Speaker 2: Loud and clear. Go ahead.
 
 In `json` every segment gains a `"speaker"` field and there is a top-level
 `"speakers"`; in `srt`/`vtt` the speaker prefixes each line. Without
-`--diarize`, the output is identical to what it always was.
+`--diarize`, the output is unchanged.
 
 ### Limits
 
@@ -339,17 +347,17 @@ In `json` every segment gains a `"speaker"` field and there is a top-level
 
 ## Finding a stretch
 
-Transcribing a long recording at quality takes a while. If you only care about
-one stretch (an interview, a talk), `find` locates it without transcribing
+Transcribing a long recording at full quality takes a while. If you only care
+about one stretch (an interview, a talk), `find` locates it without transcribing
 everything: it makes a fast pass with `tiny`, searches your query and returns
 the **regions** where it appears. With `--extract` it also clips the chosen
-stretch and transcribes it at quality.
+stretch and transcribes it with the full model.
 
 ```bash
 # locate: prints the regions (minutes) where the query appears
 speechtotext find recording.mp3 "seismic vulnerability"
 
-# extract: clips + transcribes the densest region at quality
+# extract: clips the densest region and transcribes it with the full model
 speechtotext find recording.mp3 "seismic vulnerability" --extract
 
 # pick another region, with diarization and names
@@ -358,16 +366,16 @@ speechtotext find recording.mp3 "interview" --extract --region 2 -D --speakers 4
 
 | Flag | Default | Description |
 |---|---|---|
-| `--extract` | off | Clip the chosen region and transcribe it at quality. |
-| `--region` | `1` | Which of the regions found to extract. |
+| `--extract` | off | Clip the chosen region and transcribe it with the full model. |
+| `--region` | `1` | Which region to extract (1 = the densest). |
 | `--top` | `5` | How many regions to list. |
 | `--context` | `10.0` | Seconds of margin around the clip. |
 | `--scan-model` | `tiny` | Model for the fast indexing pass. |
 | `--rebuild` | off | Rebuild the index even if one exists. |
 
 The first `find` on a file builds the index (slow, once); later searches on that
-same file are instant. The index is kept in `~/.speechtotext/index/`, and
-`--rebuild` forces it. Matching ignores accents and case.
+same file are instant. The index is kept in `~/.speechtotext/index/`. Matching
+ignores accents and case.
 
 > `find --extract` transcribes with `device auto`, `compute-type auto`, VAD off
 > and `beam-size 5` fixed. For any other configuration, extract first and then
@@ -437,7 +445,7 @@ Windows it is `...\Scripts\speechtotext.exe`, on macOS and Linux
 }
 ```
 
-The server prints nothing of its own: on stdio, stdout is the protocol. Long
+The server prints nothing on its own: on stdio, stdout is the protocol. Long
 transcriptions report no progress for that reason, and the client waits.
 
 ---
