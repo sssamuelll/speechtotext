@@ -359,3 +359,43 @@ def test_read_table_retrocompat_anade_recommendations(tmp_path, monkeypatch):
     table = benchmark.read_table()
     assert table["recommendations"]
     assert table["recommendations"][0]["case"] == "live_conversation"
+
+
+def test_read_table_migra_las_claves_viejas_en_espanol(tmp_path, monkeypatch):
+    # Un bench.json escrito por el codigo de ANTES de este fix tiene "recommendations"
+    # presente pero con las claves viejas (caso/que/motivo/eleccion): read_table debe
+    # remedirlas desde `results` (intactos), no reventar con KeyError sobre el archivo
+    # de la semana pasada.
+    import json as _json
+
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    vieja = {
+        "schema_version": benchmark.SCHEMA_VERSION, "results": _tabla_realista(), "skipped": [],
+        "recommendations": [
+            {"caso": "conversacion_en_vivo", "que": "algo", "eleccion": None, "motivo": "algo"},
+        ],
+    }
+    benchmark.bench_path().parent.mkdir(parents=True, exist_ok=True)
+    benchmark.bench_path().write_text(_json.dumps(vieja), encoding="utf-8")
+    table = benchmark.read_table()
+    assert table["recommendations"][0]["case"] == "live_conversation"
+    assert table["recommendations"][0]["choice"]["engine"] == "faster-whisper"
+
+
+def test_read_table_no_recalcula_recommendations_ya_con_la_clave_nueva(tmp_path, monkeypatch):
+    # Lo opuesto del test anterior: una tabla ya escrita con el schema nuevo (no vacia)
+    # se confia tal cual, sin recalcular -- si recalculara de todos modos, este stub
+    # (deliberadamente distinto de lo que recommend() produciria de verdad) no
+    # sobreviviria la lectura.
+    import json as _json
+
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    fresca = {
+        "schema_version": benchmark.SCHEMA_VERSION, "results": _tabla_realista(), "skipped": [],
+        "recommendations": [
+            {"case": "live_conversation", "description": "d", "choice": None, "reason": "stub"},
+        ],
+    }
+    benchmark.bench_path().parent.mkdir(parents=True, exist_ok=True)
+    benchmark.bench_path().write_text(_json.dumps(fresca), encoding="utf-8")
+    assert benchmark.read_table() == fresca
