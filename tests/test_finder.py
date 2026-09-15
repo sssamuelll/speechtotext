@@ -14,11 +14,11 @@ def test_normalize_strips_accents_and_case():
 def test_search_groups_contiguous_into_one_region():
     segs = [
         _seg(0, 1, "hola"),
-        _seg(1, 2, "la vulnerabilidad sismica"),
-        _seg(2, 3, "sismica again"),
+        _seg(1, 2, "the seismic vulnerability"),
+        _seg(2, 3, "seismic again"),
         _seg(500, 501, "nothing"),
     ]
-    regs = search(segs, "vulnerabilidad sismica", gap=60, top=5)
+    regs = search(segs, "seismic vulnerability", gap=60, top=5)
     assert len(regs) == 1
     assert regs[0].start == 1 and regs[0].end == 3
     assert regs[0].hits == 2

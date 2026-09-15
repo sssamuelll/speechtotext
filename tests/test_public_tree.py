@@ -56,6 +56,7 @@ WATCHED = (
     "scripts",
     ".github",
     "docs",
+    "constraints",
     "README.md",
     "CHANGELOG.md",
     "pyproject.toml",
@@ -135,7 +136,9 @@ def _files():
             # The suffix filter guards directory walks only. An entry that names
             # a file names it on purpose, and `.gitignore` has no suffix at all:
             # Path(".gitignore").suffix is "".
-            if root.is_dir() and path.suffix not in (".py", ".md", ".toml", ".yml"):
+            if root.is_dir() and path.suffix not in (
+                ".py", ".md", ".toml", ".yml", ".json", ".svg", ".txt", ".yaml",
+            ):
                 continue
             rel = path.relative_to(ROOT).as_posix()
             if rel == SELF or any(rel.startswith(p) for p in EXCLUDED + PENDING):
@@ -282,10 +285,32 @@ def test_readme_anchors_into_api_md_resolve():
 
 
 # Real people. The repo ships with the history of a private project attached to
-# it; these two are the ones who leaked into fixtures and examples. There is no
-# PENDING for this one -- a real name in a published tree is not a translation
-# that got delayed.
-REAL_NAMES = re.compile(r"\b(samuel|simon|ale)\b", re.IGNORECASE)
+# it; these are the ones who leaked into fixtures, examples and old design
+# docs. There is no PENDING for this one -- a real name in a published tree is
+# not a translation that got delayed.
+#
+# Every alternative below is built from concatenated literals instead of a
+# whole word. Section 9.5's history rewrite runs `git filter-repo
+# --replace-text` over this same vocabulary across all of history -- this file
+# included -- so a whole "samuel" or "simon" sitting in a string literal here
+# becomes a replacement token mid-pattern the moment that rewrite runs, e.g.
+# `\b(***REMOVED***|ale)\b`. That is invalid regex (nothing to repeat right
+# after `(` or `|`): it raises `re.error` at import time, drops this entire
+# file from collection, and silences the one test run meant to prove the tree
+# is clean. Python concatenates adjacent string literals at compile time, long
+# before `--replace-text` ever reads a git blob, so splitting each word keeps
+# the compiled pattern identical while leaving no contiguous copy behind for
+# it to find.
+REAL_NAMES = re.compile(
+    r"\b("
+    "samue" "l"                    # Samuel
+    "|sim" "o" "n"                  # simon
+    "|sim" "ó" "n"             # Simón, the accented spelling
+    "|ball" "esteros"               # the surname -- not just the first names
+    "|al" "e"                       # Ale
+    r")\b",
+    re.IGNORECASE,
+)
 
 
 @pytest.mark.parametrize("rel", FILES)
@@ -296,3 +321,23 @@ def test_no_real_names(rel):
         if REAL_NAMES.search(line)
     ]
     assert not hits, "a real person's name in a public file:\n" + "\n".join(hits)
+
+
+def test_real_names_pattern_matches_every_spelling():
+    """REAL_NAMES is assembled from split literals so `--replace-text` has no
+    contiguous word to mangle (see the comment above it). This proves the
+    split didn't also break what the pattern must still catch: both spellings
+    of the name and the surname match as whole words, and words that merely
+    contain one as a substring still don't."""
+    for line in (
+        "Samuel ran the benchmark",
+        "SAMUEL RAN IT",
+        "a talk by simon last week",
+        "el profesor Simón dio la charla",  # spanish-is-data: the accented spelling under test
+        "the professor's surname is Ballesteros",
+        "ale sat in the back",
+    ):
+        assert REAL_NAMES.search(line), f"REAL_NAMES should match: {line!r}"
+
+    for line in ("sale", "scale", "aleph", "simony", "ballet"):
+        assert not REAL_NAMES.search(line), f"REAL_NAMES should not match: {line!r}"

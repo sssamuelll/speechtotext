@@ -365,20 +365,33 @@ speechtotext find recording.mp3 "interview" --extract --region 2 -D --speakers 4
 
 | Flag | Default | Description |
 |---|---|---|
-| `--extract` | off | Clip the chosen region and transcribe it with the full model. |
+| `--extract`, `-e` | off | Clip the chosen region and transcribe it with the full model. |
 | `--region` | `1` | Which region to extract (1 = the densest). |
-| `--top` | `5` | How many regions to list. |
-| `--context` | `10.0` | Seconds of margin around the clip. |
+| `--model`, `-m` | `large-v3` | Model for transcribing the clip (small = fast draft). |
 | `--scan-model` | `tiny` | Model for the fast indexing pass. |
+| `--language`, `-l` | `auto` | Language for transcribing the clip. |
+| `--formats`, `-f` | `txt,srt` | Output formats for the clip. |
+| `--diarize`, `-D` | off | Diarize the extracted clip. |
+| `--speakers` | none | Number of speakers (a hint). |
+| `--identify` / `--no-identify` | on | Name enrolled voices. |
+| `--threshold` | `0.5` | Voice match threshold (cosine, 0-1). |
+| `--context` | `10.0` | Seconds of margin around the clip. |
+| `--output`, `-o` | next to the audio | Output folder for the clip. |
 | `--rebuild` | off | Rebuild the index even if one exists. |
+| `--top` | `5` | How many regions to list. |
+| `--hotwords` | none | Hard terms for transcribing the clip (see `transcribe`). |
+| `--hotwords-file` | none | Lexicon file for transcribing the clip (see `transcribe`). |
 
 The first `find` on a file builds the index (slow, once); later searches on that
 same file are instant. The index is kept in `~/.speechtotext/index/`. Matching
 ignores accents and case.
 
 > `find --extract` transcribes with `device auto`, `compute-type auto`, VAD off
-> and `beam-size 5` fixed. For any other configuration, extract first and then
-> run `transcribe` on the clip.
+> and `beam-size 5` fixed. `--engine`, `--chunk` and `--jobs` aren't exposed
+> either -- for those, extract first and then run `transcribe` on the clip.
+> Everything else `find` accepts (`--model`, `--language`, `--formats`,
+> `--diarize`, `--speakers`, `--identify`, `--threshold`, `--hotwords`) passes
+> straight through.
 
 ---
 

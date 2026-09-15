@@ -56,10 +56,10 @@ library.
 
 ### Changed — breaking
 
-- **The project's language moved wholesale, Spanish to English.** Every
-  identifier, error message, warning, doc and default that used to speak
-  Spanish now speaks English. The concrete breaks below come out of that
-  move; if none of them touch your integration, bumping the pin is
+- **The project's public surface moved wholesale, Spanish to English.** Every
+  identifier, error message, warning, doc and default reachable through the
+  library's public API now speaks English. The concrete breaks below come out
+  of that move; if none of them touch your integration, bumping the pin is
   otherwise safe.
 - `Cap` values are English now — `honored` / `degraded` / `rejected`, not
   `honrado` / `degradado` / `rechazado`. <!-- # spanish-is-data: the old Spanish enum values being replaced; translating them erases what changed -->

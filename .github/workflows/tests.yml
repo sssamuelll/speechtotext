@@ -57,10 +57,11 @@ jobs:
 
       # The `mcp` extra is a few MB and does NOT cost a gigabyte: the reason it isn't
       # installed everywhere is that there's no need to repeat it six times. But it
-      # has to live somewhere, because `test_serve_registra_contra_el_sdk_real` skips
-      # without it, and it's the only thing that checks the SDK's API still matches
-      # what serve() assumes. Without this step, the day `mcp` moves something the
-      # suite stays green and the command breaks on the user's machine.
+      # has to live somewhere, because `test_serve_registers_against_the_real_sdk`
+      # skips without it, and it's the only thing that checks the SDK's API still
+      # matches what serve() assumes. Without this step, the day `mcp` moves
+      # something the suite stays green and the command breaks on the user's
+      # machine.
       - name: Install the MCP SDK (one job only)
         if: matrix.os == 'ubuntu-latest' && matrix.python == '3.11'
         run: pip install -e ".[mcp]"

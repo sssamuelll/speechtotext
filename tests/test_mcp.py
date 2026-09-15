@@ -44,19 +44,19 @@ def _transcript(segments):
 
 def test_transcribe_writes_the_json_next_to_the_audio_and_returns_the_text(monkeypatch, tmp_path):
     audio = tmp_path / "reunion.mp4"
-    audio.write_bytes(b"no importa: transcribe va stubbeado")
+    audio.write_bytes(b"doesn't matter: transcribe is stubbed")
     seen = {}
 
     def fake_transcribe(path, **kw):
         seen.update(path=path, kw=kw)
-        return _transcript([LabeledSegment(0.0, 3.0, " hola"),
+        return _transcript([LabeledSegment(0.0, 3.0, " hello"),
                             LabeledSegment(3.0, 6.0, " there")])
 
     monkeypatch.setattr(core_transcribe, "transcribe", fake_transcribe)
 
     result = mcp_server.transcribe(str(audio))
 
-    assert result["text"] == "hola\nthere"
+    assert result["text"] == "hello\nthere"
     assert result["json"] == str(tmp_path / "reunion.json")
     assert result["language"] == "es"
     assert result["duration"] == 12.5

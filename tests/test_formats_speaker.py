@@ -20,13 +20,13 @@ REAL = LabeledSegment(30, 33, "Okay, so that's settled.")
 
 def test_txt_groups_consecutive_speaker(tmp_path):
     segs = [
-        LabeledSegment(0, 1, "hola", "Alice"),
+        LabeledSegment(0, 1, "hello", "Alice"),
         LabeledSegment(1, 2, "there", "Alice"),
-        LabeledSegment(2, 3, "bien", "Bob"),
+        LabeledSegment(2, 3, "fine", "Bob"),
     ]
     p = tmp_path / "o.txt"
     write_txt(segs, p)
-    assert p.read_text(encoding="utf-8") == "Alice: hola there\nBob: bien\n"
+    assert p.read_text(encoding="utf-8") == "Alice: hello there\nBob: fine\n"
 
 
 def test_txt_without_speaker_unchanged(tmp_path):

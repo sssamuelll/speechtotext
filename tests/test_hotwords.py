@@ -14,14 +14,14 @@ runner = CliRunner()
 
 def test_load_hotwords_file_handles_lines_and_commas(tmp_path):
     p = tmp_path / "lex.txt"
-    p.write_text("Tachira\nLa Guaira, Sofitasa\n\n  Bocono  \n", encoding="utf-8")
-    assert _load_hotwords_file(p) == "Tachira, La Guaira, Sofitasa, Bocono"
+    p.write_text("Kestrel\nGlen Hollow, Meridian\n\n  Larkspur  \n", encoding="utf-8")
+    assert _load_hotwords_file(p) == "Kestrel, Glen Hollow, Meridian, Larkspur"
 
 
 def test_load_hotwords_file_tolerates_a_bom(tmp_path):
     p = tmp_path / "lex.txt"
-    p.write_text("Bocono, Cucuta", encoding="utf-8-sig")  # Windows editor with a BOM
-    assert _load_hotwords_file(p) == "Bocono, Cucuta"
+    p.write_text("Larkspur, Windmere", encoding="utf-8-sig")  # Windows editor with a BOM
+    assert _load_hotwords_file(p) == "Larkspur, Windmere"
 
 
 def test_resolve_with_nothing_returns_none(tmp_path):
@@ -32,8 +32,8 @@ def test_resolve_with_nothing_returns_none(tmp_path):
 
 def test_resolve_combines_file_and_inline_hotwords(tmp_path):
     p = tmp_path / "lex.txt"
-    p.write_text("Bocono", encoding="utf-8")
-    assert _resolve_hotwords("Sofitasa", p) == "Bocono, Sofitasa"
+    p.write_text("Larkspur", encoding="utf-8")
+    assert _resolve_hotwords("Meridian", p) == "Larkspur, Meridian"
 
 
 def test_hf_environment_defaults_are_set_on_windows():
@@ -117,7 +117,7 @@ def test_long_hotword_list_prints_the_count_and_warning(tmp_path, monkeypatch):
 def test_short_hotword_list_does_not_warn(tmp_path, monkeypatch):
     # With 3 terms, the blackout measured no loss: the count is printed, but no warning.
     audio = _fake_transcribe(monkeypatch, tmp_path)
-    result = _invoke(audio, tmp_path, "--hotwords", "Sofitasa, Bocono, Tachira")
+    result = _invoke(audio, tmp_path, "--hotwords", "Meridian, Larkspur, Kestrel")
     assert result.exit_code == 0
     plain_output = _plain(result.stdout)
     assert "3 terms" in plain_output
