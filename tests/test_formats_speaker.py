@@ -20,13 +20,13 @@ REAL = LabeledSegment(30, 33, "Bueno, entonces quedamos así.")
 
 def test_txt_groups_consecutive_speaker(tmp_path):
     segs = [
-        LabeledSegment(0, 1, "hola", "Samuel"),
-        LabeledSegment(1, 2, "qué tal", "Samuel"),
-        LabeledSegment(2, 3, "bien", "Ale"),
+        LabeledSegment(0, 1, "hola", "Alice"),
+        LabeledSegment(1, 2, "qué tal", "Alice"),
+        LabeledSegment(2, 3, "bien", "Bob"),
     ]
     p = tmp_path / "o.txt"
     write_txt(segs, p)
-    assert p.read_text(encoding="utf-8") == "Samuel: hola qué tal\nAle: bien\n"
+    assert p.read_text(encoding="utf-8") == "Alice: hola qué tal\nBob: bien\n"
 
 
 def test_txt_without_speaker_unchanged(tmp_path):
@@ -37,20 +37,20 @@ def test_txt_without_speaker_unchanged(tmp_path):
 
 
 def test_srt_prefixes_speaker(tmp_path):
-    segs = [LabeledSegment(0, 1, "hola", "Samuel")]
+    segs = [LabeledSegment(0, 1, "hola", "Alice")]
     p = tmp_path / "o.srt"
     write_srt(segs, p)
-    assert "Samuel: hola" in p.read_text(encoding="utf-8")
+    assert "Alice: hola" in p.read_text(encoding="utf-8")
 
 
 def test_json_has_speaker_and_speakers(tmp_path):
-    segs = [LabeledSegment(0, 1, "hola", "Ale")]
+    segs = [LabeledSegment(0, 1, "hola", "Bob")]
     info = SimpleNamespace(language="es", language_probability=1.0, duration=1.0)
     p = tmp_path / "o.json"
     write_json(segs, info, p)
     data = json.loads(p.read_text(encoding="utf-8"))
-    assert data["speakers"] == ["Ale"]
-    assert data["segments"][0]["speaker"] == "Ale"
+    assert data["speakers"] == ["Bob"]
+    assert data["segments"][0]["speaker"] == "Bob"
 
 
 def test_json_without_speaker_omits_fields(tmp_path):
@@ -64,10 +64,10 @@ def test_json_without_speaker_omits_fields(tmp_path):
 
 
 def test_vtt_prefixes_speaker(tmp_path):
-    segs = [LabeledSegment(0, 1, "hola", "Samuel")]
+    segs = [LabeledSegment(0, 1, "hola", "Alice")]
     p = tmp_path / "o.vtt"
     write_vtt(segs, p)
-    assert "Samuel: hola" in p.read_text(encoding="utf-8")
+    assert "Alice: hola" in p.read_text(encoding="utf-8")
 
 
 # --- 1.2: segundos con voz y huecos ---
@@ -133,19 +133,19 @@ def test_txt_marca_sospechoso_sin_diarizacion(tmp_path):
 def test_txt_marca_sospechoso_con_diarizacion(tmp_path):
     # La forma que la ruta real SÍ produce bajo --diarize: el span se recomprime a la
     # extensión de las palabras (speakers/diarization.py) y la duración del segmento
-    # ASR viaja en src_dur. El LabeledSegment(0, 30, "Gracias.", "Samuel") construido
+    # ASR viaja en src_dur. El LabeledSegment(0, 30, "Gracias.", "Alice") construido
     # a mano que había aquí certificaba un caso imposible: con --diarize puesto, la
     # ruta jamás emite un span de 30 s con una palabra — lo emite de ~1 s con
     # src_dur=30.0. La rama de respaldo (sin src_dur) sigue cubierta por los tests
     # sin diarizar de este mismo archivo.
     segs = [
-        LabeledSegment(0.4, 1.4, "Gracias.", "Samuel", src_dur=30.0),
-        LabeledSegment(30.2, 32.8, "Bueno, entonces quedamos así.", "Ale", src_dur=3.0),
+        LabeledSegment(0.4, 1.4, "Gracias.", "Alice", src_dur=30.0),
+        LabeledSegment(30.2, 32.8, "Bueno, entonces quedamos así.", "Bob", src_dur=3.0),
     ]
     p = tmp_path / "o.txt"
     write_txt(segs, p)
     assert p.read_text(encoding="utf-8") == (
-        "Samuel: [?] Gracias.\nAle: Bueno, entonces quedamos así.\n"
+        "Alice: [?] Gracias.\nBob: Bueno, entonces quedamos así.\n"
     )
 
 
@@ -229,7 +229,7 @@ def test_json_engine_info_completo(tmp_path):
 def test_json_diarization_va_dentro_del_bloque_engine(tmp_path):
     p = tmp_path / "o.json"
     write_json(
-        [LabeledSegment(0, 1, "hola", "Samuel")],
+        [LabeledSegment(0, 1, "hola", "Alice")],
         _info(),
         p,
         engine_info={**ENGINE_INFO, "diarization": "segment"},

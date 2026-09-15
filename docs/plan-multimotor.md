@@ -1,6 +1,6 @@
 # Plan definitivo — speechtotext multimotor (v1)
 
-Fecha: 2026-07-27. Decisión de Samuel (no se relitiga): speechtotext pasa a ser multimotor para
+Fecha: 2026-07-27. Decisión de Alice (no se relitiga): speechtotext pasa a ser multimotor para
 exprimir el 5900X (faster-whisper) y la GTX 980 (whisper.cpp CUDA). La junta deliberó el CÓMO.
 Este documento es la síntesis ejecutable: solo material sobreviviente o refutado-con-corrección
 (se usa la corrección). Cada cifra lleva su clase: [medido] / [citado] / [supuesto].

@@ -43,19 +43,19 @@ def test_hablante_mayoritario_gana_aunque_pyannote_lo_fragmente():
 
 def test_segmento_que_cruza_frontera_se_parte_por_hablante():
     # El bug: un solo segmento Whisper abarca el cambio de hablante. "al profesor" lo dice
-    # SPEAKER_00 y "Simón Ballesteros" SPEAKER_01. Con palabras debe PARTIRSE, no etiquetar
+    # SPEAKER_00 y "Dave Bennett" SPEAKER_01. Con palabras debe PARTIRSE, no etiquetar
     # todo el segmento con un solo hablante (la cola arrastrada al siguiente).
     turns = [(0.0, 5.0, "SPEAKER_00"), (5.0, 10.0, "SPEAKER_01")]
     words = [
         _word(4.0, 4.4, " al"),
         _word(4.4, 5.0, " profesor"),
-        _word(5.0, 5.5, " Simón"),
-        _word(5.5, 6.0, " Ballesteros"),
+        _word(5.0, 5.5, " Dave"),
+        _word(5.5, 6.0, " Bennett"),
     ]
-    out = assign_segments([_seg_words(4.0, 6.0, " al profesor Simón Ballesteros", words)], turns)
+    out = assign_segments([_seg_words(4.0, 6.0, " al profesor Dave Bennett", words)], turns)
     assert [s.speaker for s in out] == ["SPEAKER_00", "SPEAKER_01"]
     assert out[0].text.strip() == "al profesor"
-    assert out[1].text.strip() == "Simón Ballesteros"
+    assert out[1].text.strip() == "Dave Bennett"
     # el corte sigue a las palabras, no al segmento entero
     assert (out[0].start, out[0].end) == (4.0, 5.0)
     assert (out[1].start, out[1].end) == (5.0, 6.0)
@@ -132,8 +132,8 @@ def test_assign_segments_llena_src_dur_en_ruta_gruesa():
 def test_apply_names_propaga_src_dur():
     from speechtotext.core.segments import LabeledSegment
     labeled = [LabeledSegment(0.4, 1.4, " Gracias.", "SPEAKER_00", src_dur=30.0)]
-    out = apply_names(labeled, {"SPEAKER_00": "Samuel"})
-    assert out[0].speaker == "Samuel"
+    out = apply_names(labeled, {"SPEAKER_00": "Alice"})
+    assert out[0].speaker == "Alice"
     assert out[0].src_dur == 30.0
 
 
@@ -150,5 +150,5 @@ def test_apply_names_maps_and_humanizes():
         LabeledSegment(1, 2, "chao", "SPEAKER_01"),
         LabeledSegment(2, 3, "...", None),
     ]
-    out = apply_names(labeled, {"SPEAKER_00": "Samuel"})
-    assert [s.speaker for s in out] == ["Samuel", "Hablante 2", None]
+    out = apply_names(labeled, {"SPEAKER_00": "Alice"})
+    assert [s.speaker for s in out] == ["Alice", "Hablante 2", None]

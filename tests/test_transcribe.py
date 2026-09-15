@@ -372,12 +372,12 @@ def test_diariza_sobre_las_mismas_muestras_y_mide_antes(monkeypatch):
         return [(0.0, 30.0, "SPEAKER_00")], {"SPEAKER_00": np.array([1.0, 0.0])}
 
     monkeypatch.setattr(diarization, "diarize", fake_diarize)
-    monkeypatch.setattr(registry, "get_embeddings", lambda model: {"Samuel": np.array([1.0, 0.0])})
+    monkeypatch.setattr(registry, "get_embeddings", lambda model: {"Alice": np.array([1.0, 0.0])})
     backend = FakeBackend([(0.0, 30.0, " Gracias.")])
     t = core.transcribe(_zeros(30.0), backend=backend, diarize=True, speakers=1, chunk=False)
     assert visto == {"n": 30 * 16000, "sr": 16000, "k": 1}
     assert backend.calls[0][1].word_timestamps is True  # diarizar pide palabras
-    assert t.segments[0].speaker == "Samuel"
+    assert t.segments[0].speaker == "Alice"
     assert t.segments[0].src_dur == 30.0            # el span que el ASR emitio, para is_suspect
     assert t.speech_s == 30.0 and t.gaps == []      # medido ANTES de diarizar
     assert t.engine.diarization == "word"

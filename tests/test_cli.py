@@ -117,9 +117,9 @@ def test_forget_missing_returns_error(tmp_path, monkeypatch):
 
 def test_voices_lists_enrolled(tmp_path, monkeypatch):
     monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
-    registry.enroll("Samuel", np.array([1.0, 2.0], dtype=np.float32), seconds=10.0, model="m")
+    registry.enroll("Alice", np.array([1.0, 2.0], dtype=np.float32), seconds=10.0, model="m")
     result = runner.invoke(app, ["voices"])
-    assert "Samuel" in result.stdout
+    assert "Alice" in result.stdout
 
 
 def test_transcribe_still_registered():
@@ -335,7 +335,7 @@ def test_reporte_diarizacion_mejor_score_bajo_umbral(tmp_path, monkeypatch):
     # la identificación falla a oscuras (el caso real del plan: 0.38 < 0.50 sin aviso).
     clusters = {"SPEAKER_00": np.array([1.0, 3.0]), "SPEAKER_01": np.array([0.0, 1.0])}
     turns = [(0.0, 5.0, "SPEAKER_00"), (5.0, 9.0, "SPEAKER_01")]
-    enrolled = {"Samuel": np.array([1.0, 0.0])}  # coseno con SPEAKER_00: 1/sqrt(10) = 0.32
+    enrolled = {"Alice": np.array([1.0, 0.0])}  # coseno con SPEAKER_00: 1/sqrt(10) = 0.32
     _fake_diarization(monkeypatch, tmp_path, turns, clusters, enrolled)
     segs = [_seg(0.0, 5.0), _seg(5.0, 9.0)]
     audio = _fake_transcribe(monkeypatch, tmp_path, segs, _info(9.0))

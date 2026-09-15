@@ -138,8 +138,8 @@ def test_assign_segments_por_palabras_propaga_a_cada_run():
 def test_apply_names_conserva_las_senales():
     labeled = [LabeledSegment(0.0, 2.0, "hola", "SPEAKER_00",
                               no_speech=0.8, avg_logprob=-0.5, compression_ratio=2.0)]
-    out = apply_names(labeled, {"SPEAKER_00": "Samuel"})
-    assert out[0].speaker == "Samuel"
+    out = apply_names(labeled, {"SPEAKER_00": "Alice"})
+    assert out[0].speaker == "Alice"
     assert (out[0].no_speech, out[0].avg_logprob, out[0].compression_ratio) == (0.8, -0.5, 2.0)
 
 

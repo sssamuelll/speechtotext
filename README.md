@@ -257,9 +257,9 @@ La primera corrida descarga los modelos a `~/.cache/huggingface`; luego quedan e
 ### Registrar voces (enrollment)
 
 ```bash
-speechtotext enroll "Samuel" muestra_samuel.wav   # >=10 s de una sola voz, limpia
+speechtotext enroll "Alice" alice_sample.wav   # >=10 s de una sola voz, limpia
 speechtotext voices                               # lista las voces registradas
-speechtotext forget "Samuel"                      # borra una voz
+speechtotext forget "Alice"                      # borra una voz
 ```
 
 Las voces se guardan en `~/.speechtotext/` (override con `SPEECHTOTEXT_HOME`).
@@ -287,7 +287,7 @@ speechtotext transcribe llamada.m4a -D --threshold 0.6
 Salida `txt` de ejemplo:
 
 ```
-Samuel: Hola, ¿cómo estás?
+Alice: Hola, ¿cómo estás?
 Hablante 2: Bien, ¿y tú?
 ```
 

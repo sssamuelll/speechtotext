@@ -8,5 +8,5 @@ def test_labeled_segment_defaults_speaker_none():
 
 
 def test_labeled_segment_with_speaker():
-    seg = LabeledSegment(0.0, 1.0, "hola", "Samuel")
-    assert seg.speaker == "Samuel"
+    seg = LabeledSegment(0.0, 1.0, "hola", "Alice")
+    assert seg.speaker == "Alice"

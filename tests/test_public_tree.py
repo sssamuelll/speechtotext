@@ -167,3 +167,20 @@ def test_pending_only_names_things_that_exist():
     line: the file left the watch list and nobody noticed."""
     orphans = [p for p in PENDING if not (ROOT / p).exists()]
     assert not orphans, f"PENDING names paths that do not exist: {orphans}"
+
+
+# Real people. The repo ships with the history of a private project attached to
+# it; these two are the ones who leaked into fixtures and examples. There is no
+# PENDING for this one -- a real name in a published tree is not a translation
+# that got delayed.
+REAL_NAMES = re.compile(r"\b(samuel|simon|ale)\b", re.IGNORECASE)
+
+
+@pytest.mark.parametrize("rel", FILES)
+def test_no_real_names(rel):
+    hits = [
+        f"{rel}:{n}: {line.strip()[:90]}"
+        for n, line in enumerate((ROOT / rel).read_text(encoding="utf-8").splitlines(), 1)
+        if REAL_NAMES.search(line)
+    ]
+    assert not hits, "a real person's name in a public file:\n" + "\n".join(hits)

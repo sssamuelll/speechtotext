@@ -13,19 +13,19 @@ def test_enroll_list_get_remove_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
     vec = np.array([1.0, 2.0, 3.0], dtype=np.float32)
 
-    registry.enroll("Samuel", vec, seconds=12.0, model=PYANNOTE)
+    registry.enroll("Alice", vec, seconds=12.0, model=PYANNOTE)
 
     voices = registry.list_voices()
-    assert [v["name"] for v in voices] == ["Samuel"]
+    assert [v["name"] for v in voices] == ["Alice"]
     assert voices[0]["seconds"] == 12.0
     assert voices[0]["model"] == PYANNOTE
 
     got = registry.get_embeddings(PYANNOTE)
-    assert np.allclose(got["Samuel"], vec)
+    assert np.allclose(got["Alice"], vec)
 
-    assert registry.remove("Samuel") is True
+    assert registry.remove("Alice") is True
     assert registry.list_voices() == []
-    assert registry.remove("Samuel") is False
+    assert registry.remove("Alice") is False
 
 
 def test_home_respects_env(tmp_path, monkeypatch):
@@ -35,7 +35,7 @@ def test_home_respects_env(tmp_path, monkeypatch):
 
 def test_get_embeddings_skips_missing_file(tmp_path, monkeypatch):
     monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
-    registry.enroll("Samuel", np.array([1.0, 2.0], dtype=np.float32), seconds=10.0, model=PYANNOTE)
+    registry.enroll("Alice", np.array([1.0, 2.0], dtype=np.float32), seconds=10.0, model=PYANNOTE)
     for npy in tmp_path.rglob("*.npy"):
         npy.unlink()
     assert registry.get_embeddings(PYANNOTE) == {}
@@ -46,11 +46,11 @@ def test_get_embeddings_solo_devuelve_las_voces_de_ese_modelo(tmp_path, monkeypa
     distintos: el coseno entre ellos no significa nada, y si las dimensiones coinciden
     ni siquiera falla — puntúa basura. El registro no puede devolverlos mezclados."""
     monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
-    registry.enroll("Samuel", np.array([1.0, 0.0], dtype=np.float32), seconds=10.0, model=PYANNOTE)
-    registry.enroll("Ale", np.array([0.0, 1.0], dtype=np.float32), seconds=10.0, model=SHERPA)
+    registry.enroll("Alice", np.array([1.0, 0.0], dtype=np.float32), seconds=10.0, model=PYANNOTE)
+    registry.enroll("Bob", np.array([0.0, 1.0], dtype=np.float32), seconds=10.0, model=SHERPA)
 
-    assert list(registry.get_embeddings(PYANNOTE)) == ["Samuel"]
-    assert list(registry.get_embeddings(SHERPA)) == ["Ale"]
+    assert list(registry.get_embeddings(PYANNOTE)) == ["Alice"]
+    assert list(registry.get_embeddings(SHERPA)) == ["Bob"]
     assert registry.get_embeddings("otro/modelo") == {}
 
 
@@ -66,30 +66,30 @@ def test_la_misma_persona_en_dos_modelos_no_se_pisa(tmp_path, monkeypatch):
     pyannote_vec = np.array([1.0, 2.0, 3.0], dtype=np.float32)
     sherpa_vec = np.array([9.0, 8.0], dtype=np.float32)
 
-    registry.enroll("Samuel", pyannote_vec, seconds=10.0, model=PYANNOTE)
-    registry.enroll("Samuel", sherpa_vec, seconds=30.0, model=SHERPA)
+    registry.enroll("Alice", pyannote_vec, seconds=10.0, model=PYANNOTE)
+    registry.enroll("Alice", sherpa_vec, seconds=30.0, model=SHERPA)
 
-    assert np.allclose(registry.get_embeddings(PYANNOTE)["Samuel"], pyannote_vec)
-    assert np.allclose(registry.get_embeddings(SHERPA)["Samuel"], sherpa_vec)
+    assert np.allclose(registry.get_embeddings(PYANNOTE)["Alice"], pyannote_vec)
+    assert np.allclose(registry.get_embeddings(SHERPA)["Alice"], sherpa_vec)
 
 
 def test_list_voices_filtra_por_modelo(tmp_path, monkeypatch):
     monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
-    registry.enroll("Samuel", np.array([1.0], dtype=np.float32), seconds=10.0, model=PYANNOTE)
-    registry.enroll("Ale", np.array([1.0], dtype=np.float32), seconds=10.0, model=SHERPA)
+    registry.enroll("Alice", np.array([1.0], dtype=np.float32), seconds=10.0, model=PYANNOTE)
+    registry.enroll("Bob", np.array([1.0], dtype=np.float32), seconds=10.0, model=SHERPA)
 
-    assert [v["name"] for v in registry.list_voices()] == ["Ale", "Samuel"]
-    assert [v["name"] for v in registry.list_voices(SHERPA)] == ["Ale"]
+    assert [v["name"] for v in registry.list_voices()] == ["Alice", "Bob"]
+    assert [v["name"] for v in registry.list_voices(SHERPA)] == ["Bob"]
 
 
 def test_remove_borra_solo_el_modelo_pedido(tmp_path, monkeypatch):
     monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
-    registry.enroll("Samuel", np.array([1.0], dtype=np.float32), seconds=10.0, model=PYANNOTE)
-    registry.enroll("Samuel", np.array([2.0], dtype=np.float32), seconds=10.0, model=SHERPA)
+    registry.enroll("Alice", np.array([1.0], dtype=np.float32), seconds=10.0, model=PYANNOTE)
+    registry.enroll("Alice", np.array([2.0], dtype=np.float32), seconds=10.0, model=SHERPA)
 
-    assert registry.remove("Samuel", model=SHERPA) is True
+    assert registry.remove("Alice", model=SHERPA) is True
     assert registry.get_embeddings(SHERPA) == {}
-    assert list(registry.get_embeddings(PYANNOTE)) == ["Samuel"]
+    assert list(registry.get_embeddings(PYANNOTE)) == ["Alice"]
 
 
 def test_lee_el_manifiesto_plano_de_v0_4(tmp_path, monkeypatch):
@@ -98,12 +98,12 @@ def test_lee_el_manifiesto_plano_de_v0_4(tmp_path, monkeypatch):
     monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
     voices = tmp_path / "voices"
     voices.mkdir(parents=True)
-    np.save(voices / "Samuel.npy", np.array([1.0, 2.0, 3.0], dtype=np.float32))
+    np.save(voices / "Alice.npy", np.array([1.0, 2.0, 3.0], dtype=np.float32))
     (voices / "manifest.json").write_text(
         json.dumps(
             {
-                "Samuel": {
-                    "file": "Samuel.npy",
+                "Alice": {
+                    "file": "Alice.npy",
                     "seconds": 12.0,
                     "model": PYANNOTE,
                     "enrolled_at": "2026-07-01T10:00:00",
@@ -113,6 +113,6 @@ def test_lee_el_manifiesto_plano_de_v0_4(tmp_path, monkeypatch):
         encoding="utf-8",
     )
 
-    assert np.allclose(registry.get_embeddings(PYANNOTE)["Samuel"], [1.0, 2.0, 3.0])
+    assert np.allclose(registry.get_embeddings(PYANNOTE)["Alice"], [1.0, 2.0, 3.0])
     assert registry.get_embeddings(SHERPA) == {}
     assert registry.list_voices()[0]["model"] == PYANNOTE

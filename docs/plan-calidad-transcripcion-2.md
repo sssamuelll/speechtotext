@@ -257,7 +257,7 @@ crea que con eso desbloqueó la construcción.
 Los defectos de 1.5, en concreto: (a) el gate `dur >= 10.0` (`core/formats.py:39`) deja de
 dispararse bajo `--diarize`, y el test que lo certifica
 (`tests/test_formats_speaker.py:121-130`) construye a mano un `LabeledSegment(0, 30, "Gracias.",
-"Samuel")` que la ruta real **no puede producir** con `--diarize` puesto; (b) la rama `no_speech`
+"Alice")` que la ruta real **no puede producir** con `--diarize` puesto; (b) la rama `no_speech`
 (`core/formats.py:36-38`) está muerta porque ninguna de las dos dataclasses tiene el campo y
 `getattr(..., None)` la apaga en silencio. Queda **un solo eje vivo**: densidad de caracteres. Ambos
 se atacan en 4.3.
@@ -602,7 +602,7 @@ sola.
 **Test**: (a) `tests/test_diarization_pure.py` — `assign_segments` sobre un segmento de 30 s con una
 palabra de 1 s produce un `LabeledSegment` con `src_dur == 30.0`; (b)
 `tests/test_formats_speaker.py:121-130` se reescribe para usar la forma que la ruta real **sí**
-produce (`LabeledSegment(0.4, 1.4, "Gracias.", "Samuel", src_dur=30.0)`), en vez del
+produce (`LabeledSegment(0.4, 1.4, "Gracias.", "Alice", src_dur=30.0)`), en vez del
 `LabeledSegment(0, 30, ...)` construido a mano que hoy certifica un caso imposible.
 **Coste: 1 h 30 min.**
 

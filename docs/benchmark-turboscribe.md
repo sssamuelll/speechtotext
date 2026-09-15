@@ -1,11 +1,11 @@
 # Benchmark: speechtotext vs TurboScribe
 
 **Fecha:** 2026-07-07
-**Audio:** ponencia de radio de Simón Ballesteros (papá de Samuel) — patología estructural, sismos, San Cristóbal–Táchira. Tramo evaluado ~25–46 min.
+**Audio:** ponencia de radio de Dave Bennett (papá de Alice) — patología estructural, sismos, San Cristóbal–Táchira. Tramo evaluado ~25–46 min.
 **Fuentes comparadas:**
 
 - TurboScribe (ASR comercial): `E:\ponencia-papa 25-46min.txt`
-- speechtotext (esta herramienta): `C:\Users\simon\Desktop\Papa\ponencia-papa_transcripcion.txt`
+- speechtotext (esta herramienta): `C:\Users\alice\Desktop\Papa\ponencia-papa_transcripcion.txt`
 
 Este documento captura el diagnóstico para orientar el backlog. No es un README ni una spec.
 
@@ -34,9 +34,9 @@ La conclusión estructural: **la brecha real no está en el modelo acústico, es
 Salida sin comas, sin puntos, sin signos `¿?`. Muros de texto corridos. Mayúsculas y acentos erráticos: `tachira`, `guaira`, `caracas` en minúscula. Es la falla de mayor impacto en legibilidad y **no toca el modelo acústico**.
 
 ### 2. Alineación palabra→hablante (diarización) — va con retraso
-La asignación de hablante llega tarde: **arrastra la cola de un turno al siguiente** y corta a mitad de sintagma (ej: `al profesor | Simón Ballesteros`, partido entre dos hablantes).
+La asignación de hablante llega tarde: **arrastra la cola de un turno al siguiente** y corta a mitad de sintagma (ej: `al profesor | Dave Bennett`, partido entre dos hablantes).
 
-Su única ventaja —nombrar al invitado "Simón Ballesteros"— **se le vuelve en contra**: por el desfase, le atribuye frases ajenas, incluido el corte de estación y el ID de emisora del final (`833 minutos... san sebastián 92`).
+Su única ventaja —nombrar al invitado "Dave Bennett"— **se le vuelve en contra**: por el desfase, le atribuye frases ajenas, incluido el corte de estación y el ID de emisora del final (`833 minutos... san sebastián 92`).
 
 ### 3. Normalización de números y horas — sin criterio
 Colapsa `8:33` en `833`. Mezcla letras y dígitos sin regla única.
@@ -80,7 +80,7 @@ Ya está muy por encima de lo esperado (ver tabla de arriba). Un **hotword list*
 
 ## Fase 0 — resultado (2026-07-08)
 
-Misma ponencia, mismo CLI, un solo cambio: `-m large-v3` (antes `small`). Sin diarización, sin hotwords, sin ningún cambio de código. 23 min para 20.7 min de audio en CPU int8 (~1.1× tiempo real). Salida: `C:\Users\simon\Desktop\Papa\fase0-large-v3.txt`.
+Misma ponencia, mismo CLI, un solo cambio: `-m large-v3` (antes `small`). Sin diarización, sin hotwords, sin ningún cambio de código. 23 min para 20.7 min de audio en CPU int8 (~1.1× tiempo real). Salida: `C:\Users\alice\Desktop\Papa\fase0-large-v3.txt`.
 
 **Hipótesis confirmada: la brecha de puntuación/léxico era talla de modelo.** TurboScribe corre Whisper large; compararlo contra nuestro `small` no era pelea justa.
 

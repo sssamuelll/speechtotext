@@ -21,7 +21,7 @@ valor; ninguna aparece en `null`.
   "duration": 1843.2,
   "speech_s": 1502.7,
   "gaps": [[312.4, 340.1], [905.0, 913.8]],
-  "speakers": ["Samuel", "Hablante 2"],
+  "speakers": ["Alice", "Hablante 2"],
   "engine": {
     "name": "faster-whisper",
     "version": "1.2.0",
@@ -37,7 +37,7 @@ valor; ninguna aparece en `null`.
       "start": 0.0,
       "end": 3.42,
       "text": "Hola, ¿cómo estás?",
-      "speaker": "Samuel",
+      "speaker": "Alice",
       "no_speech": 0.0142,
       "avg_logprob": -0.1877,
       "compression_ratio": 1.2044,
@@ -285,10 +285,10 @@ sintonices: cambiarlas cambia el significado de los números que ya guardaste.
 ```python
 from speechtotext.speakers import registry
 
-registry.enroll("Samuel", embedding, seconds=12.4, model="pyannote/speaker-diarization-community-1")
+registry.enroll("Alice", embedding, seconds=12.4, model="pyannote/speaker-diarization-community-1")
 registry.list_voices()                                    # todas, de todos los modelos
 vectores = registry.get_embeddings("pyannote/speaker-diarization-community-1")
-registry.remove("Samuel")                                 # en todos los modelos
+registry.remove("Alice")                                 # en todos los modelos
 ```
 
 | Función | Contrato |
@@ -318,7 +318,7 @@ Las entradas cuyo `.npy` ya no existe en disco se ignoran en silencio.
 ~/.speechtotext/voices/
 ├── manifest.json
 └── pyannote_speaker-diarization-community-1/
-    └── samuel.npy
+    └── alice.npy
 ```
 
 `manifest.json` es un diccionario anidado, `{modelo: {nombre: metadatos}}`, con
