@@ -46,25 +46,29 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 SELF = Path(__file__).relative_to(ROOT).as_posix()
 
-# What ships. `docs/superpowers/` is not here and never will be.
+# What ships. `docs` is watched as a directory, not as a list of files: naming
+# the files one by one left every document someone adds next to them outside the
+# guard, permanently and silently. `docs/superpowers/` is the one thing under it
+# that stays out, and EXCLUDED below is the whole reason the entries were loose.
 WATCHED = (
     "src",
     "tests",
     "scripts",
     ".github",
-    "docs/api.md",
-    "docs/README.md",
-    "docs/design.md",
+    "docs",
     "README.md",
     "CHANGELOG.md",
     "pyproject.toml",
     ".gitignore",
 )
 
-# Still untranslated. One line per task; they come off in order.
-PENDING = (
-    "docs/README.md",                # task 8
-)
+# Walked but never checked. Section 9.5 strips this tree from the published
+# history; watching it would drag 12,930 lines of Spanish specs into the sweep.
+EXCLUDED = ("docs/superpowers",)
+
+# Still untranslated. One line per task; they came off in order, and the last
+# one left with task 8. `test_nothing_is_pending` is what keeps it that way.
+PENDING = ()
 
 # Terms English writes with an accent. Not leftover Spanish.
 ALLOWED = ("Bézier",)
@@ -134,7 +138,7 @@ def _files():
             if root.is_dir() and path.suffix not in (".py", ".md", ".toml", ".yml"):
                 continue
             rel = path.relative_to(ROOT).as_posix()
-            if rel == SELF or any(rel == p or rel.startswith(p) for p in PENDING):
+            if rel == SELF or any(rel.startswith(p) for p in EXCLUDED + PENDING):
                 continue
             yield rel
 
@@ -225,6 +229,12 @@ def test_spanish_is_data_needs_a_reason(tmp_path):
     assert GLOSSARY.search(stripped), "an empty reason exempted the line anyway"
 
 
+def test_nothing_is_pending():
+    """Plan 3 is done when this passes. A new entry here means someone put
+    Spanish back into the tree and added an exception instead of translating it."""
+    assert not PENDING, f"still untranslated: {PENDING}"
+
+
 def test_pending_only_names_things_that_exist():
     """A PENDING entry pointing at nothing is a task that forgot to delete its
     line: the file left the watch list and nobody noticed."""
@@ -237,10 +247,9 @@ def test_pending_only_names_things_that_exist():
 # lands the reader at the top of a 500-line document and says nothing. Task 6
 # translated the README first and had to write three English anchors before task
 # 7 had written the headings they name -- this is what turns that into a contract
-# instead of a line in a report nobody reads twice. It stays asleep while
-# `docs/api.md` is still Spanish and wakes up in the same commit that takes it
-# off PENDING. The wanted anchors are read out of README.md rather than listed
-# here, so moving a link moves the check with it.
+# instead of a line in a report nobody reads twice. The wanted anchors are read
+# out of README.md rather than listed here, so moving a link moves the check
+# with it.
 HEADING = re.compile(r"#{1,6}\s+(\S.*)")
 FENCE = re.compile(r"^\s*(```|~~~)")
 
@@ -263,8 +272,6 @@ def _anchors(text: str) -> set[str]:
 
 
 def test_readme_anchors_into_api_md_resolve():
-    if "docs/api.md" in PENDING:
-        pytest.skip("docs/api.md is still Spanish; the headings these anchors name are task 7's")
     wanted = set(re.findall(r"\]\(docs/api\.md#([^)\s]+)\)", (ROOT / "README.md").read_text(encoding="utf-8")))
     missing = sorted(wanted - _anchors((ROOT / "docs/api.md").read_text(encoding="utf-8")))
     assert not missing, (

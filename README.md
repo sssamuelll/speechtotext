@@ -507,7 +507,8 @@ src/speechtotext/
 | Document | What is in it |
 |---|---|
 | [`docs/api.md`](docs/api.md) | The contract for consumers: JSON, public types, guarantees. |
-| [`docs/README.md`](docs/README.md) | Index of `docs/`, saying what is current and what is history. |
+| [`docs/design.md`](docs/design.md) | Why the product has this shape, with the measurement behind each decision. |
+| [`docs/README.md`](docs/README.md) | Index of `docs/`. |
 | [`CHANGELOG.md`](CHANGELOG.md) | What changed between tags, and what breaks. |
 
 ---
