@@ -17,7 +17,7 @@ NOMBRE = "speechtotext"
 
 def transcribe(path: str, language: str = "auto", model: str = "large-v3",
                diarize: bool = False) -> dict:
-    """Transcribe un audio o video local y escribe el JSON junto al archivo."""
+    """Transcribe a local audio or video file and write the JSON next to it."""
     from speechtotext.core.formats import write_json
     from speechtotext.core import transcribe as nucleo
 
@@ -40,12 +40,12 @@ def transcribe(path: str, language: str = "auto", model: str = "large-v3",
 
 
 def find(path: str, query: str) -> dict:
-    """Busca palabras en un audio largo y devuelve las regiones donde aparecen."""
+    """Search a long audio file for words and return the regions where they appear."""
     from speechtotext.core import finder
 
     segments, cached = finder.load_or_build_index(Path(path), "tiny")
     return {
-        "index": "caché" if cached else "construido",
+        "index": "cached" if cached else "built",
         "regions": [
             {"start": r.start, "end": r.end, "hits": r.hits,
              "matches": r.matches, "snippet": r.snippet}
@@ -55,14 +55,14 @@ def find(path: str, query: str) -> dict:
 
 
 def voices() -> dict:
-    """Lista las voces registradas para identificar hablantes."""
+    """List enrolled voices used to identify speakers."""
     from speechtotext.speakers import registry
 
     return {"voices": registry.list_voices()}
 
 
 def probe() -> dict:
-    """Sondea esta máquina y dice qué ruta elegiría `transcribe` para large-v3."""
+    """Probe this machine and report the route `transcribe` would choose for large-v3."""
     from speechtotext.asr import AsrError
     from speechtotext.core import probe as sondeo
 
@@ -94,7 +94,7 @@ def serve() -> None:
         from mcp.server import MCPServer
     except ImportError as e:
         raise SystemExit(
-            'El servidor MCP necesita el SDK oficial. Instálalo con:\n'
+            'The MCP server needs the official SDK. Install it with:\n'
             '    pip install "speechtotext[mcp]"'
         ) from e
 

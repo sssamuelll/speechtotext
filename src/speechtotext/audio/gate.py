@@ -29,17 +29,17 @@ class QualityThresholds:
 
     def __post_init__(self) -> None:
         if self.min_effective_voice_ms <= 0:
-            raise ValueError("min_effective_voice_ms debe ser positivo")
+            raise ValueError("min_effective_voice_ms must be positive")
         if not math.isfinite(self.min_processed_rms_dbfs):
-            raise ValueError("min_processed_rms_dbfs debe ser finito")
+            raise ValueError("min_processed_rms_dbfs must be finite")
         if not math.isfinite(self.min_snr_db):
-            raise ValueError("min_snr_db debe ser finito")
+            raise ValueError("min_snr_db must be finite")
         if not math.isfinite(self.max_clipping_ratio):
-            raise ValueError("max_clipping_ratio debe ser finito")
+            raise ValueError("max_clipping_ratio must be finite")
         if not 0.0 <= self.max_clipping_ratio <= 1.0:
-            raise ValueError("max_clipping_ratio debe estar entre 0 y 1")
+            raise ValueError("max_clipping_ratio must be between 0 and 1")
         if self.max_dropped_frames < 0 or self.max_discontinuities < 0:
-            raise ValueError("los maximos de transporte no pueden ser negativos")
+            raise ValueError("transport maximums cannot be negative")
 
 
 @dataclass(frozen=True)

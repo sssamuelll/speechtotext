@@ -142,19 +142,19 @@ def _ruta(r):
 def test_sin_gpu_va_a_cpu_int8():
     r = probe.choose_route(_m(), "large-v3")
     assert _ruta(r) == ("faster-whisper", "cpu", "int8")
-    assert r.reason == "sin GPU utilizable: CPU"
+    assert r.reason == "no usable GPU: CPU"
 
 
 def test_gpu_holgada_va_a_faster_whisper_cuda_float16():
     r = probe.choose_route(_m(cuda=True, gpu_name="RTX 3060", vram_free_gb=11.2), "large-v3")
     assert _ruta(r) == ("faster-whisper", "cuda", "float16")
-    assert r.reason == "GPU con 11.2 GB libres"
+    assert r.reason == "GPU with 11.2 GB free"
 
 
 def test_gpu_justa_va_a_whispercpp_si_esta_instalado_o_es_win32():
     r = probe.choose_route(_m(cuda=True, gpu_name="GTX 980", vram_free_gb=3.5), "large-v3")
     assert _ruta(r) == ("whispercpp", "cuda", "q5_0")
-    assert r.reason == "GPU con 3.5 GB libres: whisper.cpp cuantizado"
+    assert r.reason == "GPU with 3.5 GB free: quantized whisper.cpp"
     # linux con el binario en el PATH: también, etiquetado native
     r = probe.choose_route(
         _m(platform="linux", cuda=True, vram_free_gb=3.5, whispercpp=Path("/usr/bin/whisper-cli")),
@@ -166,13 +166,13 @@ def test_gpu_justa_va_a_whispercpp_si_esta_instalado_o_es_win32():
 def test_gpu_justa_sin_binario_fuera_de_win32_cae_a_cpu_y_lo_dice():
     r = probe.choose_route(_m(platform="linux", cuda=True, vram_free_gb=3.5), "large-v3")
     assert _ruta(r) == ("faster-whisper", "cpu", "int8")
-    assert r.reason == "GPU con 3.5 GB libres no alcanza para large-v3: CPU"
+    assert r.reason == "GPU with 3.5 GB free isn't enough for large-v3: CPU"
 
 
 def test_gpu_justa_con_modelo_no_pinneado_cae_a_cpu_y_lo_dice():
     r = probe.choose_route(_m(cuda=True, vram_free_gb=3.5), "medium")
     assert _ruta(r) == ("faster-whisper", "cpu", "int8")
-    assert "no alcanza para medium" in r.reason
+    assert "isn't enough for medium" in r.reason
 
 
 def test_umbrales_exactos():
@@ -184,7 +184,7 @@ def test_umbrales_exactos():
 
 def test_gpu_sin_vram_legible_va_a_cpu():
     r = probe.choose_route(_m(cuda=True, gpu_name="rara", vram_free_gb=None), "large-v3")
-    assert _ruta(r) == ("faster-whisper", "cpu", "int8") and r.reason == "sin GPU utilizable: CPU"
+    assert _ruta(r) == ("faster-whisper", "cpu", "int8") and r.reason == "no usable GPU: CPU"
 
 
 def test_device_explicito_manda_sobre_la_tabla():
@@ -198,16 +198,16 @@ def test_device_explicito_manda_sobre_la_tabla():
 def test_engine_explicito_se_respeta_y_el_device_auto_se_sondea():
     m = _m(cuda=True, vram_free_gb=11.0)
     r = probe.choose_route(m, "large-v3", engine="faster-whisper")
-    assert _ruta(r) == ("faster-whisper", "cuda", "float16") and r.reason == "GPU con 11.0 GB libres"
+    assert _ruta(r) == ("faster-whisper", "cuda", "float16") and r.reason == "GPU with 11.0 GB free"
     r = probe.choose_route(_m(cuda=True, vram_free_gb=3.5), "large-v3", engine="faster-whisper")
     assert _ruta(r) == ("faster-whisper", "cpu", "int8")
-    assert r.reason == "GPU con 3.5 GB libres no alcanza para faster-whisper en float16: CPU"
+    assert r.reason == "GPU with 3.5 GB free isn't enough for faster-whisper in float16: CPU"
     r = probe.choose_route(_m(), "large-v3", engine="faster-whisper")
-    assert _ruta(r) == ("faster-whisper", "cpu", "int8") and r.reason == "sin GPU utilizable: CPU"
+    assert _ruta(r) == ("faster-whisper", "cpu", "int8") and r.reason == "no usable GPU: CPU"
     assert probe.choose_route(m, "large-v3", engine="faster-whisper", device="cpu").reason == ""
     r = probe.choose_route(_m(), "large-v3", engine="whispercpp")
     assert _ruta(r) == ("whispercpp", "cuda", "q5_0")
-    assert r.reason == "whisper.cpp (build CUDA) corre en la GPU; device=cuda"
+    assert r.reason == "whisper.cpp (CUDA build) runs on the GPU; device=cuda"
     assert probe.choose_route(_m(), "large-v3", engine="whispercpp", device="cuda").reason == ""
 
 
@@ -223,7 +223,7 @@ def test_el_sondeo_nunca_cambia_el_modelo():
     with pytest.raises(AsrError) as ei:
         probe.choose_route(_m(ram_gb=4.0), "large-v3")
     assert ei.value.code == "insufficient_resources" and ei.value.recoverable is False
-    assert "large-v3 necesita ~6 GB" in str(ei.value) and "-m small" in str(ei.value)
+    assert "large-v3 needs ~6 GB" in str(ei.value) and "-m small" in str(ei.value)
     with pytest.raises(AsrError) as ei:
         probe.choose_route(_m(ram_gb=2.0), "small")
     assert "-m small" not in str(ei.value)
@@ -233,11 +233,11 @@ def test_el_sondeo_nunca_cambia_el_modelo():
 
 
 def test_flags_imposibles():
-    with pytest.raises(ValueError, match="no existe"):
+    with pytest.raises(ValueError, match="does not exist"):
         probe.choose_route(_m(), "large-v3", engine="chatgpt")
-    with pytest.raises(ValueError, match="paging WDDM"):
+    with pytest.raises(ValueError, match="WDDM paging"):
         probe.choose_route(_m(), "large-v3", engine="whispercpp", compute_type="float16")
-    with pytest.raises(ValueError, match="no está pinneado"):
+    with pytest.raises(ValueError, match="is not pinned"):
         probe.choose_route(_m(), "medium", engine="whispercpp")
 
 

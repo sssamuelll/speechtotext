@@ -40,7 +40,7 @@ def test_fingerprint_cambia_si_cambia_orden_o_threshold():
 
 
 def test_fingerprint_rechaza_nan():
-    with pytest.raises(ValueError, match="JSON finito"):
+    with pytest.raises(ValueError, match="finite JSON"):
         PipelineProvenance.capture(
             sample_rate=16000,
             step=PipelineStep("gain", "1", {"db": math.nan}),
@@ -82,7 +82,7 @@ def test_from_dict_rechaza_fingerprint_autoafirmado():
     )
     payload = provenance.to_dict()
     payload["fingerprint"] = "0" * 64
-    with pytest.raises(ValueError, match="no coincide"):
+    with pytest.raises(ValueError, match="does not match"):
         PipelineProvenance.from_dict(payload, parent=None, models=())
 
 

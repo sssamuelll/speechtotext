@@ -138,7 +138,7 @@ def test_config_fingerprint_liga_todos_los_parametros_efectivos():
 def test_backend_declara_caps_y_version_del_motor():
     backend = _backend("large-v3", [], _INFO, {})
     assert isinstance(backend, AsrBackend)
-    assert backend.caps == Caps("honrado", "honrado", "honrado")
+    assert backend.caps == Caps("honored", "honored", "honored")
     assert backend.engine_version.startswith("faster-whisper")
     assert (backend.quant, backend.device) == ("int8", "cpu")
 

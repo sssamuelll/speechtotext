@@ -29,14 +29,14 @@ def test_find_locate_prints_region(tmp_path, monkeypatch):
     result = runner.invoke(app, ["find", str(audio), "sismica"])
     assert result.exit_code == 0
     assert "00:10" in result.stdout
-    assert "regiones" in result.stdout.lower() or "región" in result.stdout.lower()
+    assert "regions" in result.stdout.lower() or "region" in result.stdout.lower()
 
 
 def test_find_no_match(tmp_path, monkeypatch):
     audio = _seed(tmp_path, monkeypatch)
     result = runner.invoke(app, ["find", str(audio), "baloncesto"])
     assert result.exit_code == 0
-    assert "No se encontró" in result.stdout
+    assert "No match for" in result.stdout
 
 
 def test_find_extract_recorta_y_transcribe_con_los_defaults_nuevos(tmp_path, monkeypatch):

@@ -64,7 +64,7 @@ class WhisperCppBackend:
     # --prompt es INERTE bajo -mc 0 (bit-identico en 7 corridas, medido 2026-07-27);
     # sin -mc 0 contamina la ortografia global. Avisar "degradado" sobre un knob inerte
     # fabricaria un efecto que no ocurrio: rechazo. VAD y palabras: el motor no los trae.
-    caps = Caps(hotwords="rechazado", vad="degradado", word_timestamps="degradado")
+    caps = Caps(hotwords="rejected", vad="degraded", word_timestamps="degraded")
     quant = "q5_0"
 
     def __init__(
@@ -78,7 +78,7 @@ class WhisperCppBackend:
     ) -> None:
         if model not in enginepin._MODEL_ALIAS:
             raise ValueError(
-                f"modelo {model!r} no está pinneado para whispercpp; disponibles: "
+                f"model {model!r} is not pinned for whispercpp; available: "
                 f"{', '.join(sorted(enginepin._MODEL_ALIAS))}"
             )
         self._model = model
@@ -117,8 +117,8 @@ class WhisperCppBackend:
         if request.hotwords:
             # No degradacion: avisar sobre un knob inerte fabricaria un efecto que no ocurrio.
             raise AsrError("unsupported_option", False,
-                           "--hotwords no tiene efecto con whispercpp (--prompt es inerte con "
-                           "-mc 0, medido 2026-07-27); usa --engine faster-whisper")
+                           "--hotwords has no effect with whispercpp (--prompt is inert with "
+                           "-mc 0, measured 2026-07-27); use --engine faster-whisper")
         self.warm()
         started = self._clock()
         fd, wav = tempfile.mkstemp(suffix=".wav")
@@ -130,7 +130,7 @@ class WhisperCppBackend:
             for p in (wav, base):
                 if not p.isascii():
                     raise RuntimeError(
-                        f"ruta con caracteres no ASCII; whisper-cli no la soporta: {p}"
+                        f"path has non-ASCII characters; whisper-cli does not support it: {p}"
                     )
             _write_wav(wav, samples)
             cmd = [
@@ -157,7 +157,7 @@ class WhisperCppBackend:
                 segments, language = parse_ojf(data)
             except (OSError, ValueError, KeyError, TypeError) as exc:
                 raise RuntimeError(
-                    f"whisper-cli termino bien pero su JSON no sirve ({json_path}): {exc}"
+                    f"whisper-cli exited cleanly but its JSON is unusable ({json_path}): {exc}"
                 ) from exc
         finally:
             for p in (wav, base, json_path):

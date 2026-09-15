@@ -117,7 +117,7 @@ def test_audio_clip_conserva_pausas_y_resuelve_vistas():
     assert clip.view("asr") is view
     with pytest.raises(KeyError, match="identity"):
         clip.view("identity")
-    with pytest.raises(KeyError, match="desconocida"):
+    with pytest.raises(KeyError, match="unknown view"):
         clip.view("raw")
 
 
@@ -176,9 +176,9 @@ def test_quality_rechaza_conteos_rangos_e_inconsistencia():
         replace(_quality(), clipping_ratio=1.01)
     with pytest.raises(ValueError):
         replace(_quality(), dropped_frames=-1)
-    with pytest.raises(ValueError, match="enteros"):
+    with pytest.raises(ValueError, match="integers"):
         replace(_quality(), duration_ms=True)
-    with pytest.raises(ValueError, match="enteros"):
+    with pytest.raises(ValueError, match="integers"):
         replace(_quality(), dropped_frames=0.5)
 
 
@@ -187,7 +187,7 @@ def test_audio_views_rechaza_duck_types_y_clip_rechaza_duraciones_divergentes():
     half_second = _view(np.zeros(8_000, dtype=np.float32))
     with pytest.raises(TypeError, match="AudioView"):
         AudioViews(one_second, object(), one_second)
-    with pytest.raises(ValueError, match="duracion de vistas"):
+    with pytest.raises(ValueError, match="view duration"):
         AudioClip(
             0.0, 1.0, "mic", (), _quality(),
             AudioViews(one_second, half_second, one_second),
@@ -205,5 +205,5 @@ def test_quality_rechaza_metricas_o_warnings_con_tipo_incorrecto(bad):
         with pytest.raises(ValueError, match="warnings"):
             replace(_quality(), warnings=bad)
     else:
-        with pytest.raises(ValueError, match="metricas"):
+        with pytest.raises(ValueError, match="metrics"):
             replace(_quality(), processed_rms_dbfs=bad)

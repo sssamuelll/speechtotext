@@ -55,14 +55,14 @@ def data_dir() -> Path:
 
 def _check_engine(engine: str) -> None:
     if engine not in ENGINES:
-        raise ValueError(f"engine {engine!r} no existe; disponibles: {', '.join(ENGINES)}")
+        raise ValueError(f"engine {engine!r} does not exist; available: {', '.join(ENGINES)}")
 
 
 def _fw_repo(name: str) -> str:
     try:
         return _FW_REPOS[name]
     except KeyError:
-        raise ValueError(f"modelo {name!r} no está en la tabla de faster-whisper; disponibles: "
+        raise ValueError(f"model {name!r} is not in the faster-whisper table; available: "
                          f"{', '.join(_FW_REPOS)}") from None
 
 
@@ -70,7 +70,7 @@ def _wcpp_key(name: str) -> str:
     try:
         return enginepin._MODEL_ALIAS[name]
     except KeyError:
-        raise ValueError(f"modelo {name!r} no está pinneado para whispercpp; disponibles: "
+        raise ValueError(f"model {name!r} is not pinned for whispercpp; available: "
                          f"{', '.join(sorted(enginepin._MODEL_ALIAS))}") from None
 
 
@@ -159,4 +159,4 @@ def remove(engine: str, name: str) -> None:
             mi.path.unlink()
             Path(str(mi.path) + ".verified").unlink(missing_ok=True)
         return
-    raise FileNotFoundError(f"{name} ({engine}) no está instalado")
+    raise FileNotFoundError(f"{name} ({engine}) is not installed")

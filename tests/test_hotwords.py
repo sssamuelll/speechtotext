@@ -66,7 +66,7 @@ def _fake_transcribe(monkeypatch, tmp_path):
     )
     fake = SimpleNamespace(backend_id="faster-whisper", model_id="small", device="cpu", quant="int8",
                            model_version="1", engine_version="faster-whisper 1.2.0",
-                           caps=Caps("honrado", "honrado", "honrado"), warm=lambda: None,
+                           caps=Caps("honored", "honored", "honored"), warm=lambda: None,
                            transcribe=lambda samples, request: result)
     monkeypatch.setattr(core_transcribe, "make_backend", lambda *a, **k: fake)
     return audio
@@ -108,10 +108,10 @@ def test_lista_larga_de_hotwords_imprime_conteo_y_aviso(tmp_path, monkeypatch):
     result = _invoke(audio, tmp_path, "--hotwords", lista)
     assert result.exit_code == 0
     salida = _plana(result.stdout)
-    assert "25 términos" in salida
-    assert "caracteres" in salida
-    assert "degradaron la cobertura 9 puntos" in salida
-    assert "texto previo" in salida
+    assert "25 terms" in salida
+    assert "characters" in salida
+    assert "degraded coverage by 9 points" in salida
+    assert "prior text" in salida
 
 
 def test_lista_corta_de_hotwords_no_avisa(tmp_path, monkeypatch):
@@ -120,5 +120,5 @@ def test_lista_corta_de_hotwords_no_avisa(tmp_path, monkeypatch):
     result = _invoke(audio, tmp_path, "--hotwords", "Sofitasa, Boconó, Táchira")
     assert result.exit_code == 0
     salida = _plana(result.stdout)
-    assert "3 términos" in salida
-    assert "degradaron" not in salida
+    assert "3 terms" in salida
+    assert "degraded" not in salida

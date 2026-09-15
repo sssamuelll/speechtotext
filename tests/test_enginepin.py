@@ -215,6 +215,6 @@ def test_ensure_model_sha_que_no_cuadra_revienta(monkeypatch, tmp_path):
 
 
 def test_ensure_model_no_pinneado_lista_disponibles(tmp_path):
-    with pytest.raises(RuntimeError, match="no esta pinneado") as ei:
+    with pytest.raises(RuntimeError, match="is not pinned") as ei:
         ensure_model("medium", root=tmp_path)
     assert "large-v3" in str(ei.value) and "small" in str(ei.value)

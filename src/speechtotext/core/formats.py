@@ -23,7 +23,7 @@ def parse_formats(formats: str) -> set[str]:
     invalid = requested - VALID_FORMATS
     if invalid:
         raise ValueError(
-            f"Formatos no soportados: {sorted(invalid)}. Usa: {sorted(VALID_FORMATS)}."
+            f"Unsupported formats: {sorted(invalid)}. Use: {sorted(VALID_FORMATS)}."
         )
     return requested
 
@@ -67,7 +67,7 @@ def write_txt(segments, path: Path) -> None:
         cur: str | None = None
         buf: list[str] = []
         for s in segs:
-            spk = _speaker(s) or "Hablante ?"
+            spk = _speaker(s) or "Speaker ?"
             if spk != cur:
                 if buf:
                     lines.append(f"{cur}: {' '.join(buf)}")

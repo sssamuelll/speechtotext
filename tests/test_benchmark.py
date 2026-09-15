@@ -69,7 +69,7 @@ def test_available_configs_sin_binario(monkeypatch):
     viables, skipped = benchmark.available_configs()
     assert all(c["engine"] == "faster-whisper" for c in viables) and len(viables) == 5
     assert [s["model"] for s in skipped] == ["small", "large-v3"]
-    assert all(s["engine"] == "whispercpp" and "ausente" in s["reason"] for s in skipped)
+    assert all(s["engine"] == "whispercpp" and "missing" in s["reason"] for s in skipped)
 
 
 def test_available_configs_sin_gpu(monkeypatch):
@@ -108,7 +108,7 @@ def test_caps_de_la_tabla_salen_de_los_backends():
         "hotwords": True, "word_timestamps": True, "native_signals": True, "vad": True}
     assert benchmark._CAPS["whispercpp"] == {
         "hotwords": False, "word_timestamps": False, "native_signals": False, "vad": False}
-    assert benchmark._CAPS["whispercpp"]["vad"] == (WhisperCppBackend.caps.vad == "honrado")
+    assert benchmark._CAPS["whispercpp"]["vad"] == (WhisperCppBackend.caps.vad == "honored")
 
 
 # --- run_config ------------------------------------------------------------------
@@ -210,8 +210,8 @@ class _FakeBackend:
         from speechtotext.asr import Caps
 
         self.backend_id = engine
-        self.caps = (Caps("rechazado", "degradado", "degradado") if engine == "whispercpp"
-                     else Caps("honrado", "honrado", "honrado"))
+        self.caps = (Caps("rejected", "degraded", "degraded") if engine == "whispercpp"
+                     else Caps("honored", "honored", "honored"))
         self.model_id, self.model_version, self.engine_version = "tiny", "1", "fake"
         self.quant, self.device = "int8", "cpu"
         self.request = None
@@ -333,7 +333,7 @@ def test_recommend_caso_sin_candidata_se_declara_con_razon():
     solo_wcpp = [_fila("whispercpp", "large-v3", 10.66, wer=0.355)]
     recs = {r["caso"]: r for r in benchmark.recommend(solo_wcpp)}
     assert recs["conversacion_en_vivo"]["eleccion"] is None
-    assert "ninguna config" in recs["conversacion_en_vivo"]["motivo"]
+    assert "no measured config" in recs["conversacion_en_vivo"]["motivo"]
     assert recs["transcripcion_maxima_calidad"]["eleccion"] is not None
 
 

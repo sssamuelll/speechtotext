@@ -94,7 +94,7 @@ def test_installed_lista_whispercpp_con_su_verificacion(monkeypatch):
 
 
 def test_installed_rechaza_motor_desconocido():
-    with pytest.raises(ValueError, match="no existe"):
+    with pytest.raises(ValueError, match="does not exist"):
         models.installed("chatgpt")
 
 
@@ -123,12 +123,12 @@ def test_ensure_whispercpp_delega_en_enginepin(monkeypatch, tmp_path):
 
 
 def test_ensure_nombre_desconocido_lista_los_disponibles():
-    with pytest.raises(ValueError, match="disponibles") as ei:
+    with pytest.raises(ValueError, match="available") as ei:
         models.ensure("faster-whisper", "gigante")
     assert "large-v3" in str(ei.value)
-    with pytest.raises(ValueError, match="disponibles"):
+    with pytest.raises(ValueError, match="available"):
         models.ensure("whispercpp", "medium")
-    with pytest.raises(ValueError, match="no existe"):
+    with pytest.raises(ValueError, match="does not exist"):
         models.ensure("chatgpt", "small")
 
 

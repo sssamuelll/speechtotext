@@ -62,7 +62,7 @@ for _stream in (sys.stdout, sys.stderr):
 logging.basicConfig(level=logging.WARNING)
 logging.getLogger("faster_whisper").setLevel(logging.INFO)
 
-app = typer.Typer(add_completion=False, help="Transcripción de audio offline con Whisper.")
+app = typer.Typer(add_completion=False, help="Offline audio transcription with Whisper.")
 console = Console()
 
 
@@ -161,8 +161,8 @@ def transcribe_file(
 
         # 650 MB por urllib sin barra: que al menos se anuncie (spec §5.3, "nunca en silencio").
         console.print(
-            f"[yellow]whisper.cpp {ENGINE_PIN['version']} no está instalado: se descarga ahora "
-            f"(~{ENGINE_PIN['zip_bytes'] / 1024 ** 2:.0f} MB, una sola vez)[/yellow]"
+            f"[yellow]whisper.cpp {ENGINE_PIN['version']} is not installed: downloading now "
+            f"(~{ENGINE_PIN['zip_bytes'] / 1024 ** 2:.0f} MB, once)[/yellow]"
         )
     if route.engine == ENGINE_WHISPERCPP and jobs != 1:
         # 4 subprocesos × 1.28 GB contra 4096 MiB: WDDM no revienta, pagina 25x en silencio
@@ -170,7 +170,7 @@ def transcribe_file(
         # "Troceado (jobs=N)" y se avisa ÚNICAMENTE a quien pidió el motor a mano: bajo
         # --engine auto el usuario no tocó nada y el aviso sería ruido.
         if engine == ENGINE_WHISPERCPP:
-            console.print("[yellow]la GPU no paraleliza; jobs=1[/yellow]")
+            console.print("[yellow]the GPU does not parallelize; jobs=1[/yellow]")
         jobs = 1
     if hotwords:
         n_terms = len([t for t in hotwords.split(",") if t.strip()])
@@ -178,19 +178,19 @@ def transcribe_file(
         # el tokenizer del modelo, que en este punto todavía no está cargado; 223 tokens
         # son del orden de 600-700 caracteres en español.
         console.print(
-            f"Hotwords ({n_terms} términos, {len(hotwords)} caracteres): {hotwords}",
+            f"Hotwords ({n_terms} terms, {len(hotwords)} characters): {hotwords}",
             markup=False,
         )
         if n_terms >= 10 or len(hotwords) >= 300:
             console.print(
-                "[yellow]Lista larga de hotwords: 25 términos degradaron la cobertura "
-                "9 puntos sobre 240 s de audio real (2026-08-03); entran como texto "
-                "previo, no como léxico.[/yellow]"
+                "[yellow]Long hotwords list: 25 terms degraded coverage by 9 points "
+                "over 240 s of real audio (2026-08-03); they enter as prior text, "
+                "not as a lexicon.[/yellow]"
             )
     terms = tuple(t.strip() for t in hotwords.split(",") if t.strip()) if hotwords else ()
 
     console.print(
-        f"[bold]Modelo[/bold] [cyan]{model}[/cyan] · [bold]motor[/bold] [cyan]{route.engine}[/cyan] · "
+        f"[bold]Model[/bold] [cyan]{model}[/cyan] · [bold]engine[/bold] [cyan]{route.engine}[/cyan] · "
         f"[bold]device[/bold] [cyan]{route.device}[/cyan] · "
         f"[bold]compute[/bold] [cyan]{route.compute_type}[/cyan]"
     )
@@ -198,7 +198,7 @@ def transcribe_file(
         from speechtotext.core.enginepin import ENGINE_PIN
 
         console.print(
-            f"[bold]Motor[/bold] [cyan]whisper.cpp {ENGINE_PIN['version']}[/cyan] · "
+            f"[bold]Engine[/bold] [cyan]whisper.cpp {ENGINE_PIN['version']}[/cyan] · "
             f"[cyan]{model} {route.compute_type}[/cyan] · [cyan]{route.device}[/cyan]"
         )
 
@@ -206,7 +206,7 @@ def transcribe_file(
         SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
         TimeElapsedColumn(), console=console,
     ) as progress:
-        task = progress.add_task(f"Transcribiendo {audio.name}", total=None)
+        task = progress.add_task(f"Transcribing {audio.name}", total=None)
 
         avisado = False
 
@@ -216,15 +216,15 @@ def transcribe_file(
                 dur_min = p.total / 60
                 if route.eta_factor:
                     eta_min = max(1, round(dur_min * route.eta_factor))
-                    fuente = "estimado" if route.estimated else "medido con bench"
-                    console.print(f"Duración {dur_min:.1f} min · ETA ~{eta_min} min ({fuente})")
+                    fuente = "estimated" if route.estimated else "measured with bench"
+                    console.print(f"Duration {dur_min:.1f} min · ETA ~{eta_min} min ({fuente})")
                 else:
-                    console.print(f"Duración {dur_min:.1f} min · ETA sin medir para esta ruta")
+                    console.print(f"Duration {dur_min:.1f} min · ETA not measured for this route")
                 return
             if p.stage == "transcribe" and p.total and p.total > 1:
                 if not avisado:
                     avisado = True
-                    console.print(f"[bold]Troceado[/bold] (jobs={jobs}) · {model}")
+                    console.print(f"[bold]Chunked[/bold] (jobs={jobs}) · {model}")
                 linea = f"[{int(p.done)}/{int(p.total)}] {p.detail}"
                 if console.is_terminal:
                     progress.update(task, description=linea, total=p.total, completed=p.done)
@@ -248,22 +248,22 @@ def transcribe_file(
                 console.print(str(e), markup=False)
                 raise typer.Exit(2)
             if e.code == "out_of_memory":
-                console.print("[red]Se quedó sin memoria al transcribir.[/red]")
+                console.print("[red]Ran out of memory while transcribing.[/red]")
                 console.print(f"  {e}", markup=False)
                 raise typer.Exit(1)
             if e.code == "diarize_unavailable":
-                console.print(r'[red]Falta el extra de diarización:[/red] pip install -e ".\[diarize]"')
+                console.print(r'[red]The diarization extra is missing:[/red] pip install -e ".\[diarize]"')
                 raise typer.Exit(1)
             if e.code == "diarize_failed":
-                console.print(f"[red]La diarización falló:[/red] {e}")
+                console.print(f"[red]Diarization failed:[/red] {e}")
                 console.print(
-                    "Revisa que aceptaste los términos de los modelos pyannote y que HF_TOKEN esté configurado."
+                    "Check that you accepted the pyannote model terms and that HF_TOKEN is set."
                 )
                 raise typer.Exit(1)
             console.print(str(e), markup=False)
             raise typer.Exit(1)
         except AudioDecodeError as e:
-            console.print(f"[red]No se pudo procesar el audio:[/red] {e}")
+            console.print(f"[red]Could not process the audio:[/red] {e}")
             raise typer.Exit(1)
 
     for aviso in t.warnings:
@@ -272,49 +272,49 @@ def transcribe_file(
 
     if t.duration:
         ratio = t.speech_s / t.duration
-        voz = f"con voz {t.speech_s / 60:.1f} de {t.duration / 60:.1f} min ({100 * ratio:.0f}%)"
+        voz = f"speech {t.speech_s / 60:.1f} of {t.duration / 60:.1f} min ({100 * ratio:.0f}%)"
     else:
-        voz = "[yellow]cobertura desconocida (duración no medida)[/yellow]"
+        voz = "[yellow]coverage unknown (duration not measured)[/yellow]"
     if language != "auto":
-        idioma = f"Idioma: [bold]{t.language}[/bold] (forzado)"
+        idioma = f"Language: [bold]{t.language}[/bold] (forced)"
     else:
-        idioma = f"Idioma detectado: [bold]{t.language}[/bold]"
+        idioma = f"Language detected: [bold]{t.language}[/bold]"
         if t.language_probability is not None:
             idioma += f" (prob={t.language_probability:.2f})"
             if t.language_probability < 0.5:
-                idioma += " — dudoso: fíjalo con -l <código>"
+                idioma += " — uncertain: set it with -l <code>"
     console.print(
-        f"{idioma} · duración {t.duration:.1f}s · "
-        f"{len(t.segments)} segmentos · {voz} · motor {route.engine}"
+        f"{idioma} · duration {t.duration:.1f}s · "
+        f"{len(t.segments)} segments · {voz} · engine {route.engine}"
     )
     if t.duration:
         if t.gaps:
             # ponytail: se listan los primeros 5 huecos y luego "y N más (ver el JSON)".
             lista = ", ".join(f"{_fmt(a)}-{_fmt(b)} ({b - a:.0f} s)" for a, b in t.gaps[:5])
             if len(t.gaps) > 5:
-                lista += f", y {len(t.gaps) - 5} más (ver el JSON)"
+                lista += f", and {len(t.gaps) - 5} more (see the JSON)"
             # El consejo sólo aplica a quien tiene el VAD puesto de verdad (la petición
             # efectiva): bajo whispercpp no hay VAD que apagar.
-            consejo = " — prueba --no-vad" if t.request.vad else ""
-            plural = "hueco" if len(t.gaps) == 1 else "huecos"
-            console.print(f"{len(t.gaps)} {plural} sin texto: {lista}{consejo}")
+            consejo = " — try --no-vad" if t.request.vad else ""
+            plural = "gap" if len(t.gaps) == 1 else "gaps"
+            console.print(f"{len(t.gaps)} {plural} without text: {lista}{consejo}")
         else:
-            console.print("sin huecos de 5 s o más")
+            console.print("no gaps of 5 s or more")
 
     if t.diarization is not None:
         d = t.diarization
-        partes = [f"{d.speakers} hablante{'s' if d.speakers != 1 else ''}",
-                  f"{d.unattributed_pct}% sin atribuir"]
+        partes = [f"{d.speakers} speaker{'s' if d.speakers != 1 else ''}",
+                  f"{d.unattributed_pct}% unattributed"]
         if d.enrolled:
-            parte = f"{d.identified} de {d.enrolled} voces identificadas"
+            parte = f"{d.identified} of {d.enrolled} voices identified"
             if d.best_score is not None:
-                parte += f" (mejor score {d.best_score:.2f} < {threshold:.2f})"
+                parte += f" (best score {d.best_score:.2f} < {threshold:.2f})"
             partes.append(parte)
         console.print(" · ".join(partes))
         if d.auto and d.speakers > 5:
             console.print(
-                f"[yellow]{d.speakers} hablantes detectados en automático; si sabes cuántos son, "
-                "fija el número con --speakers N[/yellow]"
+                f"[yellow]{d.speakers} speakers detected automatically; if you know how many "
+                "there are, set the number with --speakers N[/yellow]"
             )
 
     info = SimpleNamespace(language=t.language, language_probability=t.language_probability,
@@ -336,88 +336,88 @@ def transcribe_file(
 @app.command()
 def transcribe(
     audio: Path = typer.Argument(
-        ..., exists=True, readable=True, dir_okay=False, help="Archivo de audio o vídeo."
+        ..., exists=True, readable=True, dir_okay=False, help="Audio or video file."
     ),
     output: Optional[Path] = typer.Option(
-        None, "--output", "-o", help="Carpeta o ruta base de salida (por defecto: junto al audio)."
+        None, "--output", "-o", help="Output folder or base path (defaults to next to the audio)."
     ),
     language: str = typer.Option(
         "auto",
         "--language",
         "-l",
-        help="'auto' (default) detecta con ≥ 30 s de audio; si la probabilidad sale baja, "
-        "fíjalo con un código ISO-639-1 (es, en, fr, ...).",
+        help="'auto' (default) detects from 30 s of audio or more; if the probability "
+        "comes back low, it prints it and suggests -l.",
     ),
     model: str = typer.Option(
         "large-v3",
         "--model",
         "-m",
-        help="tiny | base | small | medium | large-v3 | distil-large-v3. large-v3 = el único "
-        "que no perdió nada en lo medido; small = borrador rápido (5x más veloz, cambia lo "
-        "que se dijo).",
+        help="tiny | base | small | medium | large-v3 | distil-large-v3. large-v3 is the only "
+        "one that lost nothing in what the measurements say; small is a fast draft (5x faster, "
+        "changes what was said).",
     ),
     formats: str = typer.Option(
-        "txt,srt,json", "--formats", "-f", help="Formatos separados por coma (txt, srt, vtt, json)."
+        "txt,srt,json", "--formats", "-f", help="Comma-separated formats (txt, srt, vtt, json)."
     ),
     device: str = typer.Option(
         "auto", "--device", "-d",
-        help="auto (sondea la GPU; ver `speechtotext probe`) | cpu | cuda",
+        help="auto (probes the GPU; see `speechtotext probe`) | cpu | cuda",
     ),
     compute_type: str = typer.Option(
         "auto",
         "--compute-type",
-        help="auto | int8 | int8_float16 | float16 | float32. 'auto' elige int8 en CPU, float16 "
-        "en GPU y q5_0 bajo whisper.cpp (donde solo valen auto y q5_0).",
+        help="auto | int8 | int8_float16 | float16 | float32. 'auto' picks int8 on CPU, float16 "
+        "on GPU, and q5_0 under whisper.cpp (where only auto and q5_0 are valid).",
     ),
     vad: bool = typer.Option(
         False, "--vad/--no-vad",
-        help="Filtro VAD para descartar silencios largos. Apagado por defecto: medido, "
-        "pierde frases cortas sin avisar.",
+        help="VAD filter to drop long silences. Off by default: measured, it removes "
+        "short sentences without saying so.",
     ),
-    beam_size: int = typer.Option(5, "--beam-size", min=1, help="Tamaño del beam search."),
+    beam_size: int = typer.Option(5, "--beam-size", min=1, help="Beam search size."),
     diarize: bool = typer.Option(
-        False, "--diarize", "-D", help=r"Marcar quién habla (diarización). Requiere el extra \[diarize]."
+        False, "--diarize", "-D", help=r"Mark who's speaking (diarization). Requires the \[diarize] extra."
     ),
     speakers: Optional[int] = typer.Option(
-        None, "--speakers", min=1, help="Número de hablantes (pista; auto si se omite)."
+        None, "--speakers", min=1, help="Number of speakers (a hint; auto when omitted)."
     ),
     identify: bool = typer.Option(
-        True, "--identify/--no-identify", help="Poner nombre a las voces registradas."
+        True, "--identify/--no-identify", help="Name enrolled voices."
     ),
     threshold: float = typer.Option(
-        0.5, "--threshold", min=0.0, max=1.0, help="Umbral de coincidencia de voz (coseno, 0-1)."
+        0.5, "--threshold", min=0.0, max=1.0, help="Voice match threshold (cosine, 0-1)."
     ),
     hotwords: Optional[str] = typer.Option(
         None,
         "--hotwords",
-        help="Términos difíciles separados por coma (nombres propios, jerga): entran a cada "
-        "ventana como si fueran la conversación previa, así que una lista corta ayuda y una "
-        "larga degrada. Escríbelos con mayúsculas y tildes.",
+        help="Hard terms, comma separated (proper nouns, jargon): they go into every "
+        "window as if they were the previous conversation, so a short list helps and a "
+        "long one hurts. Write them capitalized and accented.",
     ),
     hotwords_file: Optional[Path] = typer.Option(
         None,
         "--hotwords-file",
         exists=True,
         dir_okay=False,
-        help="Archivo con términos difíciles (uno por línea o separados por coma), para un "
-        "léxico por proyecto. Se combina con --hotwords. Techo: por encima de 223 tokens "
-        "(~600-700 caracteres) la lista se trunca en silencio "
+        help="File with hard terms (one per line or comma separated), for a per-project "
+        "lexicon. Combines with --hotwords. Ceiling: above 223 tokens "
+        "(~600-700 characters) the list is truncated silently "
         "(faster_whisper/transcribe.py:1546-1547).",
     ),
     chunk: Optional[bool] = typer.Option(
         None, "--chunk/--no-chunk",
-        help="Trocear el audio para checkpoint/resume + paralelismo. Auto si dura > 20 min.",
+        help="Chunk the audio for checkpoint/resume plus parallelism. Automatic when longer than 20 min.",
     ),
     jobs: int = typer.Option(
-        4, "--jobs", "-j", help="Trozos en paralelo al trocear (comparten un modelo).",
+        4, "--jobs", "-j", help="Chunks in parallel when chunking (they share one model).",
     ),
     engine: str = typer.Option(
         "auto",
         "--engine",
-        help="auto (según la máquina; ver `speechtotext probe`) | faster-whisper | whispercpp",
+        help="auto (based on the machine; see `speechtotext probe`) | faster-whisper | whispercpp",
     ),
 ) -> None:
-    """Transcribe un archivo de audio localmente con Whisper (sin enviar nada a internet)."""
+    """Transcribe an audio file locally with Whisper (nothing leaves your machine)."""
     transcribe_file(
         audio, output, language, model, formats, device, compute_type,
         vad, beam_size, diarize, speakers, identify, threshold,
@@ -433,7 +433,7 @@ def _extract_region(audio, regions, region, output, language, model, formats,
     from speechtotext.core.finder import clip_window
 
     if region < 1 or region > len(regions):
-        console.print(f"[red]Región {region} fuera de rango (hay {len(regions)}).[/red]")
+        console.print(f"[red]Region {region} out of range (there are {len(regions)}).[/red]")
         raise typer.Exit(1)
 
     r = regions[region - 1]
@@ -452,15 +452,15 @@ def _extract_region(audio, regions, region, output, language, model, formats,
         subprocess.run(cmd, check=True, capture_output=True)
     except FileNotFoundError:
         console.print(
-            "[red]ffmpeg no está en el PATH.[/red] "
-            "Instálalo: [cyan]winget install Gyan.FFmpeg[/cyan]"
+            "[red]ffmpeg is not on the PATH.[/red] "
+            "Install it: [cyan]winget install Gyan.FFmpeg[/cyan]"
         )
         raise typer.Exit(1)
     except subprocess.CalledProcessError as e:
-        console.print(f"[red]No se pudo recortar el audio:[/red] {e.stderr.decode(errors='ignore')[:200]}")
+        console.print(f"[red]Could not clip the audio:[/red] {e.stderr.decode(errors='ignore')[:200]}")
         raise typer.Exit(1)
 
-    console.print(f"  [green]Recorte[/green] {clip} ({_fmt(r.start)}–{_fmt(r.end)})")
+    console.print(f"  [green]Clip[/green] {clip} ({_fmt(r.start)}–{_fmt(r.end)})")
     transcribe_file(
         clip, base_dir, language, model, formats,
         "auto", "auto", False, 5, diarize, speakers, identify, threshold,
@@ -470,45 +470,45 @@ def _extract_region(audio, regions, region, output, language, model, formats,
 
 @app.command()
 def find(
-    audio: Path = typer.Argument(..., exists=True, dir_okay=False, help="Audio o vídeo a buscar."),
-    query: str = typer.Argument(..., help="Palabras a buscar."),
-    extract: bool = typer.Option(False, "--extract", "-e", help="Recortar + transcribir la región."),
-    region: int = typer.Option(1, "--region", help="Qué región extraer (1 = la más densa)."),
+    audio: Path = typer.Argument(..., exists=True, dir_okay=False, help="Audio or video to search."),
+    query: str = typer.Argument(..., help="Words to search for."),
+    extract: bool = typer.Option(False, "--extract", "-e", help="Clip and transcribe the region."),
+    region: int = typer.Option(1, "--region", help="Which region to extract (1 = the densest)."),
     model: str = typer.Option(
         "large-v3", "--model", "-m",
-        help="Modelo para la transcripción del tramo (small = borrador rápido).",
+        help="Model for transcribing the clip (small = fast draft).",
     ),
-    scan_model: str = typer.Option("tiny", "--scan-model", help="Modelo del índice."),
-    language: str = typer.Option("auto", "--language", "-l", help="Idioma de la transcripción del tramo."),
-    formats: str = typer.Option("txt,srt", "--formats", "-f", help="Formatos de salida del tramo."),
-    diarize: bool = typer.Option(False, "--diarize", "-D", help="Diarizar el tramo extraído."),
-    speakers: Optional[int] = typer.Option(None, "--speakers", min=1, help="Nº de hablantes (pista)."),
-    identify: bool = typer.Option(True, "--identify/--no-identify", help="Nombrar voces registradas."),
-    threshold: float = typer.Option(0.5, "--threshold", min=0.0, max=1.0, help="Umbral de coincidencia de voz."),
-    context: float = typer.Option(10.0, "--context", help="Segundos de margen al recortar."),
-    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Carpeta de salida del tramo."),
-    rebuild: bool = typer.Option(False, "--rebuild", help="Forzar reconstrucción del índice."),
-    top: int = typer.Option(5, "--top", help="Cuántas regiones listar."),
+    scan_model: str = typer.Option("tiny", "--scan-model", help="Model for the index."),
+    language: str = typer.Option("auto", "--language", "-l", help="Language for transcribing the clip."),
+    formats: str = typer.Option("txt,srt", "--formats", "-f", help="Output formats for the clip."),
+    diarize: bool = typer.Option(False, "--diarize", "-D", help="Diarize the extracted clip."),
+    speakers: Optional[int] = typer.Option(None, "--speakers", min=1, help="Number of speakers (a hint)."),
+    identify: bool = typer.Option(True, "--identify/--no-identify", help="Name enrolled voices."),
+    threshold: float = typer.Option(0.5, "--threshold", min=0.0, max=1.0, help="Voice match threshold."),
+    context: float = typer.Option(10.0, "--context", help="Seconds of margin when clipping."),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output folder for the clip."),
+    rebuild: bool = typer.Option(False, "--rebuild", help="Force a rebuild of the index."),
+    top: int = typer.Option(5, "--top", help="How many regions to list."),
     hotwords: Optional[str] = typer.Option(
-        None, "--hotwords", help="Términos difíciles para la transcripción del tramo (ver transcribe)."
+        None, "--hotwords", help="Hard terms for transcribing the clip (see transcribe)."
     ),
     hotwords_file: Optional[Path] = typer.Option(
         None, "--hotwords-file", exists=True, dir_okay=False,
-        help="Archivo de léxico para la transcripción del tramo (ver transcribe).",
+        help="Lexicon file for transcribing the clip (see transcribe).",
     ),
 ) -> None:
-    """Busca contenido en un audio largo; con --extract recorta y transcribe el tramo."""
+    """Search a long audio file; with --extract, clip and transcribe the region."""
     from speechtotext.core import finder
 
     segments, cached = finder.load_or_build_index(audio, scan_model, rebuild)
-    console.print(f"Índice: {'caché' if cached else 'construido'} ({scan_model}, {len(segments)} segmentos)")
+    console.print(f"Index: {'cached' if cached else 'built'} ({scan_model}, {len(segments)} segments)")
 
     regions = finder.search(segments, query, top=top)
     if not regions:
-        console.print(f'No se encontró "{query}" en el audio.', markup=False)
+        console.print(f'No match for "{query}" in the audio.', markup=False)
         raise typer.Exit(0)
 
-    console.print(f"{len(regions)} regiones para \"{query}\":", markup=False)
+    console.print(f"{len(regions)} regions for \"{query}\":", markup=False)
     for i, r in enumerate(regions, start=1):
         console.print(f"  {i}.  {_fmt(r.start)} – {_fmt(r.end)}  ({r.hits})  \"{r.snippet}\"", markup=False)
 
@@ -522,10 +522,10 @@ def find(
 
 @app.command()
 def enroll(
-    name: str = typer.Argument(..., help="Nombre de la persona."),
-    sample: Path = typer.Argument(..., exists=True, dir_okay=False, help="Audio de muestra de su voz."),
+    name: str = typer.Argument(..., help="Name of the person."),
+    sample: Path = typer.Argument(..., exists=True, dir_okay=False, help="Sample audio of their voice."),
 ) -> None:
-    """Registra la voz de una persona desde una muestra de audio (>=10s recomendado)."""
+    """Enroll a person's voice from a sample recording (>=10s recommended)."""
     import contextlib
     import wave
 
@@ -535,54 +535,54 @@ def enroll(
     try:
         wav = transcode_to_wav(sample.read_bytes())
     except (FfmpegMissingError, TranscodeError) as e:
-        console.print(f"[red]No se pudo procesar el audio:[/red] {e}")
+        console.print(f"[red]Could not process the audio:[/red] {e}")
         raise typer.Exit(1)
     try:
         with contextlib.closing(wave.open(str(wav))) as w:
             seconds = w.getnframes() / float(w.getframerate())
         if seconds < 10:
             console.print(
-                f"[yellow]Aviso:[/yellow] muestra corta ({seconds:.0f}s); >=10s es más fiable."
+                f"[yellow]Note:[/yellow] short sample ({seconds:.0f}s); >=10s is more reliable."
             )
         try:
             vec = diarization.embed_voice(str(wav))
         except ImportError:
-            console.print(r'[red]Falta el extra de diarización:[/red] pip install -e ".\[diarize]"')
+            console.print(r'[red]The diarization extra is missing:[/red] pip install -e ".\[diarize]"')
             raise typer.Exit(1)
         except Exception as e:
-            console.print(f"[red]No se pudo registrar la voz:[/red] {e}")
+            console.print(f"[red]Could not enroll the voice:[/red] {e}")
             raise typer.Exit(1)
     finally:
         wav.unlink(missing_ok=True)
 
     registry.enroll(name, vec, seconds=seconds, model=diarization.EMBEDDING_MODEL)
-    console.print(f"  [green]OK[/green] voz de {name} registrada.")
+    console.print(f"  [green]OK[/green] {name}'s voice enrolled.")
 
 
 @app.command()
 def voices() -> None:
-    """Lista las voces registradas."""
+    """List enrolled voices."""
     from speechtotext.speakers import registry
 
     vs = registry.list_voices()
     if not vs:
-        console.print("Sin voces registradas. Usa: speechtotext enroll <nombre> <muestra.wav>")
+        console.print("No enrolled voices. Use: speechtotext enroll <name> <sample.wav>")
         return
-    table = Table("Nombre", "Segundos", "Registrada", "Modelo")
+    table = Table("Name", "Seconds", "Enrolled", "Model")
     for v in vs:
         table.add_row(v["name"], str(v.get("seconds", "")), v.get("enrolled_at", ""), v["model"])
     console.print(table)
 
 
 @app.command()
-def forget(name: str = typer.Argument(..., help="Nombre de la voz a borrar.")) -> None:
-    """Borra una voz registrada."""
+def forget(name: str = typer.Argument(..., help="Name of the voice to delete.")) -> None:
+    """Delete an enrolled voice."""
     from speechtotext.speakers import registry
 
     if registry.remove(name):
-        console.print(f"  [green]OK[/green] {name} borrada.")
+        console.print(f"  [green]OK[/green] {name} deleted.")
     else:
-        console.print(f"[red]No existe una voz llamada {name}.[/red]")
+        console.print(f"[red]No voice named {name}.[/red]")
         raise typer.Exit(1)
 
 
@@ -605,7 +605,7 @@ def _trim_wav(wav: Path, seconds: float) -> Path:
         # Sin esto el usuario ve un CalledProcessError crudo; con esto, el mismo
         # patron de mensaje rojo que ya usa el resto del comando.
         stderr = (e.stderr or b"").decode(errors="replace").strip()
-        raise RuntimeError(f"ffmpeg no pudo recortar el audio: {stderr[-300:]}") from e
+        raise RuntimeError(f"ffmpeg could not clip the audio: {stderr[-300:]}") from e
     return out
 
 
@@ -627,7 +627,7 @@ def _print_bench(table: dict) -> None:
             return "—"
         return fmt.format(v) if isinstance(v, float) else str(v)
 
-    t = Table("Motor", "Modelo", "x_rt", "load_s", "RAM MB", "VRAM MB", "Caps", "WER", "Error")
+    t = Table("Engine", "Model", "x_rt", "load_s", "RAM MB", "VRAM MB", "Caps", "WER", "Error")
     for r in table["results"]:
         caps = r.get("capabilities") or {}
         # H/W/S/V = hotwords/word_timestamps/native_signals/vad, compacto para caber.
@@ -653,16 +653,16 @@ def _print_bench(table: dict) -> None:
     ok = sum(1 for r in table["results"] if not r.get("error"))
     con_error = len(table["results"]) - ok
     skipped = table.get("skipped", [])
-    console.print(f"{ok} viables · {con_error} con error · {len(skipped)} saltadas")
+    console.print(f"{ok} viable · {con_error} with errors · {len(skipped)} skipped")
     for s in skipped:
-        console.print(f"  saltada {s['engine']} {s['model']}: {s['reason']}", markup=False)
+        console.print(f"  skipped {s['engine']} {s['model']}: {s['reason']}", markup=False)
 
     recs = table.get("recommendations") or []
     if recs:
-        r_t = Table("Caso de uso", "Config", "Motivo", title="¿Qué config para qué?")
+        r_t = Table("Use case", "Config", "Reason", title="Which config for what?")
         for rec in recs:
             e = rec.get("eleccion")
-            config = f"{e['engine']} {e['model']}" if e else "— sin candidata —"
+            config = f"{e['engine']} {e['model']}" if e else "— no candidate —"
             r_t.add_row(rec["caso"], config, rec["motivo"])
         Console(width=120).print(r_t)
 
@@ -671,30 +671,30 @@ def _print_bench(table: dict) -> None:
 def bench(
     audio: Optional[Path] = typer.Argument(
         None, exists=True, dir_okay=False,
-        help="Audio a medir. Omítelo (o usa --show) para ver la última tabla.",
+        help="Audio to measure. Omit it (or use --show) to see the last table.",
     ),
     seconds: float = typer.Option(
         60.0, "--seconds",
-        help="Segundos del audio a medir (recorte inicial; acota el coste del bench).",
+        help="Seconds of audio to measure (initial clip; bounds the cost of the bench).",
     ),
     quick: bool = typer.Option(
         False, "--quick",
-        help="Salta medium y large-v3 de faster-whisper: son los lentos en CPU "
-        "(minutos por config) y el resto basta para una primera decisión.",
+        help="Skips faster-whisper's medium and large-v3: they are the slow ones on CPU "
+        "(minutes per config) and the rest are enough for a first decision.",
     ),
     show: bool = typer.Option(
-        False, "--show", help="Pinta la tabla guardada sin volver a medir."
+        False, "--show", help="Print the saved table without measuring again."
     ),
 ) -> None:
-    """Mide las configs ASR viables en ESTA máquina y guarda bench.json."""
+    """Measure the viable ASR configs on THIS machine and save bench.json."""
     from speechtotext.core import benchmark
 
     if show or audio is None:
         table = benchmark.read_table()
         if table is None:
             console.print(
-                "[red]No hay tabla de benchmark.[/red] "
-                "Mídela con: [cyan]speechtotext bench <audio>[/cyan]"
+                "[red]No benchmark table yet.[/red] "
+                "Measure it with: [cyan]speechtotext bench <audio>[/cyan]"
             )
             raise typer.Exit(1)
         _print_bench(table)
@@ -707,12 +707,12 @@ def bench(
     try:
         wav = transcode_to_wav(audio.read_bytes())
     except (FfmpegMissingError, TranscodeError) as e:
-        console.print(f"[red]No se pudo procesar el audio:[/red] {e}")
+        console.print(f"[red]Could not process the audio:[/red] {e}")
         raise typer.Exit(1)
     try:
         clip = _trim_wav(wav, seconds)
     except RuntimeError as e:
-        console.print(f"[red]No se pudo recortar el audio:[/red] {e}")
+        console.print(f"[red]Could not clip the audio:[/red] {e}")
         raise typer.Exit(1)
     finally:
         wav.unlink(missing_ok=True)
@@ -730,17 +730,17 @@ def bench(
             # Las quick-saltadas van a skipped: una tabla con filas ausentes sin razón
             # haría que el consumidor de la tabla eligiera sin saber que faltan candidatas.
             quick_saltadas = [
-                {"engine": c["engine"], "model": c["model"], "reason": "saltada por --quick"}
+                {"engine": c["engine"], "model": c["model"], "reason": "skipped by --quick"}
                 for c in lentas
             ]
-        console.print(f"Midiendo {len(configs)} configs sobre {duration_s:.1f}s de audio...")
+        console.print(f"Measuring {len(configs)} configs over {duration_s:.1f}s of audio...")
 
         def _progress(cfg, res):
             # Una fila al terminar cada config: el bench tarda minutos y el silencio
             # se confunde con un cuelgue. markup=False: el error trae corchetes.
             if res.get("error"):
                 console.print(
-                    f"  FALLO {cfg['engine']} {cfg['model']}: {res['error'][:120]}",
+                    f"  FAILED {cfg['engine']} {cfg['model']}: {res['error'][:120]}",
                     markup=False,
                 )
             else:
@@ -761,7 +761,7 @@ def bench(
             # ultimo hijo (WinError 32); un temporal huerfano no justifica tumbar un
             # bench de 15 minutos YA escrito en disco.
             pass
-    console.print(f"Tabla escrita en {path}")
+    console.print(f"Table written to {path}")
     _print_bench(table)
 
 
@@ -771,17 +771,17 @@ def _gb(n: int) -> str:
 
 @app.command()
 def probe() -> None:
-    """Sondea esta máquina y muestra la ruta que elegiría `transcribe` (pégalo en un issue)."""
+    """Probe this machine and show the route `transcribe` would choose (paste it into an issue)."""
     m = core_probe.machine()
     console.print(f"platform   {m.platform}", markup=False, soft_wrap=True)
     console.print(f"cpu_count  {m.cpu_count}", markup=False, soft_wrap=True)
-    console.print(f"ram_gb     {m.ram_gb if m.ram_gb is not None else 'sin medir'}",
+    console.print(f"ram_gb     {m.ram_gb if m.ram_gb is not None else 'not measured'}",
                  markup=False, soft_wrap=True)
     console.print(f"cuda       {m.cuda}", markup=False, soft_wrap=True)
     console.print(f"gpu        {m.gpu_name or '-'}", markup=False, soft_wrap=True)
     console.print(f"vram_free  {f'{m.vram_free_gb} GB' if m.vram_free_gb is not None else '-'}",
                  markup=False, soft_wrap=True)
-    console.print(f"whispercpp {m.whispercpp or 'no instalado'}", markup=False, soft_wrap=True)
+    console.print(f"whispercpp {m.whispercpp or 'not installed'}", markup=False, soft_wrap=True)
     for model in ("large-v3", "small"):
         try:
             r = core_probe.choose_route(m, model)
@@ -789,35 +789,35 @@ def probe() -> None:
             console.print(f"{model:9} {e}", markup=False, soft_wrap=True)
             continue
         if r.eta_factor:
-            eta = f"~{1 / r.eta_factor:.1f}x tiempo real{' (estimado)' if r.estimated else ' (bench)'}"
+            eta = f"~{1 / r.eta_factor:.1f}x real time{' (estimated)' if r.estimated else ' (bench)'}"
         else:
-            eta = "sin medir"
+            eta = "not measured"
         console.print(
-            f"{model:9} {r.engine} · {r.device} · {r.compute_type} · {eta} · {r.reason or 'sin avisos'}",
+            f"{model:9} {r.engine} · {r.device} · {r.compute_type} · {eta} · {r.reason or 'no notices'}",
             markup=False, soft_wrap=True,
         )
 
 
-models_app = typer.Typer(help="Modelos locales: listar, bajar (pull) y borrar (rm).")
+models_app = typer.Typer(help="Local models: list, pull, and remove (rm).")
 app.add_typer(models_app, name="models")
 
 
 @models_app.callback(invoke_without_command=True)
 def models_list(ctx: typer.Context) -> None:
-    """Lista los modelos instalados (faster-whisper en la caché de HF, whisper.cpp en data_dir)."""
+    """List installed models (faster-whisper in the HF cache, whisper.cpp in data_dir)."""
     if ctx.invoked_subcommand is not None:
         return
     from speechtotext.core import models
 
     rows = models.installed()
     if not rows:
-        console.print("No hay modelos instalados. Baja uno: [cyan]speechtotext models pull large-v3[/cyan]")
+        console.print("No installed models. Pull one: [cyan]speechtotext models pull large-v3[/cyan]")
         return
-    t = Table("motor", "modelo", "tamaño", "verificado", "ruta")
+    t = Table("engine", "model", "size", "verified", "path")
     for mi in rows:
-        t.add_row(mi.engine, mi.name, _gb(mi.size_bytes), "sí" if mi.verified else "-", str(mi.path))
+        t.add_row(mi.engine, mi.name, _gb(mi.size_bytes), "yes" if mi.verified else "-", str(mi.path))
     Console(width=140).print(t)
-    console.print(f"Datos en {models.data_dir()}", markup=False)
+    console.print(f"Data in {models.data_dir()}", markup=False)
 
 
 @models_app.command("pull")
@@ -825,14 +825,14 @@ def models_pull(
     name: str = typer.Argument(..., help="tiny | base | small | medium | large-v3 | distil-large-v3"),
     engine: str = typer.Option(ENGINE_FASTER, "--engine", help="faster-whisper | whispercpp"),
 ) -> None:
-    """Descarga un modelo. Anuncia el tamaño antes; la barra la pinta huggingface_hub."""
+    """Download a model. Announces the size beforehand; huggingface_hub draws the progress bar."""
     from speechtotext.core import models
 
     try:
         size = models.remote_size(engine, name)
     except ValueError as e:
         raise typer.BadParameter(str(e))
-    console.print(f"Descargando {name} ({engine}{', ~' + _gb(size) if size else ''})...", markup=False)
+    console.print(f"Downloading {name} ({engine}{', ~' + _gb(size) if size else ''})...", markup=False)
     try:
         path = models.ensure(engine, name)
     except Exception as e:   # frontera del CLI: sha que no cuadra, sin red... se imprime y sale 1
@@ -843,10 +843,10 @@ def models_pull(
 
 @models_app.command("rm")
 def models_rm(
-    name: str = typer.Argument(..., help="Nombre del modelo (ver `speechtotext models`)."),
+    name: str = typer.Argument(..., help="Model name (see `speechtotext models`)."),
     engine: str = typer.Option(ENGINE_FASTER, "--engine", help="faster-whisper | whispercpp"),
 ) -> None:
-    """Borra un modelo local."""
+    """Remove a local model."""
     from speechtotext.core import models
 
     try:
@@ -856,12 +856,12 @@ def models_rm(
     except FileNotFoundError as e:
         console.print(str(e), style="red", markup=False)
         raise typer.Exit(1)
-    console.print(f"  [green]Borrado[/green] {name} ({engine})")
+    console.print(f"  [green]Removed[/green] {name} ({engine})")
 
 
 @app.command()
 def mcp() -> None:
-    """Sirve las herramientas por MCP sobre stdio (Claude Desktop y compatibles)."""
+    """Serve the tools over MCP on stdio (Claude Desktop and compatible clients)."""
     from speechtotext.cli import mcp_server
 
     mcp_server.serve()

@@ -32,7 +32,7 @@ def test_ruta_por_defecto_en_la_maquina_de_pruebas_es_cpu_int8():
     # conftest fija una máquina sin GPU: 'auto' resuelve a faster-whisper en CPU int8.
     r = resolve_route()
     assert (r.engine, r.device, r.compute_type, r.reason) == (
-        "faster-whisper", "cpu", "int8", "sin GPU utilizable: CPU")
+        "faster-whisper", "cpu", "int8", "no usable GPU: CPU")
     assert r.eta_factor == round(1 / 1.27, 3) and r.estimated is True
 
 
@@ -114,7 +114,7 @@ class FakeBackend:
 
     def __init__(self, segments=((1.0, 2.0, " hola"),), *, language="es", probability=0.9,
                  boom=None, wrap=False, backend_id="faster-whisper",
-                 caps=Caps("honrado", "honrado", "honrado")):
+                 caps=Caps("honored", "honored", "honored")):
         self.segments, self.language, self.probability, self.boom = segments, language, probability, boom
         self.wrap = wrap
         self.backend_id, self.caps = backend_id, caps
@@ -195,24 +195,24 @@ def test_acepta_la_ruta_como_str(tmp_path, monkeypatch):
 
 def test_flags_imposibles_cortan_antes_de_decodificar(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "load_audio", lambda p: pytest.fail("decodificó antes de validar"))
-    with pytest.raises(ValueError, match="no existe"):
+    with pytest.raises(ValueError, match="does not exist"):
         core.transcribe(tmp_path / "a.wav", engine="chatgpt")
 
 
 def test_hotwords_rechazado_corta_antes_de_cargar_el_modelo():
-    backend = FakeBackend(backend_id="whispercpp", caps=Caps("rechazado", "degradado", "degradado"))
+    backend = FakeBackend(backend_id="whispercpp", caps=Caps("rejected", "degraded", "degraded"))
     with pytest.raises(AsrError) as ei:
         core.transcribe(_zeros(5.0), backend=backend, hotwords=("Bézier",), chunk=False)
     assert ei.value.code == "unsupported_option" and ei.value.recoverable is False
-    assert "--hotwords no tiene efecto" in str(ei.value) and "faster-whisper" in str(ei.value)
+    assert "--hotwords has no effect" in str(ei.value) and "faster-whisper" in str(ei.value)
     assert backend.warmed == 0 and backend.calls == []
 
 
 def test_caps_degradado_avisa_y_apaga_el_knob():
-    backend = FakeBackend(backend_id="whispercpp", caps=Caps("rechazado", "degradado", "degradado"))
+    backend = FakeBackend(backend_id="whispercpp", caps=Caps("rejected", "degraded", "degraded"))
     t = core.transcribe(_zeros(5.0), backend=backend, vad=True, word_timestamps=True, chunk=False)
-    assert any("no trae VAD" in w for w in t.warnings)
-    assert any("atribución por segmento" in w for w in t.warnings)
+    assert any("has no VAD" in w for w in t.warnings)
+    assert any("per-segment attribution" in w for w in t.warnings)
     assert t.request.vad is False and t.request.word_timestamps is False
     assert backend.calls[0][1].vad is False
 
@@ -255,8 +255,8 @@ def test_el_nucleo_clampa_jobs_para_whispercpp_y_los_reparte_para_faster(tmp_pat
 
     def fabrica(engine, model, device, compute_type, jobs=1):
         visto.append((engine, jobs))
-        return FakeBackend(backend_id=engine, caps=Caps("rechazado", "degradado", "degradado")
-                           if engine == "whispercpp" else Caps("honrado", "honrado", "honrado"))
+        return FakeBackend(backend_id=engine, caps=Caps("rejected", "degraded", "degraded")
+                           if engine == "whispercpp" else Caps("honored", "honored", "honored"))
 
     monkeypatch.setattr(core, "make_backend", fabrica)
     audio = tmp_path / "a.wav"
@@ -333,7 +333,7 @@ def test_primer_fallo_cancela_los_pendientes_y_nombra_el_trozo(tmp_path, monkeyp
     audio.write_bytes(b"RIFF")
     with pytest.raises(AsrError) as ei:
         core.transcribe(audio, backend=FakeBackend(boom=RuntimeError("cable")), chunk=True, jobs=1)
-    assert ei.value.code == "backend_failed" and "fallo en el trozo 1/2" in str(ei.value)
+    assert ei.value.code == "backend_failed" and "failed on chunk 1/2" in str(ei.value)
 
 
 def test_oom_envuelto_por_el_backend_real_tambien_se_traduce():
@@ -351,7 +351,7 @@ def test_fallo_envuelto_en_varios_trozos_nombra_el_trozo(tmp_path, monkeypatch):
     audio.write_bytes(b"RIFF")
     with pytest.raises(AsrError) as ei:
         core.transcribe(audio, backend=FakeBackend(boom=RuntimeError("cable"), wrap=True), chunk=True, jobs=1)
-    assert ei.value.code == "backend_failed" and "fallo en el trozo 1/2" in str(ei.value)
+    assert ei.value.code == "backend_failed" and "failed on chunk 1/2" in str(ei.value)
 
 
 def test_cancelacion_envuelta_no_se_reetiqueta():
@@ -423,9 +423,9 @@ def test_los_avisos_de_caps_van_antes_que_los_del_motor():
         def transcribe(self, samples, request):
             return dc_replace(super().transcribe(samples, request), warnings=("empty_transcript",))
 
-    backend = Avisa(backend_id="whispercpp", caps=Caps("rechazado", "degradado", "degradado"))
+    backend = Avisa(backend_id="whispercpp", caps=Caps("rejected", "degraded", "degraded"))
     t = core.transcribe(_zeros(5.0), backend=backend, vad=True, chunk=False)
-    assert "no trae VAD" in t.warnings[0] and t.warnings[-1] == "whispercpp: empty_transcript"
+    assert "has no VAD" in t.warnings[0] and t.warnings[-1] == "whispercpp: empty_transcript"
 
 
 def test_route_dada_no_vuelve_a_sondear_y_marca_selection(monkeypatch):

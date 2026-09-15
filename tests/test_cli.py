@@ -61,8 +61,8 @@ def _fake_transcribe(monkeypatch, tmp_path, segments, info, boom=None, calls=Non
             self.backend_id, self.model_id, self.device, self.quant = engine, model, device, compute_type
             self.model_version = "1"
             self.engine_version = "whisper.cpp v1.9.1" if engine == "whispercpp" else "faster-whisper 1.2.0"
-            self.caps = (Caps("rechazado", "degradado", "degradado") if engine == "whispercpp"
-                         else Caps("honrado", "honrado", "honrado"))
+            self.caps = (Caps("rejected", "degraded", "degraded") if engine == "whispercpp"
+                         else Caps("honored", "honored", "honored"))
 
         def warm(self):
             pass
@@ -106,7 +106,7 @@ def test_voices_empty(tmp_path, monkeypatch):
     monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
     result = runner.invoke(app, ["voices"])
     assert result.exit_code == 0
-    assert "Sin voces" in result.stdout
+    assert "No enrolled voices" in result.stdout
 
 
 def test_forget_missing_returns_error(tmp_path, monkeypatch):
@@ -140,8 +140,8 @@ def test_resumen_lista_los_huecos(tmp_path, monkeypatch):
     result = _invoke(audio, tmp_path, "--vad")
     assert result.exit_code == 0
     assert "25%" in result.stdout
-    assert "2 huecos sin texto: 05:00-10:00 (300 s), 14:10-36:46 (1356 s)" in result.stdout
-    assert "prueba --no-vad" in result.stdout
+    assert "2 gaps without text: 05:00-10:00 (300 s), 14:10-36:46 (1356 s)" in result.stdout
+    assert "try --no-vad" in result.stdout
 
 
 def test_cobertura_alta_con_hueco_real_lo_lista(tmp_path, monkeypatch):
@@ -154,7 +154,7 @@ def test_cobertura_alta_con_hueco_real_lo_lista(tmp_path, monkeypatch):
     result = _invoke(audio, tmp_path)
     assert result.exit_code == 0
     assert "90%" in result.stdout
-    assert "1 hueco sin texto: 15:00-16:40 (100 s)" in result.stdout
+    assert "1 gap without text: 15:00-16:40 (100 s)" in result.stdout
 
 
 def test_resumen_sin_huecos_lo_dice_explicitamente(tmp_path, monkeypatch):
@@ -164,7 +164,7 @@ def test_resumen_sin_huecos_lo_dice_explicitamente(tmp_path, monkeypatch):
     result = _invoke(audio, tmp_path)
     assert result.exit_code == 0
     assert "100%" in result.stdout
-    assert "sin huecos de 5 s o más" in result.stdout
+    assert "no gaps of 5 s or more" in result.stdout
     assert "--no-vad" not in result.stdout
 
 
@@ -175,7 +175,7 @@ def test_no_sugiere_no_vad_a_quien_ya_lo_apago(tmp_path, monkeypatch):
     audio = _fake_transcribe(monkeypatch, tmp_path, segs, _info(2206.0))
     result = _invoke(audio, tmp_path, "--no-vad")
     assert result.exit_code == 0
-    assert "1 hueco sin texto: 05:00-36:46 (1906 s)" in result.stdout
+    assert "1 gap without text: 05:00-36:46 (1906 s)" in result.stdout
     assert "--no-vad" not in result.stdout
 
 
@@ -208,7 +208,7 @@ def test_json_mide_sobre_lo_que_el_asr_emitio_no_sobre_lo_diarizado(tmp_path, mo
     assert payload["speech_s"] == 550.0  # 300 + 250; post-diarización daría 2.0
     assert payload["gaps"] == [[300.0, 600.0], [850.0, 2206.0]]
     # Y es exactamente lo que la consola dijo: una cantidad, dos canales.
-    assert "2 huecos sin texto: 05:00-10:00 (300 s), 14:10-36:46 (1356 s)" in result.stdout
+    assert "2 gaps without text: 05:00-10:00 (300 s), 14:10-36:46 (1356 s)" in result.stdout
 
 
 # --- 5.2.1 · los contratos de rango los valida typer, no la prosa del --help -----------
@@ -294,7 +294,7 @@ def test_diarize_marca_sospechoso_igual_que_sin_diarizar(tmp_path, monkeypatch):
     assert con.exit_code == 0
     texto = (tmp_path / "out.txt").read_text(encoding="utf-8")
     assert "[?] Gracias." in texto  # con el span recomprimido a 1 s, solo src_dur la marca
-    assert "Hablante 1" in texto
+    assert "Speaker 1" in texto
 
 
 # --- 5.2.4 · reporte de calidad de la diarización --------------------------------------
@@ -325,9 +325,9 @@ def test_reporte_diarizacion_sin_voces_registradas(tmp_path, monkeypatch):
     result = _invoke(audio, tmp_path, "--diarize")
     assert result.exit_code == 0
     salida = _plana(result.stdout)
-    assert "2 hablantes · 0% sin atribuir" in salida
-    assert "voces identificadas" not in salida  # sin registro, la cláusula no aplica
-    assert "mejor score" not in salida
+    assert "2 speakers · 0% unattributed" in salida
+    assert "voices identified" not in salida  # sin registro, la cláusula no aplica
+    assert "best score" not in salida
 
 
 def test_reporte_diarizacion_mejor_score_bajo_umbral(tmp_path, monkeypatch):
@@ -342,8 +342,8 @@ def test_reporte_diarizacion_mejor_score_bajo_umbral(tmp_path, monkeypatch):
     result = _invoke(audio, tmp_path, "--diarize")
     assert result.exit_code == 0
     salida = _plana(result.stdout)
-    assert "0 de 1 voces identificadas" in salida
-    assert "mejor score 0.32 < 0.50" in salida
+    assert "0 of 1 voices identified" in salida
+    assert "best score 0.32 < 0.50" in salida
 
 
 def test_reporte_diarizacion_sugiere_speakers_cuando_el_automatico_se_dispara(
@@ -357,7 +357,7 @@ def test_reporte_diarizacion_sugiere_speakers_cuando_el_automatico_se_dispara(
 
     result = _invoke(audio, tmp_path, "--diarize")
     assert result.exit_code == 0
-    assert "6 hablantes" in _plana(result.stdout)
+    assert "6 speakers" in _plana(result.stdout)
     assert "--speakers N" in result.stdout
 
     # Con el número fijado por el usuario la sugerencia no aplica.
@@ -373,16 +373,16 @@ def test_idioma_forzado_no_reporta_probabilidad(tmp_path, monkeypatch):
     # -l explícito: ahí no se detectó nada, se obedeció al usuario (el default es auto).
     audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0))
     result = _invoke(audio, tmp_path, "-l", "es")
-    assert "(forzado)" in result.stdout
+    assert "(forced)" in result.stdout
     assert "prob=" not in result.stdout
-    assert "Idioma detectado" not in result.stdout
+    assert "Language detected" not in result.stdout
 
 
 def test_idioma_auto_reporta_probabilidad(tmp_path, monkeypatch):
     info = _info(10.0, language="en", language_probability=0.87)
     audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], info)
     result = _invoke(audio, tmp_path, "-l", "auto")
-    assert "Idioma detectado" in result.stdout
+    assert "Language detected" in result.stdout
     assert "prob=0.87" in result.stdout
 
 
@@ -391,7 +391,7 @@ def test_idioma_auto_omite_probabilidad_desconocida(tmp_path, monkeypatch):
     info = _info(10.0, language="en", language_probability=None)
     audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], info)
     result = _invoke(audio, tmp_path, "-l", "auto")
-    assert "Idioma detectado" in result.stdout
+    assert "Language detected" in result.stdout
     assert "prob=" not in result.stdout
 
 
@@ -411,7 +411,7 @@ def test_oom_sale_con_mensaje_accionable(tmp_path, monkeypatch):
     audio = _fake_transcribe(monkeypatch, tmp_path, [], _info(2206.0), boom=boom)
     result = _invoke(audio, tmp_path)
     assert result.exit_code == 1
-    assert "memoria" in result.stdout
+    assert "memory" in result.stdout
     assert "medium" in result.stdout
 
 
@@ -432,7 +432,7 @@ def test_hotwords_con_whispercpp_rechaza_sin_construir(tmp_path, monkeypatch):
     audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0), calls=calls)
     result = _invoke(audio, tmp_path, "--engine", "whispercpp", "--hotwords", "Bézier")
     assert result.exit_code == 2
-    assert "--hotwords no tiene efecto" in result.stdout
+    assert "--hotwords has no effect" in result.stdout
     assert "faster-whisper" in result.stdout
     assert calls == []  # jamás llegó a el backend: ni modelo ni caché
 
@@ -442,7 +442,7 @@ def test_engine_invalido_falla(tmp_path, monkeypatch):
     audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0), calls=calls)
     result = _invoke(audio, tmp_path, "--engine", "chatgpt")
     assert result.exit_code == 2
-    assert "no existe" in result.stderr  # BadParameter nuestro, no "no such option"
+    assert "does not exist" in result.stderr  # BadParameter nuestro, no "no such option"
     assert calls == []
 
 
@@ -452,7 +452,7 @@ def test_compute_type_no_mapeable_con_whispercpp(tmp_path, monkeypatch):
     audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0), calls=calls)
     result = _invoke(audio, tmp_path, "--engine", "whispercpp", "--compute-type", "float16")
     assert result.exit_code == 2
-    assert "paging WDDM" in result.stderr  # el rechazo cita la medición, no un genérico
+    assert "WDDM paging" in result.stderr  # el rechazo cita la medición, no un genérico
     assert calls == []
 
 
@@ -461,7 +461,7 @@ def test_aviso_vad_con_whispercpp(tmp_path, monkeypatch):
     audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0))
     result = _invoke(audio, tmp_path, "--engine", "whispercpp", "--vad")
     assert result.exit_code == 0
-    assert "no trae VAD" in result.stdout
+    assert "has no VAD" in result.stdout
 
 
 def test_whispercpp_no_sugiere_no_vad(tmp_path, monkeypatch):
@@ -472,8 +472,8 @@ def test_whispercpp_no_sugiere_no_vad(tmp_path, monkeypatch):
     audio = _fake_transcribe(monkeypatch, tmp_path, segs, _info(2206.0))
     result = _invoke(audio, tmp_path, "--engine", "whispercpp")
     assert result.exit_code == 0
-    assert "1 hueco sin texto: 05:00-36:46 (1906 s)" in result.stdout
-    assert "prueba --no-vad" not in result.stdout
+    assert "1 gap without text: 05:00-36:46 (1906 s)" in result.stdout
+    assert "try --no-vad" not in result.stdout
 
 
 def test_aviso_diarize_con_whispercpp(tmp_path, monkeypatch):
@@ -486,7 +486,7 @@ def test_aviso_diarize_con_whispercpp(tmp_path, monkeypatch):
     audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0))
     result = _invoke(audio, tmp_path, "--engine", "whispercpp", "--diarize")
     assert result.exit_code == 0
-    assert "atribución por segmento" in result.stdout
+    assert "per-segment attribution" in result.stdout
 
 
 def test_clamp_jobs_con_whispercpp_cuda(tmp_path, monkeypatch):
@@ -504,7 +504,7 @@ def test_resumen_incluye_motor_default(tmp_path, monkeypatch):
     result = _invoke(audio, tmp_path)
     assert result.exit_code == 0
     assert "faster-whisper" in result.stdout  # el resumen declara el motor, siempre
-    assert "Motor whisper.cpp" not in result.stdout  # header extra solo si no es default
+    assert "Engine whisper.cpp" not in result.stdout  # header extra solo si no es default
 
 
 def test_resumen_y_header_con_whispercpp(tmp_path, monkeypatch):
@@ -582,7 +582,7 @@ def test_whispercpp_rechaza_modelo_no_pinneado(tmp_path, monkeypatch):
     audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0), calls=calls)
     result = _invoke(audio, tmp_path, "--engine", "whispercpp", "-m", "medium")
     assert result.exit_code == 2
-    assert "no está pinneado" in result.stderr
+    assert "is not pinned" in result.stderr
     assert "large-v3" in result.stderr and "small" in result.stderr
     assert calls == []  # el backend jamas se llamo
 
@@ -710,12 +710,12 @@ def test_bench_config_con_error_sale_marcada(tmp_path, monkeypatch):
 
     monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
     rota = _bench_row(model="medium", load_s=None, transcribe_s=None, x_realtime=None,
-                      peak_ram_mb=None, segments=None, chars=None, error="hijo murio rc=1")
+                      peak_ram_mb=None, segments=None, chars=None, error="child died rc=1")
     benchmark.write_table(_bench_table([_bench_row(), rota]))
     result = runner.invoke(app, ["bench", "--show"])
     assert result.exit_code == 0
-    assert "hijo murio" in result.stdout  # la fila rota se ve, no se oculta
-    assert "1 con error" in result.stdout
+    assert "child died" in result.stdout  # la fila rota se ve, no se oculta
+    assert "1 with errors" in result.stdout
 
 
 def test_whispercpp_avisa_el_remapeo_de_device(tmp_path, monkeypatch):
@@ -724,11 +724,11 @@ def test_whispercpp_avisa_el_remapeo_de_device(tmp_path, monkeypatch):
     audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0))
     result = _invoke(audio, tmp_path, "--engine", "whispercpp", "-d", "cpu")
     assert result.exit_code == 0
-    assert "corre en la GPU; device=cuda" in result.stdout
+    assert "runs on the GPU; device=cuda" in result.stdout
 
     result = _invoke(audio, tmp_path, "--engine", "whispercpp", "-d", "cuda")
     assert result.exit_code == 0
-    assert "corre en la GPU" not in result.stdout  # quien pidio cuda no recibe ruido
+    assert "runs on the GPU" not in result.stdout  # quien pidio cuda no recibe ruido
 
 
 def test_bench_quick_documenta_las_saltadas_en_skipped(tmp_path, monkeypatch):
@@ -767,8 +767,8 @@ def test_bench_quick_documenta_las_saltadas_en_skipped(tmp_path, monkeypatch):
     assert result.exit_code == 0
     tabla = json.loads((tmp_path / "home" / "bench.json").read_text(encoding="utf-8"))
     razones = {(s["engine"], s["model"]): s["reason"] for s in tabla["skipped"]}
-    assert razones[("faster-whisper", "medium")] == "saltada por --quick"
-    assert razones[("faster-whisper", "large-v3")] == "saltada por --quick"
+    assert razones[("faster-whisper", "medium")] == "skipped by --quick"
+    assert razones[("faster-whisper", "large-v3")] == "skipped by --quick"
 
 
 def test_bench_ffmpeg_roto_sale_con_mensaje(tmp_path, monkeypatch):
@@ -782,12 +782,12 @@ def test_bench_ffmpeg_roto_sale_con_mensaje(tmp_path, monkeypatch):
     from speechtotext.cli import app as app_mod
 
     def boom(wav, s):
-        raise RuntimeError("ffmpeg no pudo recortar el audio: pista corrupta")
+        raise RuntimeError("ffmpeg could not clip the audio: corrupt track")
 
     monkeypatch.setattr(app_mod, "_trim_wav", boom)
     result = runner.invoke(app, ["bench", str(audio)])
     assert result.exit_code == 1
-    assert "No se pudo recortar" in result.stdout
+    assert "Could not clip" in result.stdout
 
 
 def test_troceado_anuncia_y_lista_cada_trozo_fuera_de_tty(tmp_path, monkeypatch):
@@ -800,7 +800,7 @@ def test_troceado_anuncia_y_lista_cada_trozo_fuera_de_tty(tmp_path, monkeypatch)
     result = _invoke(audio, tmp_path, "-j", "2")
     assert result.exit_code == 0, result.stdout
     salida = _plana(result.stdout)
-    assert "Troceado (jobs=2)" in salida
+    assert "Chunked (jobs=2)" in salida
     assert "[1/2]" in salida and "[2/2]" in salida
     assert "(nuevo)" in salida
 
@@ -821,15 +821,15 @@ def test_defaults_del_cli_son_los_del_spec(tmp_path, monkeypatch):
     assert payload["engine"]["model"] == "large-v3"
     assert payload["engine"]["device"] == "cpu"      # conftest: máquina sin GPU
     assert payload["engine"]["selection"] == "auto"
-    assert "Idioma detectado" in result.stdout
-    assert "motor faster-whisper" in _plana(result.stdout)
+    assert "Language detected" in result.stdout
+    assert "engine faster-whisper" in _plana(result.stdout)
 
 
 def test_eta_se_imprime_tras_decodificar(tmp_path, monkeypatch):
     audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(600.0))
     result = _invoke(audio, tmp_path)
     assert result.exit_code == 0, result.stdout
-    assert "Duración 10.0 min · ETA ~8 min (estimado)" in _plana(result.stdout)
+    assert "Duration 10.0 min · ETA ~8 min (estimated)" in _plana(result.stdout)
 
 
 def test_eta_medida_con_bench_no_dice_estimado(tmp_path, monkeypatch):
@@ -841,23 +841,23 @@ def test_eta_medida_con_bench_no_dice_estimado(tmp_path, monkeypatch):
         "skipped": [], "recommendations": []})
     audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(600.0))
     result = _invoke(audio, tmp_path)
-    assert "ETA ~5 min (medido con bench)" in _plana(result.stdout)
+    assert "ETA ~5 min (measured with bench)" in _plana(result.stdout)
 
 
 def test_ruta_sin_eta_lo_dice(tmp_path, monkeypatch):
     audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(60.0))
     result = _invoke(audio, tmp_path, "-m", "medium")
-    assert "ETA sin medir para esta ruta" in _plana(result.stdout)
+    assert "ETA not measured for this route" in _plana(result.stdout)
 
 
 def test_idioma_dudoso_sugiere_fijarlo(tmp_path, monkeypatch):
     info = _info(10.0, language="pt", language_probability=0.41)
     audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], info)
     result = _invoke(audio, tmp_path)
-    assert "prob=0.41" in result.stdout and "fíjalo con -l" in result.stdout
+    assert "prob=0.41" in result.stdout and "set it with -l" in result.stdout
     info = _info(10.0, language="pt", language_probability=0.9)
     audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], info)
-    assert "fíjalo con -l" not in _invoke(audio, tmp_path).stdout
+    assert "set it with -l" not in _invoke(audio, tmp_path).stdout
 
 
 def test_modelo_que_no_cabe_en_ram_corta_sin_cambiarlo(tmp_path, monkeypatch):
@@ -868,7 +868,7 @@ def test_modelo_que_no_cabe_en_ram_corta_sin_cambiarlo(tmp_path, monkeypatch):
     monkeypatch.setattr(probe, "machine", lambda: probe.Machine("win32", 4, 4.0, False, None, None, None))
     result = _invoke(audio, tmp_path)
     assert result.exit_code == 1
-    assert "large-v3 necesita ~6 GB" in result.stdout and "-m small" in result.stdout
+    assert "large-v3 needs ~6 GB" in result.stdout and "-m small" in result.stdout
     assert calls == []
 
 
@@ -883,8 +883,8 @@ def test_la_ruta_auto_avisa_y_anuncia_la_descarga_de_whispercpp(tmp_path, monkey
     result = _invoke(audio, tmp_path, "-f", "json")
     assert result.exit_code == 0, result.stdout
     salida = _plana(result.stdout)
-    assert "GPU con 3.5 GB libres: whisper.cpp cuantizado" in salida
-    assert "whisper.cpp v1.9.1 no está instalado: se descarga ahora (~646 MB, una sola vez)" in salida
+    assert "GPU with 3.5 GB free: quantized whisper.cpp" in salida
+    assert "whisper.cpp v1.9.1 is not installed: downloading now (~646 MB, once)" in salida
     payload = json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))
     assert (payload["engine"]["name"], payload["engine"]["device"]) == ("whispercpp", "cuda")
 
@@ -898,7 +898,7 @@ def test_whispercpp_ya_instalado_no_anuncia_descarga(tmp_path, monkeypatch):
     monkeypatch.setattr(probe, "machine", lambda: probe.Machine(
         "win32", 12, 32.0, True, "GTX 980", 3.5, Path("C:/x/whisper-cli.exe")))
     result = _invoke(audio, tmp_path)
-    assert result.exit_code == 0 and "se descarga ahora" not in result.stdout
+    assert result.exit_code == 0 and "downloading now" not in result.stdout
 
 
 # --- probe y models ------------------------------------------------------------------------
@@ -916,10 +916,10 @@ def test_probe_imprime_maquina_y_rutas(monkeypatch):
     # alineado de columnas del comando real usa varios espacios, pero aquí solo sobrevive uno.
     assert "platform win32" in salida and "ram_gb 31.9" in salida
     assert "gpu GTX 980" in salida and "vram_free 3.46 GB" in salida
-    assert "whispercpp no instalado" in salida
-    assert ("large-v3 whispercpp · cuda · q5_0 · ~8.0x tiempo real (estimado) · "
-            "GPU con 3.5 GB libres: whisper.cpp cuantizado") in salida
-    assert "small whispercpp · cuda · q5_0 · ~15.6x tiempo real (estimado)" in salida
+    assert "whispercpp not installed" in salida
+    assert ("large-v3 whispercpp · cuda · q5_0 · ~8.0x real time (estimated) · "
+            "GPU with 3.5 GB free: quantized whisper.cpp") in salida
+    assert "small whispercpp · cuda · q5_0 · ~15.6x real time (estimated)" in salida
 
 
 def test_probe_dice_cuando_el_modelo_no_cabe(monkeypatch):
@@ -929,8 +929,8 @@ def test_probe_dice_cuando_el_modelo_no_cabe(monkeypatch):
     result = runner.invoke(app, ["probe"])
     assert result.exit_code == 0, result.stdout
     salida = _plana(result.stdout)
-    assert "large-v3 large-v3 necesita ~6 GB" in salida
-    assert "small faster-whisper · cpu · int8 · ~6.4x tiempo real (estimado) · sin GPU utilizable: CPU" in salida
+    assert "large-v3 large-v3 needs ~6 GB" in salida
+    assert "small faster-whisper · cpu · int8 · ~6.4x real time (estimated) · no usable GPU: CPU" in salida
     assert "ram_gb 4.0" in salida
 
 
@@ -939,7 +939,7 @@ def test_probe_sin_medidas_no_inventa(monkeypatch):
 
     monkeypatch.setattr(probe, "machine", lambda: probe.Machine("darwin", 8, None, False, None, None, None))
     salida = _plana(runner.invoke(app, ["probe"]).stdout)
-    assert "ram_gb sin medir" in salida and "vram_free -" in salida and "gpu -" in salida
+    assert "ram_gb not measured" in salida and "vram_free -" in salida and "gpu -" in salida
 
 
 def _models_doble(monkeypatch, instalados=(), size=None, boom=None):
@@ -985,15 +985,15 @@ def test_models_lista_tabla(monkeypatch, tmp_path):
     result = runner.invoke(app, ["models"])
     assert result.exit_code == 0, result.stdout
     salida = _plana(result.stdout)
-    assert "large-v3" in salida and "2.9 GB" in salida and "465 MB" in salida and "sí" in salida
-    assert "Datos en" in salida
+    assert "large-v3" in salida and "2.9 GB" in salida and "465 MB" in salida and "yes" in salida
+    assert "Data in" in salida
 
 
 def test_models_pull_anuncia_tamano_y_baja(monkeypatch):
     visto = _models_doble(monkeypatch, size=3_090_839_273)
     result = runner.invoke(app, ["models", "pull", "large-v3"])
     assert result.exit_code == 0, result.stdout
-    assert "Descargando large-v3 (faster-whisper, ~2.9 GB)" in _plana(result.stdout)
+    assert "Downloading large-v3 (faster-whisper, ~2.9 GB)" in _plana(result.stdout)
     assert visto["ensure"] == ("faster-whisper", "large-v3")
     result = runner.invoke(app, ["models", "pull", "small", "--engine", "whispercpp"])
     assert result.exit_code == 0 and visto["ensure"] == ("whispercpp", "small")
@@ -1002,7 +1002,7 @@ def test_models_pull_anuncia_tamano_y_baja(monkeypatch):
 def test_models_pull_sin_tamano_no_inventa(monkeypatch):
     _models_doble(monkeypatch, size=None)
     result = runner.invoke(app, ["models", "pull", "small"])
-    assert "Descargando small (faster-whisper)..." in _plana(result.stdout)
+    assert "Downloading small (faster-whisper)..." in _plana(result.stdout)
 
 
 def test_models_pull_fallo_de_descarga_sale_1(monkeypatch):
@@ -1040,7 +1040,7 @@ def test_engine_whispercpp_explicito_con_jobs_avisa(tmp_path, monkeypatch):
     audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0))
     result = _invoke(audio, tmp_path, "--engine", "whispercpp", "-j", "4")
     assert result.exit_code == 0, result.stdout
-    assert "la GPU no paraleliza; jobs=1" in result.stdout
+    assert "the GPU does not parallelize; jobs=1" in result.stdout
 
 
 # --- I4/I5 · una sola sonda, selection fiel a quién eligió el motor -------------------

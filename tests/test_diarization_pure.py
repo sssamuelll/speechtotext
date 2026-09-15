@@ -138,8 +138,8 @@ def test_apply_names_propaga_src_dur():
 
 
 def test_humanize_speaker():
-    assert humanize_speaker("SPEAKER_00") == "Hablante 1"
-    assert humanize_speaker("SPEAKER_01") == "Hablante 2"
+    assert humanize_speaker("SPEAKER_00") == "Speaker 1"
+    assert humanize_speaker("SPEAKER_01") == "Speaker 2"
     assert humanize_speaker("raro") == "raro"
 
 
@@ -151,4 +151,4 @@ def test_apply_names_maps_and_humanizes():
         LabeledSegment(2, 3, "...", None),
     ]
     out = apply_names(labeled, {"SPEAKER_00": "Alice"})
-    assert [s.speaker for s in out] == ["Alice", "Hablante 2", None]
+    assert [s.speaker for s in out] == ["Alice", "Speaker 2", None]

@@ -70,7 +70,7 @@ def make_backend(engine: str, model: str, device: str, compute_type: str, jobs: 
         from speechtotext.asr.whispercpp import WhisperCppBackend
 
         return WhisperCppBackend(model)
-    raise ValueError(f"engine desconocido: {engine!r}; disponibles: {ENGINES}")
+    raise ValueError(f"unknown engine: {engine!r}; available: {ENGINES}")
 
 
 def load_audio(path: Path) -> np.ndarray:
@@ -138,19 +138,19 @@ def _apply_caps(backend: AsrBackend, request: TranscriptionRequest
     """Contrato de capacidades: se aplica ANTES de construir modelo alguno."""
     warnings: list[str] = []
     eff = request
-    if request.hotwords and backend.caps.hotwords == "rechazado":
+    if request.hotwords and backend.caps.hotwords == "rejected":
         raise AsrError(
             "unsupported_option", False,
-            f"--hotwords no tiene efecto con {backend.backend_id} (--prompt es inerte con "
-            "-mc 0, medido 2026-07-27); usa --engine faster-whisper",
+            f"--hotwords has no effect with {backend.backend_id} (--prompt is inert with "
+            "-mc 0, measured 2026-07-27); use --engine faster-whisper",
         )
-    if request.vad and backend.caps.vad == "degradado":
+    if request.vad and backend.caps.vad == "degraded":
         eff = replace(eff, vad=False)
-        warnings.append(f"{backend.backend_id} no trae VAD; se transcribe sin filtro")
-    if request.word_timestamps and backend.caps.word_timestamps == "degradado":
+        warnings.append(f"{backend.backend_id} has no VAD; transcribing unfiltered")
+    if request.word_timestamps and backend.caps.word_timestamps == "degraded":
         eff = replace(eff, word_timestamps=False)
         warnings.append(
-            "atribución por segmento (gruesa), sin cortes intra-segmento; la marca [?] queda activa"
+            "per-segment attribution (coarse), no intra-segment cuts; the [?] mark stays active"
         )
     return eff, tuple(warnings)
 
@@ -162,11 +162,11 @@ def _oom(exc: RuntimeError, engine: str) -> RuntimeError:
     if "alloc" not in str(exc).lower():
         return exc
     if engine == ENGINE_WHISPERCPP:
-        consejo = ("La VRAM de la GPU se agotó. Cierra aplicaciones que usen la GPU, "
-                   "prueba un modelo menor o usa --engine faster-whisper (CPU).")
+        consejo = ("The GPU ran out of VRAM. Close applications that use the GPU, "
+                   "try a smaller model, or use --engine faster-whisper (CPU).")
     else:
-        consejo = ("large-v3 pide ~3.5 GB sólo al cargar. Cierra procesos o usa -m medium. "
-                   "No cubre la muerte nativa de --diarize.")
+        consejo = ("large-v3 needs ~3.5 GB just to load. Close other processes or use -m medium. "
+                   "This does not cover --diarize's own native crash.")
     return AsrError("out_of_memory", False, f"{exc}\n{consejo}")
 
 
@@ -193,7 +193,7 @@ def _run_span(backend, samples, request, start, end, identity, cancel):
     """(segmentos globales, desde_cache, idioma, probabilidad, avisos del motor). El
     checkpoint viejo puede traer un fantasma sobre el relleno: clip_to_end tambien al leer."""
     if cancel is not None and cancel.is_set():
-        raise AsrError("cancelled", True, "transcripción cancelada")
+        raise AsrError("cancelled", True, "transcription cancelled")
     path = chunk_path(identity, start, end) if identity is not None else None
     if path is not None and path.exists():
         try:
@@ -220,7 +220,7 @@ def _diarize(samples, segments, speakers, identify, threshold):
         turns, clusters = diarization.diarize(samples, SAMPLE_RATE, num_speakers=speakers)
     except ImportError as exc:
         raise AsrError("diarize_unavailable", False,
-                       'falta el extra de diarización: pip install -e ".[diarize]"') from exc
+                       'the diarization extra is missing: pip install -e ".[diarize]"') from exc
     except Exception as exc:
         raise AsrError("diarize_failed", False, str(exc)) from exc
     labeled = diarization.assign_segments(segments, turns)
@@ -271,7 +271,7 @@ def transcribe(
 
     def check_cancel() -> None:
         if cancel is not None and cancel.is_set():
-            raise AsrError("cancelled", True, "transcripción cancelada")
+            raise AsrError("cancelled", True, "transcription cancelled")
 
     # La ruta se resuelve ANTES de decodificar: un --engine inexistente o un modelo que no
     # cabe corta en milisegundos, no tras decodificar una hora de audio. Quien ya sondeó
@@ -349,7 +349,7 @@ def transcribe(
                 if len(spans) == 1:
                     raise
                 raise AsrError("backend_failed", True,
-                               f"motor {backend.backend_id} fallo en el trozo {i + 1}/{len(spans)} "
+                               f"engine {backend.backend_id} failed on chunk {i + 1}/{len(spans)} "
                                f"({_mmss(s)}-{_mmss(e)}): {exc}") from exc
             for w in span_warnings:
                 aviso = f"{backend.backend_id}: {w}"

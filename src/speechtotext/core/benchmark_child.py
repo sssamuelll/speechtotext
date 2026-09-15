@@ -107,8 +107,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if len(args) != 5:
             raise ValueError(
-                f"uso: python -m speechtotext.core.benchmark_child engine model device "
-                f"compute_type wav (recibidos {len(args)} args)"
+                f"usage: python -m speechtotext.core.benchmark_child engine model device "
+                f"compute_type wav (received {len(args)} args)"
             )
         from speechtotext.core.transcribe import make_backend
 

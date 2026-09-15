@@ -33,8 +33,8 @@ def _caps(backend_cls, native_signals: bool) -> dict:
     """La tabla de capacidades sale del Caps del backend: un solo punto de verdad.
     native_signals no es un knob de Caps (no se pide, se emite): literal aquí, medido."""
     c = backend_cls.caps
-    return {"hotwords": c.hotwords == "honrado", "word_timestamps": c.word_timestamps == "honrado",
-            "native_signals": native_signals, "vad": c.vad == "honrado"}
+    return {"hotwords": c.hotwords == "honored", "word_timestamps": c.word_timestamps == "honored",
+            "native_signals": native_signals, "vad": c.vad == "honored"}
 
 
 _CAPS = {
@@ -86,11 +86,11 @@ def available_configs() -> tuple[list[dict], list[dict]]:
     """(viables, skipped): whispercpp solo con binario instalado y GPU NVIDIA que responda."""
     m = probe.machine()
     if m.whispercpp is None:
-        wcpp_reason = "whisper-cli ausente (ni pinneado ni en el PATH)"
+        wcpp_reason = "whisper-cli missing (not pinned, not on the PATH)"
     elif m.platform == "win32" and not m.cuda:
         # El build pinneado es CUDA: sin nvidia-smi no corre. Fuera de win32 el binario
         # del PATH decide (Metal/CUDA/CPU) y basta con que exista.
-        wcpp_reason = "nvidia-smi no responde (sin GPU NVIDIA utilizable)"
+        wcpp_reason = "nvidia-smi is not responding (no usable NVIDIA GPU)"
     else:
         wcpp_reason = None
     viables: list[dict] = []
@@ -179,17 +179,17 @@ def run_config(config: dict, wav_path, duration_s: float, *, run=None,
     try:
         proc = run(argv, capture_output=True, text=True, timeout=timeout_s)
     except subprocess.TimeoutExpired:
-        result["error"] = f"timeout: la config no termino en {timeout_s} s"
+        result["error"] = f"timeout: the config did not finish in {timeout_s} s"
         return result
     except OSError as exc:
-        result["error"] = f"no se pudo lanzar el hijo: {exc}"
+        result["error"] = f"could not launch the child process: {exc}"
         return result
     finally:
         if poller:
             result["peak_vram_mb"] = poller.stop()
     if proc.returncode != 0:
         tail = "\n".join((proc.stderr or "").splitlines()[-5:])
-        result["error"] = f"hijo murio con rc={proc.returncode}: {tail}"
+        result["error"] = f"child process died with rc={proc.returncode}: {tail}"
         return result
     # El hijo emite UNA linea JSON al final; lo anterior en stdout (si lo hay) es ruido
     # de las libs del motor.
@@ -197,7 +197,7 @@ def run_config(config: dict, wav_path, duration_s: float, *, run=None,
     try:
         payload = json.loads(lines[-1])
     except (IndexError, json.JSONDecodeError):
-        result["error"] = f"salida del hijo no es JSON: {(proc.stdout or '')[-200:]!r}"
+        result["error"] = f"child process output is not JSON: {(proc.stdout or '')[-200:]!r}"
         return result
     if payload.get("error"):
         result["error"] = payload["error"]
@@ -231,38 +231,38 @@ def _sha1(path) -> str:
 USE_CASES = (
     {
         "caso": "conversacion_en_vivo",
-        "que": "Conversación por voz: motor residente, una frase corta cada vez",
+        "que": "Voice conversation: resident engine, one short sentence at a time",
         "requisitos": {"engine": "faster-whisper"},
         "criterio": "mas_rapido",
     },
     {
         "caso": "dictado_por_voz",
-        "que": "Dictado: mas precision que conversacion con latencia todavia comoda",
+        "que": "Dictation: more accurate than conversation, latency still comfortable",
         "requisitos": {"engine": "faster-whisper"},
         "criterio": "equilibrio",
     },
     {
         "caso": "transcripcion_maxima_calidad",
-        "que": "Transcribir archivos con la mejor calidad disponible",
+        "que": "Transcribing files at the best quality available",
         "requisitos": {},
         "criterio": "mejor_calidad",
     },
     {
         "caso": "transcripcion_con_diarizacion_fina",
-        "que": "Quien-dijo-que palabra a palabra (--diarize fino, corta en el cambio de voz)",
+        "que": "Who-said-what, word by word (fine --diarize, cuts on the speaker change)",
         "requisitos": {"word_timestamps": True},
         "criterio": "mejor_calidad",
     },
     {
         "caso": "audio_con_nombres_propios",
-        "que": ("Audio lleno de nombres/jerga: --hotwords existe, pero medidos produjeron apagones "
-                "en bloque (n=3, 2026-09-11); compara contra una corrida sin ellos"),
+        "que": ("Audio full of names/jargon: --hotwords exists, but measured runs produced "
+                "blackouts (n=3, 2026-09-11); compare against a run without them"),
         "requisitos": {"hotwords": True},
         "criterio": "mejor_calidad",
     },
     {
         "caso": "borrador_rapido",
-        "que": "Texto aproximado lo antes posible, la calidad es secundaria",
+        "que": "Rough text as fast as possible, quality is secondary",
         "requisitos": {},
         "criterio": "mas_rapido",
     },
@@ -283,20 +283,20 @@ def _elegir(candidatas: list[dict], criterio: str) -> tuple[dict | None, str]:
     """(ganadora, motivo). Los motivos citan numeros MEDIDOS: la recomendacion debe
     poder defenderse sola ante quien lea la tabla."""
     if not candidatas:
-        return None, "ninguna config medida cumple los requisitos en esta maquina"
+        return None, "no measured config meets the requirements on this machine"
     rapida = max(candidatas, key=lambda r: r["x_realtime"])
     con_wer = [r for r in candidatas if r.get("wer_ref") is not None]
     if criterio == "mas_rapido":
-        return rapida, f"la mas rapida que cumple: {rapida['x_realtime']}x tiempo real"
+        return rapida, f"the fastest that qualifies: {rapida['x_realtime']}x real time"
     if criterio == "mejor_calidad":
         if not con_wer:
             return rapida, (
-                f"sin WER medido entre las candidatas; se elige la mas rapida "
+                f"no measured WER among the candidates; picking the fastest "
                 f"({rapida['x_realtime']}x)"
             )
         mejor = min(con_wer, key=lambda r: (r["wer_ref"], -r["x_realtime"]))
         return mejor, (
-            f"mejor WER medido ({mejor['wer_ref']}) a {mejor['x_realtime']}x tiempo real"
+            f"best measured WER ({mejor['wer_ref']}) at {mejor['x_realtime']}x real time"
         )
     if criterio == "equilibrio":
         # ponytail: "comodo" = >= 10x tiempo real; umbral a ojo sobre lo medido hoy,
@@ -305,14 +305,14 @@ def _elegir(candidatas: list[dict], criterio: str) -> tuple[dict | None, str]:
         if comodas:
             mejor = min(comodas, key=lambda r: r["wer_ref"])
             return mejor, (
-                f"mejor WER ({mejor['wer_ref']}) manteniendo >= 10x tiempo real "
+                f"best WER ({mejor['wer_ref']}) while staying >= 10x real time "
                 f"({mejor['x_realtime']}x)"
             )
         if con_wer:
             mejor = min(con_wer, key=lambda r: r["wer_ref"])
-            return mejor, f"mejor WER medido ({mejor['wer_ref']}); ninguna llega a 10x"
-        return rapida, f"sin WER medido; la mas rapida ({rapida['x_realtime']}x)"
-    return None, f"criterio desconocido: {criterio}"
+            return mejor, f"best measured WER ({mejor['wer_ref']}); none reaches 10x"
+        return rapida, f"no measured WER; the fastest ({rapida['x_realtime']}x)"
+    return None, f"unknown criterion: {criterio}"
 
 
 def recommend(results: list[dict]) -> list[dict]:

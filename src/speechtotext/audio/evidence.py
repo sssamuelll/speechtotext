@@ -57,13 +57,13 @@ class VoiceEvidence:
         for nombre in ("voice_band_ratio", "voiced_ratio", "spectral_flatness"):
             v = getattr(self, nombre)
             if v is not None and not (math.isfinite(v) and 0.0 <= v <= 1.0):
-                raise ValueError(f"{nombre} debe estar en [0, 1] o ser None")
+                raise ValueError(f"{nombre} must be in [0, 1] or None")
         if self.f0_median_hz is not None and not (
             math.isfinite(self.f0_median_hz) and self.f0_median_hz > 0.0
         ):
-            raise ValueError("f0_median_hz debe ser positivo y finito, o None")
+            raise ValueError("f0_median_hz must be positive and finite, or None")
         if type(self.frames) is not int or self.frames < 0:
-            raise ValueError("frames debe ser un entero no negativo")
+            raise ValueError("frames must be a non-negative integer")
 
 
 def _normalized_autocorrelation(frames: np.ndarray) -> np.ndarray:
@@ -89,15 +89,15 @@ def _normalized_autocorrelation(frames: np.ndarray) -> np.ndarray:
 def compute_voice_evidence(samples: np.ndarray, sample_rate: int) -> VoiceEvidence:
     x = np.asarray(samples, dtype=np.float64)
     if x.ndim != 1:
-        raise ValueError("samples debe ser mono (1-D)")
+        raise ValueError("samples must be mono (1-D)")
     if sample_rate <= 0 or not np.isfinite(x).all():
-        raise ValueError("audio y sample_rate deben ser validos")
+        raise ValueError("audio and sample_rate must be valid")
     frame = round(sample_rate * FRAME_S)
     hop = max(1, round(sample_rate * HOP_S))
     lag_min = int(np.floor(sample_rate / F0_RANGE_HZ[1]))
     lag_max = int(np.ceil(sample_rate / F0_RANGE_HZ[0]))
     if lag_min < 1 or lag_max + 2 > frame:
-        raise ValueError("sample_rate demasiado baja para resolver F0 en 70-350 Hz")
+        raise ValueError("sample_rate too low to resolve F0 in 70-350 Hz")
     if len(x) < frame:
         return VoiceEvidence(None, None, None, None, 0)
 

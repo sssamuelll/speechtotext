@@ -69,7 +69,7 @@ def test_decode_audio_concatena_float32_mono():
 
 
 def test_decode_audio_rechaza_archivo_sin_stream():
-    with pytest.raises(AudioDecodeError, match="stream de audio"):
+    with pytest.raises(AudioDecodeError, match="no audio stream"):
         decode_audio(
             io.BytesIO(b"leased-video"),
             sample_rate=16000,
@@ -78,7 +78,7 @@ def test_decode_audio_rechaza_archivo_sin_stream():
 
 
 def test_decode_audio_rechaza_decode_vacio():
-    with pytest.raises(AudioDecodeError, match="sin muestras"):
+    with pytest.raises(AudioDecodeError, match="no samples"):
         decode_audio(
             io.BytesIO(b"leased-empty"),
             sample_rate=16000,
@@ -92,6 +92,6 @@ def test_decode_audio_rechaza_decode_vacio():
 )
 def test_decode_audio_rechaza_paths_y_texto_antes_de_av_open(invalid_stream):
     av_module = _av([])
-    with pytest.raises(TypeError, match="stream binario leased"):
+    with pytest.raises(TypeError, match="leased, seekable binary stream"):
         decode_audio(invalid_stream, sample_rate=16000, av_module=av_module)
     assert av_module.opened == []

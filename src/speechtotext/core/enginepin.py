@@ -85,7 +85,7 @@ def _verified(path: Path, expected: str, what: str) -> Path:
     actual = _sha256_file(path)
     if actual != expected:
         raise RuntimeError(
-            f"sha256 de {what} no cuadra con el pin: esperado {expected}, obtenido {actual} ({path})"
+            f"sha256 of {what} does not match the pin: expected {expected}, got {actual} ({path})"
         )
     marker.write_text(expected, encoding="utf-8")
     return path
@@ -100,8 +100,8 @@ def _download_and_extract(root: Path) -> None:
         actual = _sha256_file(Path(tmp))
         if actual != ENGINE_PIN["zip_sha256"]:
             raise RuntimeError(
-                f"sha256 del zip de whisper.cpp no cuadra con el pin: esperado "
-                f"{ENGINE_PIN['zip_sha256']}, obtenido {actual}; no se extrae nada"
+                f"sha256 of the whisper.cpp zip does not match the pin: expected "
+                f"{ENGINE_PIN['zip_sha256']}, got {actual}; extracting nothing"
             )
         # El zip ya esta verificado; se extrae conservando el prefijo Release/ tal cual
         # (decision de layout: cero codigo de aplanado, el pin apunta adentro).
@@ -123,9 +123,9 @@ def ensure_engine(root: Path | None = None) -> Path:
         if not found:
             raise AsrError(
                 "backend_failed", False,
-                "whisper-cli no está en el PATH. Instálalo: brew install whisper-cpp (macOS) o "
-                "compílalo desde https://github.com/ggml-org/whisper.cpp (Linux); "
-                "o usa --engine faster-whisper",
+                "whisper-cli is not on the PATH. Install it: brew install whisper-cpp (macOS) or "
+                "build it from https://github.com/ggml-org/whisper.cpp (Linux); "
+                "or use --engine faster-whisper",
             )
         return Path(found)
     root = Path(root) if root is not None else install_root()
@@ -143,7 +143,7 @@ def ensure_model(name: str, root: Path | None = None) -> Path:
     pin = MODELS_PIN.get(key)
     if pin is None:
         raise RuntimeError(
-            f"modelo {name!r} no esta pinneado para whispercpp; disponibles: "
+            f"model {name!r} is not pinned for whispercpp; available: "
             f"{', '.join(sorted(_MODEL_ALIAS))}"
         )
     root = Path(root) if root is not None else install_root()

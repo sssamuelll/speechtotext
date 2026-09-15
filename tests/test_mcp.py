@@ -96,7 +96,7 @@ def test_find_devuelve_las_regiones_sin_extraer(monkeypatch, tmp_path):
 
     salida = mcp_server.find(str(audio), "presupuesto")
 
-    assert salida["index"] == "caché"
+    assert salida["index"] == "cached"
     assert salida["regions"] == [
         {"start": 10.0, "end": 70.0, "hits": 3, "matches": 3, "snippet": "…presupuesto…"}
     ]

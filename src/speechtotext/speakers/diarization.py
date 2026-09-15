@@ -81,7 +81,7 @@ def humanize_speaker(speaker_id: str) -> str:
         n = int(speaker_id.rsplit("_", 1)[-1])
     except (ValueError, IndexError):
         return speaker_id
-    return f"Hablante {n + 1}"
+    return f"Speaker {n + 1}"
 
 
 def apply_names(
@@ -194,6 +194,6 @@ def embed_voice(wav_path):
     _, embeddings = diarize(samples, sample_rate, num_speakers=1)
     if not embeddings:
         raise ValueError(
-            "no se pudo extraer un embedding de voz (audio muy corto o sin voz)"
+            "could not extract a voice embedding (audio too short or no speech)"
         )
     return next(iter(embeddings.values()))

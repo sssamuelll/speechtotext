@@ -142,10 +142,10 @@ def _fw_device(m: Machine) -> tuple[str, str]:
     """(device, razón) para faster-whisper cuando el usuario dejó device='auto'."""
     free = m.vram_free_gb if m.cuda else None
     if free is not None and free >= VRAM_FW_GB:
-        return "cuda", f"GPU con {free:.1f} GB libres"
+        return "cuda", f"GPU with {free:.1f} GB free"
     if free is not None:
-        return "cpu", f"GPU con {free:.1f} GB libres no alcanza para faster-whisper en float16: CPU"
-    return "cpu", "sin GPU utilizable: CPU"
+        return "cpu", f"GPU with {free:.1f} GB free isn't enough for faster-whisper in float16: CPU"
+    return "cpu", "no usable GPU: CPU"
 
 
 def _auto(m: Machine, model: str, device: str) -> tuple[str, str, str]:
@@ -158,13 +158,13 @@ def _auto(m: Machine, model: str, device: str) -> tuple[str, str, str]:
 
     free = m.vram_free_gb if m.cuda else None
     if free is not None and free >= VRAM_FW_GB:
-        return ENGINE_FASTER, "cuda", f"GPU con {free:.1f} GB libres"
+        return ENGINE_FASTER, "cuda", f"GPU with {free:.1f} GB free"
     if (free is not None and free >= VRAM_WCPP_GB and model in _MODEL_ALIAS
             and (m.whispercpp is not None or m.platform == "win32")):
-        return ENGINE_WHISPERCPP, "auto", f"GPU con {free:.1f} GB libres: whisper.cpp cuantizado"
+        return ENGINE_WHISPERCPP, "auto", f"GPU with {free:.1f} GB free: quantized whisper.cpp"
     if free is not None:
-        return ENGINE_FASTER, "cpu", f"GPU con {free:.1f} GB libres no alcanza para {model}: CPU"
-    return ENGINE_FASTER, "cpu", "sin GPU utilizable: CPU"
+        return ENGINE_FASTER, "cpu", f"GPU with {free:.1f} GB free isn't enough for {model}: CPU"
+    return ENGINE_FASTER, "cpu", "no usable GPU: CPU"
 
 
 def choose_route(m: Machine, model: str, *, engine: str = "auto", device: str = "auto",
@@ -173,13 +173,13 @@ def choose_route(m: Machine, model: str, *, engine: str = "auto", device: str = 
     imposibles; AsrError("insufficient_resources") si el modelo no cabe en RAM — el sondeo
     NUNCA cambia el modelo, lo dice y para."""
     if engine != "auto" and engine not in ENGINES:
-        raise ValueError(f"engine {engine!r} no existe; disponibles: {', '.join(ENGINES)}")
+        raise ValueError(f"engine {engine!r} does not exist; available: {', '.join(ENGINES)}")
     need = RAM_MIN_GB.get(model)
     if need is not None and m.ram_gb is not None and m.ram_gb < need:
-        consejo = "; prueba -m small" if model != "small" else ""
+        consejo = "; try -m small" if model != "small" else ""
         raise AsrError(
             "insufficient_resources", False,
-            f"{model} necesita ~{need:g} GB de RAM y esta máquina tiene {m.ram_gb:.1f} GB{consejo}",
+            f"{model} needs ~{need:g} GB of RAM and this machine has {m.ram_gb:.1f} GB{consejo}",
         )
     reason = ""
     if engine == "auto":
@@ -192,13 +192,13 @@ def choose_route(m: Machine, model: str, *, engine: str = "auto", device: str = 
 
         if model not in _MODEL_ALIAS:
             raise ValueError(
-                f"modelo {model!r} no está pinneado para whispercpp; disponibles: "
+                f"model {model!r} is not pinned for whispercpp; available: "
                 f"{', '.join(sorted(_MODEL_ALIAS))}"
             )
         if compute_type not in ("auto", "q5_0"):
             raise ValueError(
-                f"compute_type={compute_type!r} no soportado con whispercpp; usa 'auto' o 'q5_0'. "
-                "Motivo: fp16 = 0.53x tiempo real por paging WDDM en la 980 (medido 2026-07-27)."
+                f"compute_type={compute_type!r} is not supported with whispercpp; use 'auto' or "
+                "'q5_0'. Reason: fp16 = 0.53x real time from WDDM paging on the 980 (measured 2026-07-27)."
             )
         # win32: el binario pinneado es build CUDA y corre en la GPU SIEMPRE (medido en el
         # smoke); etiquetar cpu sería mentir en el header, la llave y el JSON. Fuera de
@@ -207,8 +207,8 @@ def choose_route(m: Machine, model: str, *, engine: str = "auto", device: str = 
         # callada: se avisa.
         label = "cuda" if m.platform == "win32" else "native"
         if not reason and device != label:
-            reason = ("whisper.cpp (build CUDA) corre en la GPU; device=cuda" if label == "cuda"
-                      else "el whisper-cli del PATH decide el dispositivo según su build; device=native")
+            reason = ("whisper.cpp (CUDA build) runs on the GPU; device=cuda" if label == "cuda"
+                      else "the whisper-cli on the PATH decides the device from its build; device=native")
         factor, estimated = eta_factor(ENGINE_WHISPERCPP, label, "q5_0", model)
         return Route(ENGINE_WHISPERCPP, label, "q5_0", reason, factor, estimated)
     device = "cpu" if device == "auto" else device

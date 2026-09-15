@@ -73,7 +73,7 @@ def test_contrato_caps_e_identidad(monkeypatch):
     backend = _backend(lambda *a, **k: None)
     assert isinstance(backend, AsrBackend)
     assert backend.backend_id == "whispercpp"
-    assert backend.caps == Caps("rechazado", "degradado", "degradado")
+    assert backend.caps == Caps("rejected", "degraded", "degraded")
     assert backend.quant == "q5_0"
     assert backend.device == "cuda"
     assert backend.model_id == "large-v3"
@@ -92,7 +92,7 @@ def test_fuera_de_win32_device_native_y_version_sin_pin(monkeypatch):
 
 
 def test_modelo_no_pinneado_se_rechaza_al_construir():
-    with pytest.raises(ValueError, match="no está pinneado"):
+    with pytest.raises(ValueError, match="is not pinned"):
         WhisperCppBackend("medium")
 
 
@@ -208,7 +208,7 @@ def test_base_temporal_no_ascii_falla_antes_de_correr(monkeypatch, tmp_path):
         return os.open(str(base), os.O_CREAT | os.O_RDWR), str(base)
 
     monkeypatch.setattr(whispercpp.tempfile, "mkstemp", fake_mkstemp)
-    with pytest.raises(RuntimeError, match="no ASCII"):
+    with pytest.raises(RuntimeError, match="non-ASCII"):
         _backend(lambda *a, **k: pytest.fail("no debe correr")).transcribe(
             _samples(), TranscriptionRequest(),
         )

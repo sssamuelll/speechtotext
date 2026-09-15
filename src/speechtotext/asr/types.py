@@ -21,7 +21,7 @@ class TranscriptionRequest:
             or not self.language.strip()
             or len(self.language) > 32
         ):
-            raise ValueError("language es obligatorio")
+            raise ValueError("language is required")
         if (
             not isinstance(self.hotwords, tuple)
             or len(self.hotwords) > 128
@@ -33,19 +33,19 @@ class TranscriptionRequest:
             )
             or len(set(self.hotwords)) != len(self.hotwords)
         ):
-            raise TypeError("hotwords debe ser tuple de strings unicos y acotados")
+            raise TypeError("hotwords must be a tuple of unique, bounded strings")
         if type(self.word_timestamps) is not bool:
-            raise TypeError("word_timestamps debe ser bool")
+            raise TypeError("word_timestamps must be bool")
         if type(self.beam_size) is not int or not 1 <= self.beam_size <= 100:
-            raise TypeError("beam_size debe ser entero entre 1 y 100")
+            raise TypeError("beam_size must be an integer between 1 and 100")
         if self.context is not None and (
             not isinstance(self.context, str)
             or not self.context.strip()
             or len(self.context) > 4096
         ):
-            raise TypeError("context debe ser string no vacio y acotado")
+            raise TypeError("context must be a non-empty, bounded string")
         if type(self.vad) is not bool:
-            raise TypeError("vad debe ser bool")
+            raise TypeError("vad must be bool")
 
     @property
     def fingerprint(self) -> str:
@@ -86,23 +86,23 @@ class TranscriptionWord:
 
     def __post_init__(self) -> None:
         if not isinstance(self.text, str):
-            raise TypeError("text de palabra debe ser string")
+            raise TypeError("word text must be a string")
         if any(
             isinstance(value, bool) or not isinstance(value, (int, float))
             for value in (self.start, self.end)
         ):
-            raise TypeError("timestamps de palabra deben ser numericos")
+            raise TypeError("word timestamps must be numeric")
         if not math.isfinite(self.start) or not math.isfinite(self.end):
-            raise ValueError("timestamps de palabra deben ser finitos")
+            raise ValueError("word timestamps must be finite")
         if self.start < 0.0 or self.end < self.start:
-            raise ValueError("timestamps de palabra invalidos")
+            raise ValueError("invalid word timestamps")
         if self.confidence is not None:
             if isinstance(self.confidence, bool) or not isinstance(
                 self.confidence, (int, float)
             ):
-                raise TypeError("confidence de palabra debe ser numerica")
+                raise TypeError("word confidence must be numeric")
             if not math.isfinite(self.confidence) or not 0.0 <= self.confidence <= 1.0:
-                raise ValueError("confidence de palabra debe estar entre 0 y 1")
+                raise ValueError("word confidence must be between 0 and 1")
 
 
 def _validate_native_signals(
@@ -117,20 +117,20 @@ def _validate_native_signals(
         and (isinstance(value, bool) or not isinstance(value, (int, float)))
         for value in values
     ):
-        raise TypeError("senales nativas deben ser numericas o None")
+        raise TypeError("native signals must be numeric or None")
     probabilities = (no_speech, language_probability)
     if any(
         value is not None
         and (not math.isfinite(value) or not 0.0 <= value <= 1.0)
         for value in probabilities
     ):
-        raise ValueError("probabilidad nativa fuera de rango")
+        raise ValueError("native probability out of range")
     if avg_logprob is not None and not math.isfinite(avg_logprob):
-        raise ValueError("avg_logprob debe ser finito")
+        raise ValueError("avg_logprob must be finite")
     if compression_ratio is not None and (
         not math.isfinite(compression_ratio) or compression_ratio <= 0.0
     ):
-        raise ValueError("compression_ratio debe ser finito y positivo")
+        raise ValueError("compression_ratio must be finite and positive")
 
 
 @dataclass(frozen=True)
@@ -161,19 +161,19 @@ class TranscriptionSegment:
             isinstance(value, bool) or not isinstance(value, (int, float))
             for value in (self.start, self.end)
         ):
-            raise TypeError("timestamps de segmento deben ser numericos")
+            raise TypeError("segment timestamps must be numeric")
         if not math.isfinite(self.start) or not math.isfinite(self.end):
-            raise ValueError("timestamps de segmento deben ser finitos")
+            raise ValueError("segment timestamps must be finite")
         if self.start < 0.0 or self.end < self.start:
-            raise ValueError("timestamps de segmento invalidos")
+            raise ValueError("invalid segment timestamps")
         if not isinstance(self.text, str):
-            raise TypeError("text de segmento debe ser string")
+            raise TypeError("segment text must be a string")
         if not isinstance(self.words, tuple) or any(
             not isinstance(word, TranscriptionWord) for word in self.words
         ):
-            raise TypeError("words de segmento debe ser tuple de TranscriptionWord")
+            raise TypeError("segment words must be a tuple of TranscriptionWord")
         if not isinstance(self.native_signals, SegmentNativeSignals):
-            raise TypeError("native_signals de segmento invalido")
+            raise TypeError("invalid segment native_signals")
 
 
 @dataclass(frozen=True)
@@ -207,7 +207,7 @@ class TranscriptionResult:
 
     def __post_init__(self) -> None:
         if not isinstance(self.text, str):
-            raise TypeError("text ASR debe ser string")
+            raise TypeError("ASR text must be a string")
         if any(
             not isinstance(value, str) or not value.strip()
             for value in (
@@ -217,23 +217,23 @@ class TranscriptionResult:
                 self.model_version,
             )
         ):
-            raise ValueError("lenguaje e identidad ASR son obligatorios")
+            raise ValueError("ASR language and identity are required")
         if (
             isinstance(self.latency_ms, bool)
             or not isinstance(self.latency_ms, int)
             or self.latency_ms < 0
         ):
-            raise ValueError("latency_ms debe ser entero no negativo")
+            raise ValueError("latency_ms must be a non-negative integer")
         if not isinstance(self.native_signals, NativeSignals):
-            raise TypeError("native_signals invalido")
+            raise TypeError("invalid native_signals")
         if not isinstance(self.words, tuple) or any(
             not isinstance(word, TranscriptionWord) for word in self.words
         ):
-            raise TypeError("words debe ser tuple de TranscriptionWord")
+            raise TypeError("words must be a tuple of TranscriptionWord")
         if not isinstance(self.segments, tuple) or any(
             not isinstance(segment, TranscriptionSegment) for segment in self.segments
         ):
-            raise TypeError("segments debe ser tuple de TranscriptionSegment")
+            raise TypeError("segments must be a tuple of TranscriptionSegment")
         if (
             not isinstance(self.warnings, tuple)
             or any(
@@ -242,4 +242,4 @@ class TranscriptionResult:
             )
             or len(set(self.warnings)) != len(self.warnings)
         ):
-            raise TypeError("warnings debe ser tuple de strings unicos")
+            raise TypeError("warnings must be a tuple of unique strings")

@@ -7,11 +7,11 @@ from pathlib import Path
 
 
 class TranscodeError(RuntimeError):
-    """ffmpeg no pudo decodificar el audio."""
+    """ffmpeg could not decode the audio."""
 
 
 class FfmpegMissingError(RuntimeError):
-    """ffmpeg no está disponible en el PATH del sistema."""
+    """ffmpeg is not available on the system PATH."""
 
 
 def transcode_to_wav(src_bytes: bytes, *, sample_rate: int = 16_000) -> Path:
@@ -33,7 +33,7 @@ def transcode_to_wav(src_bytes: bytes, *, sample_rate: int = 16_000) -> Path:
         )
     except FileNotFoundError as e:
         Path(src.name).unlink(missing_ok=True)
-        raise FfmpegMissingError("ffmpeg no está instalado en el PATH del sistema.") from e
+        raise FfmpegMissingError("ffmpeg is not installed on the system PATH.") from e
     except subprocess.CalledProcessError as e:
         Path(src.name).unlink(missing_ok=True)
         msg = e.stderr.decode(errors="ignore")[:300] if e.stderr else "ffmpeg error"

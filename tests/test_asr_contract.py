@@ -132,7 +132,7 @@ def test_tipos_asr_rechazan_coerciones_y_contenedores_mutables():
         TranscriptionRequest(word_timestamps=1)
     with pytest.raises(TypeError, match="timestamps"):
         TranscriptionWord("hola", True, 1.0, 0.9)
-    with pytest.raises(TypeError, match="senales"):
+    with pytest.raises(TypeError, match="signals"):
         NativeSignals("0.1", None, None, None)
     with pytest.raises(TypeError, match="words"):
         TranscriptionSegment(

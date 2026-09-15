@@ -13,17 +13,17 @@ _PROVENANCE_FACTORY_TOKEN = object()
 
 def _validate_json(value: object) -> None:
     if isinstance(value, float) and not math.isfinite(value):
-        raise ValueError("el pipeline solo admite JSON finito")
+        raise ValueError("the pipeline only accepts finite JSON")
     if isinstance(value, Mapping):
         for key, item in value.items():
             if not isinstance(key, str):
-                raise ValueError("las claves del pipeline deben ser strings")
+                raise ValueError("pipeline keys must be strings")
             _validate_json(item)
     elif isinstance(value, (list, tuple)):
         for item in value:
             _validate_json(item)
     elif value is not None and not isinstance(value, (str, int, float, bool)):
-        raise ValueError(f"valor no serializable en pipeline: {type(value).__name__}")
+        raise ValueError(f"value not serializable in pipeline: {type(value).__name__}")
 
 
 def _freeze_json(value: object) -> object:
@@ -59,7 +59,7 @@ class PipelineStep:
             or not self.version.strip()
             or not isinstance(self.parameters, Mapping)
         ):
-            raise ValueError("name y version de un step son obligatorios")
+            raise ValueError("a step's name and version are required")
         object.__setattr__(self, "parameters", _freeze_json(self.parameters))
 
     def to_dict(self) -> dict[str, object]:
@@ -86,13 +86,13 @@ class ModelRef:
 
     def __post_init__(self) -> None:
         if not isinstance(self.model_id, str) or not self.model_id.strip():
-            raise ValueError("model_id no puede estar vacio")
+            raise ValueError("model_id cannot be empty")
         if (
             not isinstance(self.fingerprint, str)
             or len(self.fingerprint) != 64
             or any(char not in "0123456789abcdef" for char in self.fingerprint)
         ):
-            raise ValueError("fingerprint debe ser sha256 en hex minusculas de 64")
+            raise ValueError("fingerprint must be a 64-char lowercase hex sha256")
 
 
 @dataclass(frozen=True, init=False)
@@ -116,18 +116,18 @@ class PipelineProvenance:
     ) -> "PipelineProvenance":
         if _factory_token is not _PROVENANCE_FACTORY_TOKEN:
             raise TypeError(
-                "PipelineProvenance solo puede crearse mediante su factory publica"
+                "PipelineProvenance can only be created through its public factory"
             )
         model_values = tuple(models)
         step_values = tuple(steps)
         if type(sample_rate) is not int or sample_rate <= 0:
-            raise ValueError("sample_rate debe ser un entero positivo")
+            raise ValueError("sample_rate must be a positive integer")
         if not isinstance(thresholds, Mapping):
-            raise ValueError("thresholds debe ser un mapping JSON")
+            raise ValueError("thresholds must be a JSON mapping")
         if any(not isinstance(model, ModelRef) for model in model_values):
-            raise TypeError("models exige ModelRef")
+            raise TypeError("models requires ModelRef")
         if any(not isinstance(step, PipelineStep) for step in step_values):
-            raise TypeError("steps exige PipelineStep")
+            raise TypeError("steps requires PipelineStep")
         instance = object.__new__(cls)
         object.__setattr__(instance, "sample_rate", sample_rate)
         object.__setattr__(instance, "parent_fingerprint", parent_fingerprint)
@@ -170,9 +170,9 @@ class PipelineProvenance:
         thresholds: Mapping[str, object] | None = None,
     ) -> "PipelineProvenance":
         if not isinstance(parent, PipelineProvenance):
-            raise TypeError("parent exige PipelineProvenance")
+            raise TypeError("parent requires PipelineProvenance")
         if not steps:
-            raise ValueError("derive exige al menos una transformacion de audio")
+            raise ValueError("derive requires at least one audio transformation")
         return cls._create(
             sample_rate,
             parent.fingerprint,
@@ -184,9 +184,9 @@ class PipelineProvenance:
 
     def _validate(self) -> None:
         if type(self.sample_rate) is not int or self.sample_rate <= 0:
-            raise ValueError("sample_rate debe ser un entero positivo")
+            raise ValueError("sample_rate must be a positive integer")
         if not self.steps:
-            raise ValueError("pipeline exige steps")
+            raise ValueError("pipeline requires steps")
         fingerprints = (*self.model_fingerprints,)
         if self.parent_fingerprint is not None:
             fingerprints = (self.parent_fingerprint, *fingerprints)
@@ -195,7 +195,7 @@ class PipelineProvenance:
             or any(char not in "0123456789abcdef" for char in value)
             for value in fingerprints
         ):
-            raise ValueError("fingerprint de parent/modelo invalido")
+            raise ValueError("invalid parent/model fingerprint")
         _validate_json(self.thresholds)
         object.__setattr__(self, "steps", tuple(self.steps))
         object.__setattr__(self, "model_fingerprints", tuple(self.model_fingerprints))
@@ -233,7 +233,7 @@ class PipelineProvenance:
         models: Sequence[ModelRef],
     ) -> "PipelineProvenance":
         if parent is not None and not isinstance(parent, PipelineProvenance):
-            raise TypeError("parent exige PipelineProvenance")
+            raise TypeError("parent requires PipelineProvenance")
         expected = {
             "schema_version", "sample_rate", "parent_fingerprint", "steps",
             "model_fingerprints", "thresholds", "fingerprint",
@@ -256,9 +256,9 @@ class PipelineProvenance:
             )
             or any(not isinstance(item, str) for item in data["model_fingerprints"])
         ):
-            raise ValueError("schema de pipeline invalido")
+            raise ValueError("invalid pipeline schema")
         if type(data["sample_rate"]) is not int or data["sample_rate"] <= 0:
-            raise ValueError("sample_rate debe ser un entero positivo")
+            raise ValueError("sample_rate must be a positive integer")
         provenance = cls._create(
             data["sample_rate"],
             None if parent is None else parent.fingerprint,
@@ -273,5 +273,5 @@ class PipelineProvenance:
             or tuple(data["model_fingerprints"]) != provenance.model_fingerprints
             or data["fingerprint"] != provenance.fingerprint
         ):
-            raise ValueError("fingerprint declarado no coincide con provenance")
+            raise ValueError("declared fingerprint does not match provenance")
         return provenance

@@ -11,7 +11,7 @@ from speechtotext.audio.fingerprint import PipelineStep
 
 
 class AudioDecodeError(RuntimeError):
-    """PyAV no pudo producir audio PCM canonico."""
+    """PyAV could not produce canonical PCM audio."""
 
 
 def _frames(value: Any) -> tuple[Any, ...]:
@@ -29,7 +29,7 @@ def decode_audio(
     av_module: object | None = None,
 ) -> AudioView:
     if sample_rate <= 0:
-        raise ValueError("sample_rate debe ser positivo")
+        raise ValueError("sample_rate must be positive")
     if (
         isinstance(stream, (str, bytes, bytearray, Path))
         or not hasattr(stream, "read")
@@ -38,7 +38,7 @@ def decode_audio(
         or not stream.seekable()
         or not isinstance(stream.read(0), bytes)
     ):
-        raise TypeError("decode_audio exige un stream binario leased y seekable")
+        raise TypeError("decode_audio requires a leased, seekable binary stream")
     if av_module is None:
         import av as av_module
 
@@ -46,7 +46,7 @@ def decode_audio(
     try:
         with av_module.open(stream) as container:
             if not container.streams.audio:
-                raise AudioDecodeError("el archivo no contiene stream de audio")
+                raise AudioDecodeError("the file has no audio stream")
             stream = container.streams.audio[0]
             resampler = av_module.AudioResampler(
                 format="flt",
@@ -65,10 +65,10 @@ def decode_audio(
     except AudioDecodeError:
         raise
     except Exception as exc:
-        raise AudioDecodeError(f"PyAV no pudo decodificar el asset leased: {exc}") from exc
+        raise AudioDecodeError(f"PyAV could not decode the leased asset: {exc}") from exc
     nonempty = [chunk for chunk in chunks if chunk.size]
     if not nonempty:
-        raise AudioDecodeError("PyAV produjo audio sin muestras")
+        raise AudioDecodeError("PyAV produced audio with no samples")
     return AudioView.capture(
         np.concatenate(nonempty),
         sample_rate,

@@ -10,7 +10,7 @@ from speechtotext.asr.types import TranscriptionRequest, TranscriptionResult
 # Contrato de capacidades por motor. Regla madre: degradar con aviso cuando el resultado
 # sigue siendo lo pedido con menos precision; rechazar cuando el knob seria inerte;
 # jamas silencio ni sustitucion.
-Cap = Literal["honrado", "degradado", "rechazado"]
+Cap = Literal["honored", "degraded", "rejected"]
 
 
 @dataclass(frozen=True)

@@ -35,14 +35,14 @@ class FasterWhisperConfig:
             or not isinstance(self.compute_type, str)
             or not self.compute_type.strip()
         ):
-            raise ValueError("device/compute_type son obligatorios")
+            raise ValueError("device/compute_type are required")
         if (
             type(self.cpu_threads) is not int
             or self.cpu_threads < 0
             or type(self.num_workers) is not int
             or self.num_workers < 1
         ):
-            raise ValueError("cpu_threads/num_workers invalidos")
+            raise ValueError("cpu_threads/num_workers invalid")
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -64,7 +64,7 @@ class FasterWhisperConfig:
 
 class FasterWhisperBackend:
     backend_id = "faster-whisper"
-    caps = Caps(hotwords="honrado", vad="honrado", word_timestamps="honrado")
+    caps = Caps(hotwords="honored", vad="honored", word_timestamps="honored")
 
     def __init__(
         self,
@@ -84,13 +84,13 @@ class FasterWhisperBackend:
             self._model_id = model.name
         elif isinstance(model, str):
             if not model.strip():
-                raise ValueError("model no puede estar vacio")
+                raise ValueError("model cannot be empty")
             self._model_path = None
             self._model_id = model
         else:
-            raise TypeError("model debe ser un nombre (str) o una ruta (Path)")
+            raise TypeError("model must be a name (str) or a path (Path)")
         if not isinstance(model_version, str) or not model_version.strip():
-            raise ValueError("model_version no puede estar vacio")
+            raise ValueError("model_version cannot be empty")
         self.config = config if config is not None else FasterWhisperConfig()
         self._model_version = model_version
         self._model_factory = model_factory
