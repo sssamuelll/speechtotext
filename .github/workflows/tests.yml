@@ -99,8 +99,8 @@ jobs:
       # the tree, it breaks here.
       - name: Install the wheel in a clean venv
         run: |
-          python -m venv /tmp/limpio
-          /tmp/limpio/bin/pip install dist/*.whl
+          python -m venv /tmp/clean
+          /tmp/clean/bin/pip install dist/*.whl
 
       # `probe` is the honest smoke test: it imports core.probe and core.enginepin,
       # probes the machine (no GPU or whisper.cpp on the runner), and prints the path
@@ -108,5 +108,5 @@ jobs:
       # exits 0 even if RAM wouldn't be enough for large-v3.
       - name: Smoke
         run: |
-          /tmp/limpio/bin/speechtotext --help
-          /tmp/limpio/bin/speechtotext probe
+          /tmp/clean/bin/speechtotext --help
+          /tmp/clean/bin/speechtotext probe

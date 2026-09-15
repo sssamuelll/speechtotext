@@ -21,7 +21,7 @@ env/
 
 # Outputs / runtime artefacts
 src/static/chunk*.wav
-src/static/texto.txt
+src/static/text.txt
 src/static/*.srt
 src/static/*.json
 *.log

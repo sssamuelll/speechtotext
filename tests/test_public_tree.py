@@ -69,6 +69,12 @@ ACCENTS = re.compile("[ñÑ¿¡áéíóúüÁÉÍÓÚÜ]")
 # purpose: they are language codes and appear everywhere (`language="es"`). So are
 # `todo` and friends -- `# TODO:` would trip them.
 #
+# `del` stays in despite being a Python keyword: it is the densest single signal in
+# this repo's Spanish (68 occurrences in comments) against one file that uses `del`
+# as a statement. If a fully translated file ever fails this check with `del` among
+# the words listed, that is the reason -- and it still needs a second, real hit to
+# fail at all.
+#
 # The boundary is a lookaround, not `\b`, because `\b` treats `_` as a word
 # character: `test_mide_voz_ruido` hides every word in it from `\b`, and test names
 # are 414 of the strings this file exists to find.
@@ -92,7 +98,9 @@ GLOSSARY = re.compile(
     r"|apagones|cuantizacion|ganancia|recorte|recortar|pista|pistas|honrado"
     r"|degradado|rechazado|aparato|archivo|archivos|modelo|modelos|salida"
     r"|salidas|entrada|entradas|prueba|pruebas|palabra|palabras|mensaje"
-    r"|mensajes|nombre|nombres|tiempo|silencio|voz|voces|calidad|idioma)"
+    r"|mensajes|nombre|nombres|tiempo|silencio|voz|voces|calidad|idioma"
+    r"|texto|textos|habla|transcripcion|segmento|segmentos|tabla|tablas"
+    r"|caso|casos|bajo|sola)"
     r"(?![A-Za-z0-9])",
     re.IGNORECASE,
 )

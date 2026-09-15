@@ -57,7 +57,7 @@ def _tramos(x: np.ndarray) -> list[tuple[float, float]]:
     return [(a, b) for a, b in tramos if b - a >= 1.0]
 
 
-def ventanas_con_texto(pcm: Path, model: WhisperModel) -> list[dict]:
+def windows_with_text(pcm: Path, model: WhisperModel) -> list[dict]:
     x = np.fromfile(pcm, dtype="<i2").astype(np.float32) / 32768.0
     filas = []
     for ta, tb in _tramos(x)[:60]:
@@ -65,14 +65,14 @@ def ventanas_con_texto(pcm: Path, model: WhisperModel) -> list[dict]:
         if len(seg) < SR // 2:
             continue
         for s in model.transcribe(seg, language="es", beam_size=5, vad_filter=False)[0]:
-            texto = s.text.strip()
+            text = s.text.strip()
             ventana = seg[int(s.start * SR):int(s.end * SR)]
-            if not texto or len(ventana) < VENTANA_MINIMA:
+            if not text or len(ventana) < VENTANA_MINIMA:
                 continue
             e = compute_voice_evidence(ventana, SR)
             filas.append({
                 "t_s": round(ta + s.start, 2), "dur_s": round(s.end - s.start, 2),
-                "no_speech": float(s.no_speech_prob), "texto": texto,
+                "no_speech": float(s.no_speech_prob), "text": text,
                 "band": e.voice_band_ratio, "voiced": e.voiced_ratio,
                 "f0": e.f0_median_hz, "flat": e.spectral_flatness,
             })
@@ -83,18 +83,18 @@ def _columna(filas: list[dict], clave: str) -> np.ndarray:
     return np.array([f[clave] for f in filas if f[clave] is not None], dtype=float)
 
 
-def resumen(habla: list[dict], vacio: list[dict]) -> None:
-    print(f"\nwindows with text: speech={len(habla)}  empty room={len(vacio)}\n")
+def resumen(speech: list[dict], vacio: list[dict]) -> None:
+    print(f"\nwindows with text: speech={len(speech)}  empty room={len(vacio)}\n")
     print(f"{'measure':>10} | {'SPEECH med [IQR]':>26} | {'EMPTY ROOM med [IQR]':>26} | IQR overlap")
     print("-" * 84)
     for clave in ("band", "voiced", "flat", "no_speech"):
-        a, b = _columna(habla, clave), _columna(vacio, clave)
+        a, b = _columna(speech, clave), _columna(vacio, clave)
         a25, a75 = np.percentile(a, [25, 75])
         b25, b75 = np.percentile(b, [25, 75])
         solape = max(0.0, min(a75, b75) - max(a25, b25)) / max(1e-9, max(a75, b75) - min(a25, b25))
         print(f"{clave:>10} | {np.median(a):6.3f} [{a25:6.3f}, {a75:6.3f}]      | "
               f"{np.median(b):6.3f} [{b25:6.3f}, {b75:6.3f}]      | {solape * 100:3.0f} %")
-    a, b = _columna(habla, "band"), _columna(vacio, "band")
+    a, b = _columna(speech, "band"), _columna(vacio, "band")
     print("\nsweep over voice_band_ratio (cuts if band < u)")
     print(f"{'u':>5} | cuts from EMPTY ROOM | cuts from SPEECH")
     for u in (0.3, 0.4, 0.5, 0.6):
@@ -105,14 +105,14 @@ def resumen(habla: list[dict], vacio: list[dict]) -> None:
 def main(argv: list[str]) -> None:
     if len(argv) < 3:
         sys.exit(__doc__)
-    habla_pcm, vacio_pcm = Path(argv[1]), Path(argv[2])
-    for p in (habla_pcm, vacio_pcm):
+    speech_pcm, vacio_pcm = Path(argv[1]), Path(argv[2])
+    for p in (speech_pcm, vacio_pcm):
         print(f"{hashlib.sha256(p.read_bytes()).hexdigest()[:16]}  {p.name}  {p.stat().st_size} bytes")
     model = WhisperModel("base", device="cpu", compute_type="int8")
-    habla, vacio = ventanas_con_texto(habla_pcm, model), ventanas_con_texto(vacio_pcm, model)
-    resumen(habla, vacio)
+    speech, vacio = windows_with_text(speech_pcm, model), windows_with_text(vacio_pcm, model)
+    resumen(speech, vacio)
     if len(argv) > 3:
-        Path(argv[3]).write_text(json.dumps({"habla": habla, "cuarto_vacio": vacio},
+        Path(argv[3]).write_text(json.dumps({"speech": speech, "cuarto_vacio": vacio},
                                             ensure_ascii=False, indent=1), encoding="utf-8")
 
 
