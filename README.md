@@ -161,11 +161,10 @@ Chunking has a [measured](#what-the-measurements-say) price: nothing is lost at
 the seam, but every chunk after the first decodes with its 30 s windows shifted
 and drifts 2-3% from the single pass.
 
-A chunked run is the one place `--vad` earns its cost. It still drops short
-sentences, and that cost does not go away here. What a chunk adds is a worse
-failure on the other side: it ends in silence, so Whisper has a run of padding
-to fill, and it fills it with a goodbye nobody said. Between a filter that trims
-too much and a model that invents, take the filter, and only here.
+Whisper pads the chunk's last window to 30 s and sometimes narrates over the
+padding. A segment that runs past where the chunk really ended is dropped, or
+trimmed back to it, so the invention never lands on top of the next chunk.
+Chunking is not a reason to turn `--vad` on; the default holds here too.
 
 ---
 
