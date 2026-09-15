@@ -63,9 +63,6 @@ WATCHED = (
 
 # Still untranslated. One line per task; they come off in order.
 PENDING = (
-    "docs/api.md",                   # task 7
-    "CHANGELOG.md",                  # task 7
-    "scripts/benchmark_chart.py",    # task 7
     "docs/README.md",                # task 8
 )
 

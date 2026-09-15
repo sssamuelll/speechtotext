@@ -3,7 +3,7 @@
 Two directions, neither with a signature parser:
 
   (a) mechanical — every name exported by a public `__all__` appears in api.md.
-  (b) curated    — every path in CONTRATO imports and appears in api.md.
+  (b) curated    — every path in CONTRACT imports and appears in api.md.
 
 Direction (a) catches the failure mode that actually occurred (exporting something without
 documenting it: only 17 of 20 names in `audio` were documented). Direction (b) catches the
@@ -11,7 +11,7 @@ inverse, documenting something that no longer exists. A Markdown signature parse
 faster than what it monitors.
 
 `core/` and `speakers/` have no `__all__` — they are imported by submodule — so their public
-surface lives in CONTRATO, name by name. Adding something there declares it part of the
+surface lives in CONTRACT, name by name. Adding something there declares it part of the
 contract: it goes in the CHANGELOG when it changes.
 
 Known limitation, by design. Direction (b) compares the BARE name against tokens from the
@@ -33,7 +33,7 @@ API_MD = Path(__file__).resolve().parents[1] / "docs" / "api.md"
 
 MODULES_WITH_ALL = ("speechtotext.asr", "speechtotext.audio")
 
-CONTRATO = (
+CONTRACT = (
     "speechtotext.core.transcribe.transcribe",
     "speechtotext.core.transcribe.Transcript",
     "speechtotext.core.transcribe.Progress",
@@ -101,7 +101,7 @@ def test_every_exported_name_is_documented(module, named_identifiers):
     )
 
 
-@pytest.mark.parametrize("dotted_path", CONTRATO)
+@pytest.mark.parametrize("dotted_path", CONTRACT)
 def test_every_documented_name_exists_and_imports(dotted_path, named_identifiers):
     module, _, name = dotted_path.rpartition(".")
     target = importlib.import_module(module)
@@ -149,22 +149,22 @@ def test_no_code_span_crosses_a_line_break():
 
 def test_the_document_does_not_call_monitored_code_internal():
     """A contradiction that has already appeared twice in this document: api.md
-    declaring a submodule internal while CONTRATO monitors one of its symbols. Both
+    declaring a submodule internal while CONTRACT monitors one of its symbols. Both
     times, someone wrote it carefully; that is why a test monitors it now."""
     text = API_MD.read_text(encoding="utf-8")
-    assert "El resto de `core/` es interno" in text, (
+    assert "The rest of `core/` is internal" in text, (
         "the sentence that marks the list of internal core/ submodules changed; "
         "adjust this test to the new sentence or the warning will cease to exist"
     )
-    paragraph = text.split("El resto de `core/` es interno", 1)[1].split("\n\n", 1)[0]
+    paragraph = text.split("The rest of `core/` is internal", 1)[1].split("\n\n", 1)[0]
     internal_modules = set(re.findall(r"`([a-z_]+)`", paragraph))
     monitored_modules = {
         dotted_path.split(".")[2]
-        for dotted_path in CONTRATO
+        for dotted_path in CONTRACT
         if dotted_path.startswith("speechtotext.core.")
     }
     conflict = internal_modules & monitored_modules
     assert not conflict, (
-        f"docs/api.md calls submodules internal while CONTRATO monitors one of their "
+        f"docs/api.md calls submodules internal while CONTRACT monitors one of their "
         f"symbols: {sorted(conflict)}. Decide which statement is true."
     )

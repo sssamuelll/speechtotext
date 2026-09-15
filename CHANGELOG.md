@@ -1,167 +1,214 @@
 # Changelog
 
-Los consumidores pinnean un tag, así que este archivo existe para una sola
-pregunta: **¿me conviene subir el pin, y qué se me rompe si lo hago?**
+Consumers pin a tag, so this file exists for one question only: **is it
+worth bumping the pin, and what breaks if I do?**
 
-Lo marcado como **rompe** exige cambios en el código que consume la librería.
+Anything marked **breaking** requires changes in the code that consumes the
+library.
 
 ---
 
-## Sin publicar
+## Unreleased
 
-### Añadido
+### Added
 
-- `core.transcribe.transcribe()`: un archivo (o muestras) entra, un `Transcript` sale, con
-  progreso por callback y cancelación. Una sola decodificación del audio; el archivo corto
-  y el largo recorren el mismo camino. Contrato en [`docs/api.md`](docs/api.md#transcribe).
-- `WhisperCppBackend` implementa el mismo contrato que `FasterWhisperBackend`; el CLI,
-  `bench` y `find` construyen los motores por un solo sitio.
-- `core.probe`: `machine()` sondea la máquina sin cargar modelos (`Machine`) y
-  `choose_route()` elige motor/device/compute_type con la tabla del spec (`Route`, con
-  `eta_factor` y `estimated`). `speechtotext probe` lo imprime.
-- `core.models`: `data_dir()`, `installed()`, `ensure()`, `remove()`, `remote_size()`.
-  `speechtotext models [pull|rm]` por encima.
-- El CLI imprime la duración y una ETA antes de transcribir, y sugiere fijar `-l` cuando
-  la detección sale con probabilidad < 0,5.
-- `transcribe()` acepta la ruta como `str`; los avisos del motor (`empty_transcript`)
-  llegan a `Transcript.warnings` con el prefijo del motor.
-- whisper.cpp en macOS/Linux: `ensure_engine()` usa el `whisper-cli` del `PATH`.
-- `speechtotext mcp`: servidor MCP sobre stdio con cuatro herramientas (`transcribe`,
-  `find`, `voices`, `probe`), tras el extra opcional `[mcp]`. El núcleo no gana
-  dependencias.
-- `docs/api.md` documenta la capa `audio/` entera (20 símbolos de `audio.__all__`, antes
-  3) y los tipos de `asr/` que faltaban. `tests/test_api_contract.py` la vigila en las dos
-  direcciones: nada se puede exportar sin documentar, ni documentar sin que exista.
-- **Contrato nuevo** en `docs/api.md`: `speakers.diarization.diarize` y `embed_voice`
-  (sección «Diarizar»), y `core.segments.native_signals`. Estaban en el árbol desde antes;
-  lo nuevo es que ahora son contrato vigilado, así que renombrarlos o moverlos **rompe** y
-  tiene que salir aquí.
+- `core.transcribe.transcribe()`: a file (or samples) goes in, a `Transcript`
+  comes out, with progress by callback and cancellation. A single audio
+  decode; the short file and the long one travel the same path. Contract in
+  [`docs/api.md`](docs/api.md#transcribe).
+- `WhisperCppBackend` implements the same contract as `FasterWhisperBackend`;
+  the CLI, `bench` and `find` all build engines through one single place.
+- `core.probe`: `machine()` probes the machine without loading models
+  (`Machine`), and `choose_route()` picks engine/device/compute_type using
+  the spec's table (`Route`, with `eta_factor` and `estimated`).
+  `speechtotext probe` prints it.
+- `core.models`: `data_dir()`, `installed()`, `ensure()`, `remove()`,
+  `remote_size()`. `speechtotext models [pull|rm]` sits on top.
+- The CLI prints the duration and an ETA before transcribing, and suggests
+  pinning `-l` when detection comes out with probability < 0.5.
+- `transcribe()` accepts the path as `str`; the engine's warnings
+  (`empty_transcript`) land in `Transcript.warnings` with the engine's
+  prefix.
+- whisper.cpp on macOS/Linux: `ensure_engine()` uses the `whisper-cli` from
+  `PATH`.
+- `speechtotext mcp`: an MCP server over stdio with four tools (`transcribe`,
+  `find`, `voices`, `probe`), behind the optional `[mcp]` extra. The core
+  gains no dependencies.
+- `docs/api.md` documents the entire `audio/` layer (20 symbols from
+  `audio.__all__`, up from 3) and the `asr/` types that were missing.
+  `tests/test_api_contract.py` watches it in both directions: nothing can be
+  exported without being documented, and nothing documented without
+  existing.
+- **New contract** in `docs/api.md`: `speakers.diarization.diarize` and
+  `embed_voice` (the "Diarizing" section), and `core.segments.native_signals`.
+  They were already in the tree; what's new is that they are now watched
+  contract, so renaming or moving them **breaks** and has to be recorded
+  here.
 
-### Cambiado
+### Changed
 
-- CI activado de verdad: la suite corre en Linux, macOS y Windows sobre Python 3.11 y
-  3.14, y un job aparte construye el wheel y lo instala en un venv limpio. Antes el
-  workflow existía pero instalaba un extra (`[evaluation]`) que ya no existe.
-- `tests/fixtures/whispercpp_ojf.json` pasa a ser sintética: misma forma de la salida
-  `-ojf`, sin habla humana real y sin rutas de máquina.
+- CI actually turned on: the suite runs on Linux, macOS and Windows against
+  Python 3.11 and 3.14, and a separate job builds the wheel and installs it
+  in a clean venv. Before, the workflow existed but installed an extra
+  (`[evaluation]`) that no longer exists.
+- `tests/fixtures/whispercpp_ojf.json` becomes synthetic: same shape as
+  `-ojf` output, with no real human speech and no machine paths.
 
-### Cambiado — rompe
+### Changed — breaking
 
-- **Se extrajeron el arnés de evaluación y la cadena de custodia**: `evaluation/`,
-  `security/`, `models/`, `confidence/`, `statistics.py` y el extra `[evaluation]`.
-  Viven en su único consumidor, como pasó con `api/` en la `0.4.0`. Esta librería
-  queda en lo que es: audio → texto, con o sin hablantes, y las medidas sobre la
-  señal.
-- `FasterWhisperBackend(model, config=None, *, model_version="unpinned")` recibe
-  un nombre o una ruta, no un `VerifiedModelArtifact`. Los Protocols
-  `CalibratedAsrBackend` y `VerifiedLocalAsrBackend` se fueron con la verificación.
-- `TranscriptionResult` ya no trae `confidence_target`, `calibrated_confidence` ni
-  `calibrator_version`, y `ConfidenceTarget` desaparece. Quien calibre envuelve el
-  resultado.
-- `PipelineProvenance` recibe `ModelRef(model_id, fingerprint)` en `models=`, no
-  artefactos verificados. Las huellas no cambian: el payload solo guardaba
-  `model_fingerprints`.
+- **The project's language moved wholesale, Spanish to English.** Every
+  identifier, error message, warning, doc and default that used to speak
+  Spanish now speaks English. The concrete breaks below come out of that
+  move; if none of them touch your integration, bumping the pin is
+  otherwise safe.
+- `Cap` values are English now — `honored` / `degraded` / `rejected`, not
+  `honrado` / `degradado` / `rechazado`. <!-- # spanish-is-data: the old Spanish enum values being replaced; translating them erases what changed -->
+  Code comparing `caps.vad == "degradado"` stops matching. <!-- # spanish-is-data: the exact old comparison that stops matching; the string is the evidence -->
+- The unnamed-speaker fallback in `txt` output is `Speaker ?` instead of `Hablante ?`, <!-- # spanish-is-data: the old placeholder string being replaced; translating it erases what changed -->
+  and `humanize_speaker()` — which every output format uses once diarization hands it a numbered speaker — now emits `Speaker 1` rather than `Hablante 1`. <!-- # spanish-is-data: the old placeholder string being replaced; translating it erases what changed -->
+  Both land in files a user opens.
+- Outside Windows, whisper.cpp's `engine_version` in the JSON reads
+  `"whisper.cpp (PATH, unpinned)"` instead of `"whisper.cpp (PATH, sin
+  pin)"`. Same change as the rest of this list: a consumer matching the old
+  Spanish string stops matching.
+- `bench.json`'s `recommendations` block uses English keys (`case`,
+  `description`, `requirements`, `criterion`, `choice`, `reason`) and
+  English enum values. Nothing to migrate by hand: `read_table()` recognizes
+  a file written with the old Spanish keys and regenerates the block on
+  read, without re-measuring anything.
+- `Transcript.warnings` now carries English prose. The machine codes in
+  that same list (`empty_transcript`, `language_mismatch`,
+  `no_speech_regions`, `gain_limited`) did not change — only the sentences
+  around them did.
+- **The evaluation harness and the chain of custody were extracted**:
+  `evaluation/`, `security/`, `models/`, `confidence/`, `statistics.py` and
+  the `[evaluation]` extra. They live in their one consumer now, the same
+  as `api/` did in `0.4.0`. This library is left as what it is: audio →
+  text, with or without speakers, and the measurements on the signal.
+- `FasterWhisperBackend(model, config=None, *, model_version="unpinned")`
+  now takes a name or a path, not a `VerifiedModelArtifact`. The
+  `CalibratedAsrBackend` and `VerifiedLocalAsrBackend` Protocols left with
+  the verification.
+- `TranscriptionResult` no longer carries `confidence_target`,
+  `calibrated_confidence` or `calibrator_version`, and `ConfidenceTarget`
+  is gone. Whoever calibrates wraps the result.
+- `PipelineProvenance` now takes `ModelRef(model_id, fingerprint)` in
+  `models=`, not verified artifacts. The fingerprints do not change: the
+  payload only ever stored `model_fingerprints`.
 
-  Migración: importar lo extraído desde su nuevo paquete; envolver
-  `FasterWhisperBackend` con la verificación propia pasando `model=artefacto.root`
-  y `model_version=artefacto.manifest.revision`; convertir cada artefacto a
-  `ModelRef(manifest.model_id, artefacto.fingerprint)` antes de derivar proveniencia.
-  Con una ruta, el `model` del resultado pasa a ser el nombre del directorio
-  (`Path.name`), no el `model_id` del manifiesto; si el envoltorio necesita
-  conservar ese id, sobreescribe la propiedad `model_id` del backend.
-- **`AsrBackend.transcribe` recibe muestras, no un `AudioClip`**: float32 mono a 16 kHz.
-  Quien tenga un clip pasa `clip.view("asr").samples`. El Protocol declara además `caps`,
-  `engine_version`, `quant` y `device`.
-- `TranscriptionRequest` gana `vad: bool = False`; entra al `fingerprint`, así que las
-  huellas de peticiones cambian una vez. `language="auto"` es válido.
-- El texto de `TranscriptionSegment` y `TranscriptionWord` se devuelve crudo (con el
-  espacio inicial del motor); `result.text` sigue recortado.
-- `speakers.diarization.diarize(samples, sample_rate, num_speakers=None)` recibe muestras;
-  `read_wav(path)` las lee de un wav. `embed_voice(wav_path)` no cambia.
-- `core.chunked`: `chunk_path(identity, start, end)`; se van `run_chunked`,
-  `transcribe_chunk` y `probe_duration`. Los checkpoints viejos dejan de coincidir y se
-  recomputan.
-- Se va `core/engines.py`: el adaptador de whisper.cpp es `asr.whispercpp.WhisperCppBackend`
-  y los CAPS viven en cada backend.
-- **Defaults del CLI:** `-m large-v3`, `--no-vad`, `-l auto`, `--engine auto`, `-d auto`
-  (antes `small`, `--vad`, `es`, `faster-whisper`, `cpu`). Quien dependía del default
-  lo pasa explícito. `find` igual (`large-v3`, `auto`).
-- `Route` vive en `core.probe` (sigue importable desde `core.transcribe`) y gana
-  `eta_factor` y `estimated`; `resolve_route()` ahora sondea la máquina y puede lanzar
-  `AsrError("insufficient_resources")` cuando el modelo no cabe en RAM.
-- `Progress`: etapa nueva `download`; con archivo, `decode` se emite dos veces (antes,
-  indeterminado; después, `done = total = duración`).
-- `enginepin.install_root()` cuelga de `models.data_dir()`: en Windows es la misma ruta
-  de siempre; en macOS/Linux, `~/Library/Application Support/speechtotext` y
-  `~/.local/share/speechtotext`. `SPEECHTOTEXT_HOME` manda si está puesto.
-- `benchmark._nvidia_smi/_ram_gb/_pinned_exe/machine_info` se fueron a `core.probe`
-  (`machine_info()` sigue en `benchmark` como adaptador del schema v1).
-- `WhisperCppBackend.device` es `"native"` y `engine_version` es
-  `"whisper.cpp (PATH, sin pin)"` fuera de Windows.
-- `engine.selection` en el JSON vale `"auto"` cuando el motor lo eligió el sondeo (antes
-  siempre `"explicit"`); `transcribe()` acepta `route=` para no sondear dos veces.
+  Migration: import what was extracted from its new package; wrap
+  `FasterWhisperBackend` with your own verification, passing
+  `model=artifact.root` and `model_version=artifact.manifest.revision`;
+  convert each artifact to `ModelRef(manifest.model_id, artifact.fingerprint)`
+  before deriving provenance. With a path, the result's `model` becomes the
+  directory name (`Path.name`), not the manifest's `model_id`; if your
+  wrapper needs to keep that id, override the backend's `model_id`
+  property.
+- **`AsrBackend.transcribe` now takes samples, not an `AudioClip`**: float32
+  mono at 16 kHz. Whoever has a clip passes `clip.view("asr").samples`. The
+  Protocol also declares `caps`, `engine_version`, `quant` and `device`.
+- `TranscriptionRequest` gains `vad: bool = False`; it enters the
+  `fingerprint`, so request fingerprints change once. `language="auto"` is
+  valid.
+- The text of `TranscriptionSegment` and `TranscriptionWord` is now
+  returned raw (with the engine's leading space); `result.text` is still
+  trimmed.
+- `speakers.diarization.diarize(samples, sample_rate, num_speakers=None)`
+  now takes samples; `read_wav(path)` reads them from a wav.
+  `embed_voice(wav_path)` does not change.
+- `core.chunked`: `chunk_path(identity, start, end)`; `run_chunked`,
+  `transcribe_chunk` and `probe_duration` are gone. Old checkpoints stop
+  matching and get recomputed.
+- `core/engines.py` is gone: the whisper.cpp adapter is
+  `asr.whispercpp.WhisperCppBackend`, and the CAPS live in each backend.
+- **CLI defaults:** `-m large-v3`, `--no-vad`, `-l auto`, `--engine auto`,
+  `-d auto` (previously `small`, `--vad`, `es`, `faster-whisper`, `cpu`).
+  Whoever relied on the default now passes it explicitly. Same for `find`
+  (`large-v3`, `auto`).
+- `Route` now lives in `core.probe` (still importable from
+  `core.transcribe`) and gains `eta_factor` and `estimated`;
+  `resolve_route()` now probes the machine and can raise
+  `AsrError("insufficient_resources")` when the model does not fit in RAM.
+- `Progress`: new `download` stage; with a file, `decode` is now emitted
+  twice (before, indeterminate; after, `done = total = duration`).
+- `enginepin.install_root()` now hangs off `models.data_dir()`: on Windows
+  it is the same path as always; on macOS/Linux,
+  `~/Library/Application Support/speechtotext` and
+  `~/.local/share/speechtotext`. `SPEECHTOTEXT_HOME` wins if it is set.
+- `benchmark._nvidia_smi/_ram_gb/_pinned_exe/machine_info` moved to
+  `core.probe` (`machine_info()` stays in `benchmark` as an adapter for
+  the v1 schema).
+- `WhisperCppBackend.device` is `"native"` and `engine_version` is
+  `"whisper.cpp (PATH, unpinned)"` outside Windows.
+- `engine.selection` in the JSON is `"auto"` when the engine was chosen by
+  the probe (previously always `"explicit"`); `transcribe()` accepts
+  `route=` so it doesn't have to probe twice.
 
 ---
 
 ## v0.5.1 — 2026-09-12
 
-### Añadido
+### Added
 
-- Las señales nativas del motor llegan al JSON: cada segmento puede traer
-  `no_speech`, `avg_logprob` y `compression_ratio` (#23). Un valor no finito se
-  trata como ausencia de medida y la clave se omite, en vez de escribir `NaN`,
-  que ni siquiera es JSON válido. Contrato en [`docs/api.md`](docs/api.md#esquema-del-json).
-- Documentación del contrato para consumidores (`docs/api.md`) y este changelog.
+- The engine's native signals reach the JSON: every segment can carry
+  `no_speech`, `avg_logprob` and `compression_ratio` (#23). A non-finite
+  value is treated as absence of measurement and the key is omitted,
+  instead of writing `NaN`, which is not even valid JSON. Contract in
+  [`docs/api.md`](docs/api.md#json-schema).
+- Contract documentation for consumers (`docs/api.md`) and this changelog.
 
-### Arreglado
+### Fixed
 
-- Con `--chunk`, Whisper podía emitir un segmento sobre el relleno de ceros de la
-  última ventana de un trozo (una despedida de YouTube con 30 s de marca falsa) y
-  ese segmento caía encima del trozo siguiente. Ahora se recorta al final real del
-  trozo, también al leer checkpoints viejos que lo traigan.
-- `speechtotext.__version__` decía `0.3.0` desde hace dos tags, y el docstring del
-  paquete seguía anunciando un servicio HTTP de pronunciación que se fue en la
-  `0.4.0`.
+- With `--chunk`, Whisper could emit a segment over the zero-padding of a
+  chunk's last window (a YouTube outro with a 30 s false mark), and that
+  segment landed on top of the next chunk. Now it is clipped to the
+  chunk's real end, including when reading old checkpoints that carry it.
+- `speechtotext.__version__` had said `0.3.0` for two tags, and the
+  package's docstring still advertised a pronunciation HTTP service that
+  left in `0.4.0`.
 
 ---
 
 ## v0.5.0 — 2026-09-11
 
-### Añadido
+### Added
 
-- **Evidencia de voz por DSP determinista** (#22): `compute_voice_evidence` mide
-  energía en la banda de voz, proporción de tramos sonoros, F0 mediana y planitud
-  espectral. Son medidas, no veredictos — el módulo no clasifica voz contra
-  no-voz a propósito, y distingue "no pude medir" (`None`) de "medí y no hay"
-  (`0.0`). Contrato en [`docs/api.md`](docs/api.md#evidencia-de-voz).
+- **Voice evidence via deterministic DSP** (#22): `compute_voice_evidence`
+  measures energy in the voice band, ratio of voiced frames, median F0 and
+  spectral flatness. These are measurements, not verdicts — the module
+  deliberately does not classify voice against non-voice, and it
+  distinguishes "could not measure" (`None`) from "measured, and there is
+  none" (`0.0`). Contract in [`docs/api.md`](docs/api.md#voice-evidence).
 
-### Cambiado — rompe
+### Changed — breaking
 
-- **El registro de voces archiva y filtra por modelo.** `registry.enroll` exige
-  ahora `model`, y `registry.get_embeddings(model)` exige el modelo como
-  argumento obligatorio: el coseno entre dos espacios vectoriales distintos no
-  significa nada, así que una voz solo se compara contra vectores del mismo
-  extractor.
+- **The voice registry files and filters by model.** `registry.enroll` now
+  requires `model`, and `registry.get_embeddings(model)` requires the
+  model as a mandatory argument: the cosine between two different vector
+  spaces means nothing, so a voice is only ever compared against vectors
+  from the same extractor.
 
-  Migración: los manifiestos planos de la `0.4.x` se siguen leyendo — se
-  reagrupan en memoria al cargar y el disco se reescribe al formato nuevo en el
-  siguiente `enroll` o `remove`. Lo que sí hay que tocar es el código: cualquier
-  `get_embeddings()` sin argumento levanta `TypeError`.
+  Migration: the flat manifests from `0.4.x` are still readable — they are
+  regrouped in memory on load, and the file on disk is rewritten to the
+  new format on the next `enroll` or `remove`. What you do have to touch
+  is the code: any `get_embeddings()` without an argument now raises
+  `TypeError`.
 
-  Cuidado con el modo de fallo silencioso: pedir un modelo sin voces enroladas
-  devuelve `{}`, no un error. Un nombre mal escrito se ve igual que un registro
-  vacío.
+  Watch out for the silent-failure mode: asking for a model with no
+  enrolled voices returns `{}`, not an error. A misspelled name looks
+  exactly like an empty registry.
 
 ---
 
 ## v0.4.0 — 2026-08-07
 
-### Cambiado — rompe
+### Changed — breaking
 
-- **Se extrajo el servicio HTTP de evaluación de pronunciación** (FastAPI +
-  Azure). Vivía en `api/` y hoy vive adaptado
-  (su único consumidor). Esta librería quedó como lo que es: voz a texto local, sin servidor y
-  sin dependencias de nube.
-- A partir de aquí el repo se consume como **librería versionada por tags**. Los
-  consumidores fijan tag o SHA, nunca `@main`: cambio que un consumidor necesite
-  entra por PR aquí, se taggea, y recién entonces se sube el pin allá.
+- **The pronunciation-evaluation HTTP service was extracted** (FastAPI +
+  Azure). It used to live in `api/`, and today it lives adapted in its one
+  consumer. This library ended up as what it is: local speech to text, no
+  server and no cloud dependencies.
+- From here on the repo is consumed as a **library versioned by tags**.
+  Consumers pin a tag or a SHA, never `@main`: a change a consumer needs
+  goes in through a PR here, gets tagged, and only then does the pin move
+  there.
