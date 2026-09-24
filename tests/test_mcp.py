@@ -68,11 +68,27 @@ def test_transcribe_writes_the_json_next_to_the_audio_and_returns_the_text(monke
     # No progress: a callback that prints would break the stdio protocol.
     assert seen["kw"]["on_progress"] is None
     assert seen["kw"]["model"] == "large-v3" and seen["kw"]["language"] == "auto"
-    assert seen["kw"]["diarize"] is False
+    assert seen["kw"]["diarize"] is False and seen["kw"]["diarizer"] == "pyannote"
     # The audio being transcribed is the requested file. `result["json"]` is derived
     # from the tool's own argument, so without this check a copy that passed another
     # path to the core would satisfy all eleven assertions above.
     assert seen["path"] == Path(str(audio))
+
+
+def test_transcribe_passes_the_diarizer_through(monkeypatch, tmp_path):
+    # An agent that asks for nemotron and silently gets pyannote waits ~30x longer, with no
+    # progress to tell it why: the choice has to reach the core.
+    audio = tmp_path / "call.wav"
+    audio.write_bytes(b"x")
+    seen = {}
+
+    def fake_transcribe(path, **kw):
+        seen.update(kw)
+        return _transcript([LabeledSegment(0.0, 3.0, " hello", "Speaker 1")])
+
+    monkeypatch.setattr(core_transcribe, "transcribe", fake_transcribe)
+    mcp_server.transcribe(str(audio), diarize=True, diarizer="nemotron")
+    assert (seen["diarize"], seen["diarizer"]) == (True, "nemotron")
 
 
 def test_find_returns_the_regions_without_extracting_them(monkeypatch, tmp_path):

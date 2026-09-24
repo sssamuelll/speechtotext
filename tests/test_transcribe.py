@@ -94,6 +94,9 @@ def test_engine_info_omits_diarization_when_not_applicable():
         "quant": "int8", "device": "cpu", "selection": "explicit",
     }
     assert EngineInfo("whispercpp", "v", "small", "q5_0", "cuda", diarization="segment").to_dict()["diarization"] == "segment"
+    with_diarizer = EngineInfo("faster-whisper", "v", "large-v3", "int8", "cpu", diarization="word",
+                               diarizer="nvidia/Nemotron-3-Diarization").to_dict()
+    assert with_diarizer["diarizer"] == "nvidia/Nemotron-3-Diarization"
 
 
 # --- orchestration -------------------------------------------------------------------
@@ -381,6 +384,7 @@ def test_diarization_uses_the_same_samples_and_measures_beforehand(monkeypatch):
     assert t.segments[0].src_dur == 30.0            # Span emitted by ASR, for is_suspect
     assert t.speech_s == 30.0 and t.gaps == []      # Measured BEFORE diarization
     assert t.engine.diarization == "word"
+    assert t.engine.diarizer == diarization.EMBEDDING_MODEL   # pyannote stays the default
     assert t.diarization.speakers == 1 and t.diarization.identified == 1 and t.diarization.auto is False
 
 
@@ -394,6 +398,86 @@ def test_diarization_without_the_extra_is_an_error_with_a_code(monkeypatch):
     with pytest.raises(AsrError) as ei:
         core.transcribe(_zeros(5.0), backend=FakeBackend(), diarize=True, chunk=False)
     assert ei.value.code == "diarize_unavailable" and "[diarize]" in str(ei.value)
+
+
+# --- the second diarizer: Nemotron ------------------------------------------------------
+
+def _nemotron(monkeypatch, turns, *, enrolled=None, missing=None):
+    """Stub the model boundary (nemotron.diarize, its dependency check, the voice registry);
+    assignment, naming and the report run for real."""
+    from speechtotext.speakers import nemotron, registry
+
+    observed = {}
+
+    def fake_diarize(samples, sample_rate):
+        observed.update(n=len(samples), sr=sample_rate)
+        return turns
+
+    monkeypatch.setattr(nemotron, "diarize", fake_diarize)
+    monkeypatch.setattr(nemotron, "missing", lambda: missing)
+    monkeypatch.setattr(registry, "get_embeddings", lambda model: dict(enrolled or {}))
+    return observed
+
+
+def test_nemotron_diarizes_the_same_samples_and_the_json_says_which_diarizer_ran(monkeypatch):
+    observed = _nemotron(monkeypatch, [(0.0, 30.0, "speaker_0")])
+    t = core.transcribe(_zeros(30.0), backend=FakeBackend([(0.0, 30.0, " Gracias.")]),
+                        diarize=True, diarizer="nemotron", chunk=False)
+    assert observed == {"n": 30 * 16000, "sr": 16000}
+    assert t.segments[0].speaker == "Speaker 1"
+    assert t.engine.to_dict()["diarizer"] == "nvidia/Nemotron-3-Diarization"
+    assert t.diarization.speakers == 1 and t.diarization.auto is True
+    assert t.warnings == ()
+
+
+def test_nemotron_refuses_a_speaker_count_before_any_work(monkeypatch):
+    # The model takes no count: honoring it is impossible and dropping it quietly would let
+    # the user believe it applied. The run does not start.
+    _nemotron(monkeypatch, [(0.0, 30.0, "speaker_0")])
+    backend = FakeBackend([(0.0, 30.0, " x")])
+    with pytest.raises(AsrError) as ei:
+        core.transcribe(_zeros(30.0), backend=backend, diarize=True, diarizer="nemotron",
+                        speakers=2, chunk=False)
+    assert ei.value.code == "unsupported_option" and "--speakers" in str(ei.value)
+    assert backend.calls == [] and backend.warmed == 0
+
+
+def test_nemotron_leaves_enrolled_voices_uncompared_and_says_so(monkeypatch):
+    voices = {"Alice": np.array([1.0, 0.0]), "Bob": np.array([0.0, 1.0])}
+    _nemotron(monkeypatch, [(0.0, 30.0, "speaker_0")], enrolled=voices)
+    backend = FakeBackend([(0.0, 30.0, " x")])
+    t = core.transcribe(_zeros(30.0), backend=backend, diarize=True, diarizer="nemotron", chunk=False)
+    assert t.segments[0].speaker == "Speaker 1"                # no name was put on anyone
+    assert (t.diarization.enrolled, t.diarization.identified) == (0, 0)
+    assert len([w for w in t.warnings if "2 enrolled voices" in w]) == 1
+
+    # --no-identify asked for no names: there is nothing to warn about.
+    t = core.transcribe(_zeros(30.0), backend=backend, diarize=True, diarizer="nemotron",
+                        identify=False, chunk=False)
+    assert t.warnings == ()
+
+
+def test_a_missing_nemotron_stops_before_the_transcription_starts(monkeypatch):
+    # The check exists so that a missing dependency costs milliseconds, not an hour of ASR.
+    _nemotron(monkeypatch, [], missing="transformers is not installed; pip install ...")
+    backend = FakeBackend()
+    with pytest.raises(AsrError) as ei:
+        core.transcribe(_zeros(5.0), backend=backend, diarize=True, diarizer="nemotron", chunk=False)
+    assert ei.value.code == "diarize_unavailable" and "transformers is not installed" in str(ei.value)
+    assert backend.calls == [] and backend.warmed == 0
+
+
+def test_the_nemotron_check_only_runs_when_diarizing(monkeypatch):
+    _nemotron(monkeypatch, [], missing="transformers is not installed; pip install ...")
+    t = core.transcribe(_zeros(5.0), backend=FakeBackend(), diarizer="nemotron", chunk=False)
+    assert t.diarization is None and "diarizer" not in t.engine.to_dict()
+
+
+def test_an_unknown_diarizer_is_rejected_before_decoding():
+    backend = FakeBackend()
+    with pytest.raises(ValueError, match="pyannote"):
+        core.transcribe(_zeros(5.0), backend=backend, diarize=True, diarizer="whisperx", chunk=False)
+    assert backend.calls == []
 
 
 # --- engine warnings and mid-pool cancellation ------------------------------------------

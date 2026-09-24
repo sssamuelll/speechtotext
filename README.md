@@ -60,6 +60,11 @@ pip install -e .
 # CLI + diarization and speaker identification (pyannote + torch, ~2 GB)
 pip install -e ".[diarize]"
 
+# The faster diarizer, --diarizer nemotron (transformers + torch + librosa).
+# transformers ships it from 5.18; until that release, install transformers from git first:
+pip install "transformers @ git+https://github.com/huggingface/transformers@f324707307757d9c0b8dac1c4462eceff911fa2f"
+pip install -e ".[nemotron]"
+
 # Test suite
 pip install -e ".[dev]"
 
@@ -110,7 +115,8 @@ speechtotext transcribe interview.m4a -o transcripts/ --device cuda
 | `--hotwords-file` | — | A file with those terms, one per line. |
 | `--chunk / --no-chunk` | auto | Chunk the audio; automatic above 20 minutes. |
 | `--jobs`, `-j` | `4` | Chunks transcribed in parallel. |
-| `--diarize`, `-D` | off | Mark who is speaking (needs the `[diarize]` extra). |
+| `--diarize`, `-D` | off | Mark who is speaking (needs the `[diarize]` extra, or `[nemotron]` with `--diarizer nemotron`). |
+| `--diarizer` | `pyannote` | `pyannote` or `nemotron`, about 30× faster on CPU (see [Two diarizers](#two-diarizers)). |
 | `--speakers` | auto | Number of speakers, as a hint (for example `2`); auto when omitted. |
 | `--identify / --no-identify` | `--identify` | Put names to the voices enrolled with `enroll`. |
 | `--threshold` | `0.5` | Voice match threshold (cosine, 0-1). |
@@ -331,10 +337,52 @@ In `json` every segment gains a `"speaker"` field and there is a top-level
 `"speakers"`; in `srt`/`vtt` the speaker prefixes each line. Without
 `--diarize`, the output is unchanged.
 
+### Two diarizers
+
+`--diarizer pyannote`, the default, and `--diarizer nemotron`
+([Nemotron-3-Diarization](https://huggingface.co/nvidia/Nemotron-3-Diarization))
+answer the same question, who spoke when, at very different cost:
+
+| | `pyannote` (community-1) | `nemotron` |
+|---|---|---|
+| 64 minutes of a call, CPU | 25 min | 55 s |
+| Peak RAM of that step | 1.7-1.9 GB | 1.7 GB |
+| `--speakers` | honored | an error: the run does not start |
+| Names from `enroll` | yes | no: it gives no voice embeddings |
+| Install | `[diarize]` + a Hugging Face token | `[nemotron]`, no token |
+
+Measured on 2026-09-24 on a Ryzen 9 5900X (12 threads, CPU only), both over the
+same transcription:
+
+- **A 64-minute two-person video call in Spanish**, scored against the call
+  platform's own speaker labels (it receives one audio stream per
+  participant) over the 6,970 words both transcripts agree on. Words given to
+  the wrong speaker: pyannote with `--speakers 2` 1.15%, Nemotron 1.55%,
+  pyannote without the count 1.75%. Told the count, pyannote is the more
+  accurate; without it the two are level.
+- **Four AMI test meetings** (four speakers, English), diarization error rate
+  with no collar: pyannote 20.1%, Nemotron 30.1% as it ships. Almost all of
+  Nemotron's error is missed speech: it ends a turn at every pause, and AMI's
+  references bridge short pauses. Merging a speaker's gaps under one second
+  brings it to 17.4%, a value tuned on those same meetings. A transcript does
+  not feel this, because a word that falls in a pause keeps the speaker of
+  the words around it.
+
+What this does not prove: one call and four meetings. The call counts only
+words both transcripts agree on, so crosstalk is under-represented, and in
+crosstalk a third of the words went to the wrong speaker under either
+diarizer.
+
+Nemotron downloads about 400 MB once, from a pinned revision. It is not gated
+and its license ([OpenMDW 1.1](https://openmdw.ai/license/1-1/)) allows
+commercial use. Its speakers are numbered in the order they first speak.
+
 ### Limits
 
-- It labels at **segment level**, not word level: a turn change in the middle of
-  a segment goes to a single speaker.
+- With `faster-whisper`, words are attributed one by one, so a turn change
+  inside a segment splits it. Under `whispercpp` there are no word timestamps
+  and a whole segment goes to one speaker; on the call above that doubled the
+  words given to the wrong speaker (2.3-2.5% against 1.2-1.8%).
 - Identification depends on the quality of the enrollment and on `--threshold`;
   very similar voices can be confused.
 - It works on CPU, but diarization adds time on top of the transcription.
@@ -372,6 +420,7 @@ speechtotext find recording.mp3 "interview" --extract --region 2 -D --speakers 4
 | `--language`, `-l` | `auto` | Language for transcribing the clip. |
 | `--formats`, `-f` | `txt,srt` | Output formats for the clip. |
 | `--diarize`, `-D` | off | Diarize the extracted clip. |
+| `--diarizer` | `pyannote` | `pyannote` or `nemotron` (see [Two diarizers](#two-diarizers)). |
 | `--speakers` | none | Number of speakers (a hint). |
 | `--identify` / `--no-identify` | on | Name enrolled voices. |
 | `--threshold` | `0.5` | Voice match threshold (cosine, 0-1). |
@@ -390,8 +439,8 @@ ignores accents and case.
 > and `beam-size 5` fixed. `--engine`, `--chunk` and `--jobs` aren't exposed
 > either -- for those, extract first and then run `transcribe` on the clip.
 > Everything else `find` accepts (`--model`, `--language`, `--formats`,
-> `--diarize`, `--speakers`, `--identify`, `--threshold`, `--hotwords`) passes
-> straight through.
+> `--diarize`, `--diarizer`, `--speakers`, `--identify`, `--threshold`,
+> `--hotwords`) passes straight through.
 
 ---
 
@@ -437,7 +486,7 @@ Desktop. It needs the extra: `pip install -e ".[mcp]"`.
 
 | Tool | What it does |
 |---|---|
-| `transcribe(path, language?, model?, diarize?)` | Transcribes and writes the JSON next to the audio; returns the text and the path. |
+| `transcribe(path, language?, model?, diarize?, diarizer?)` | Transcribes and writes the JSON next to the audio; returns the text and the path. `diarizer` is `pyannote` (default) or `nemotron`. |
 | `find(path, query)` | The regions of the audio where the query appears, without transcribing all of it. |
 | `voices()` | The enrolled voices. |
 | `probe()` | What the machine has and which route `transcribe` would pick. |

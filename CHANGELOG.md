@@ -12,6 +12,19 @@ library.
 
 ### Added
 
+- A second diarizer: `--diarizer nemotron` (and `transcribe(diarizer="nemotron")`)
+  runs NVIDIA's Nemotron-3-Diarization, behind the new `[nemotron]` extra. On
+  CPU it diarized 64 minutes in 55 s where pyannote took 25 minutes, with the
+  same share of misattributed words when neither is told the speaker count.
+  It counts speakers itself, so `--speakers` with it is an error and the run
+  does not start. It gives no embeddings, so enrolled voices are not named,
+  and `warnings` says so. A missing dependency also stops the run before the
+  transcription starts. pyannote stays the default. Until transformers 5.18
+  is released, the extra needs transformers installed from git (README).
+- The MCP `transcribe` tool gains `diarizer`, with the same two values.
+- **New contract**: `speakers.nemotron.diarize` and `speakers.nemotron.missing`.
+- The JSON `engine` block gains `diarizer`, the id of the model that drew the
+  turns, whenever there was diarization.
 - `core.transcribe.transcribe()`: a file (or samples) goes in, a `Transcript`
   comes out, with progress by callback and cancellation. A single audio
   decode; the short file and the long one travel the same path. Contract in

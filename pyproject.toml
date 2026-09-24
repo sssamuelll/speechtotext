@@ -26,6 +26,14 @@ diarize = [
     "pyannote.audio>=4.0",
     "torch>=2.0",
 ]
+# NVIDIA Nemotron-3-Diarization (OpenMDW-1.1, not gated). transformers ships it from 5.18; until
+# that release this requirement only resolves against a git install of transformers (README),
+# and once 5.18 is on PyPI it resolves by itself. librosa is the feature extractor's.
+nemotron = [
+    "transformers>=5.18.0.dev0",
+    "torch>=2.0",
+    "librosa>=0.10",
+]
 dev = [
     "hypothesis>=6.156,<7",
     "pytest>=9,<10",

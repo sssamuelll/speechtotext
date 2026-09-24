@@ -16,14 +16,18 @@ NAME = "speechtotext"
 
 
 def transcribe(path: str, language: str = "auto", model: str = "large-v3",
-               diarize: bool = False) -> dict:
-    """Transcribe a local audio or video file and write the JSON next to it."""
+               diarize: bool = False, diarizer: str = "pyannote") -> dict:
+    """Transcribe a local audio or video file and write the JSON next to it.
+
+    diarize marks who speaks. diarizer is "pyannote" (default; names enrolled voices) or
+    "nemotron" (about 30x faster on CPU, no names; needs the [nemotron] extra)."""
     from speechtotext.core.formats import write_json
     from speechtotext.core import transcribe as core_transcribe
 
     audio = Path(path)
     t = core_transcribe.transcribe(
-        audio, model=model, language=language, diarize=diarize, on_progress=None
+        audio, model=model, language=language, diarize=diarize, diarizer=diarizer,
+        on_progress=None,
     )
     dest = audio.with_suffix(".json")   # same default as the CLI without -o
     info = SimpleNamespace(language=t.language,

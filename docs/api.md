@@ -29,7 +29,8 @@ value; none of them ever appears as `null`.
     "quant": "int8",
     "device": "cpu",
     "selection": "explicit",
-    "diarization": "segment"
+    "diarization": "segment",
+    "diarizer": "pyannote/speaker-diarization-community-1"
   },
   "segments": [
     {
@@ -57,7 +58,7 @@ value; none of them ever appears as `null`.
 | `speech_s` | `float` | Always. Sum of the duration of the segments with speech. |
 | `gaps` | `[[float, float], …]` | Always. Gaps with no speech of 5 s or more, as `[start, end]` pairs. |
 | `speakers` | `[str, …]` | Only if the run produced speakers. |
-| `engine` | `object` | Only if the CLI reports it. Includes `diarization: "segment"` or `"word"` when `--diarize` was used. `selection` is `"auto"` if the engine was chosen by the probe (`--engine auto`) and `"explicit"` if the user asked for it. |
+| `engine` | `object` | Only if the CLI reports it. Includes `diarization: "segment"` or `"word"` when `--diarize` was used, and `diarizer`, the id of the diarization model that drew the turns (`pyannote/speaker-diarization-community-1` or `nvidia/Nemotron-3-Diarization`). `selection` is `"auto"` if the engine was chosen by the probe (`--engine auto`) and `"explicit"` if the user asked for it. |
 | `segments` | `[object, …]` | Always. |
 
 ### Each segment
@@ -376,6 +377,24 @@ that the pipeline does not return, shows up in `turns` but not in
 `embeddings`. Requires the `[diarize]` extra; the pipeline loads once per
 process.
 
+`speakers.nemotron.diarize(samples, sample_rate)` is the second diarizer,
+NVIDIA's Nemotron-3-Diarization at a pinned revision. It returns `turns`
+only, in the same `(start, end, speaker_id)` shape, with `speaker_0`,
+`speaker_1`, … numbered by first arrival and at most eight of them. There
+are no embeddings, so its speakers cannot be compared against the registry,
+and there is no speaker-count hint: the model decides. The turns are the
+model's 10 ms frames above 0.5, unmerged, so a pause ends a turn and
+overlapped speech gives overlapping turns. It takes 16 kHz audio and raises
+`ValueError` for any other rate. Audio shorter than 80 ms gives `[]` without
+loading the model. Requires the `[nemotron]` extra; the model loads once per
+process, and anything transformers prints while loading goes to stderr,
+never stdout.
+
+`speakers.nemotron.missing()` returns `None` when that extra can run, or a
+sentence naming what is missing with the command that installs it. It
+imports nothing heavy, which is why `transcribe()` asks it before the
+transcription starts rather than failing after it.
+
 ---
 
 ## Non-finite signals: two policies, on purpose
@@ -476,6 +495,17 @@ Errors: `AsrError(code, recoverable, message)` with `code` in
 `backend=` lets you reuse a warm model across calls. `route=` takes an
 already-resolved `Route` (the CLI probes, prints the reason and passes it
 in: the machine gets looked at exactly once).
+
+`diarizer=` picks who draws the turns when `diarize=True`: `"pyannote"`
+(the default) or `"nemotron"`. Anything else is a `ValueError` before the
+audio is decoded. With `"nemotron"`, a missing dependency is
+`AsrError("diarize_unavailable")` before any transcription, carrying
+`speakers.nemotron.missing()`'s sentence. Nemotron counts speakers itself,
+so passing `speakers` with it is `AsrError("unsupported_option")`, also
+before any work. It puts no names on anyone. When voices are enrolled and
+`identify` is on, `warnings` says they were not compared, and
+`DiarizationReport.enrolled` is `0`. Its `speakers` is the number of
+distinct speakers in the turns.
 
 ---
 

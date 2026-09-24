@@ -60,6 +60,8 @@ CONTRACT = (
     "speechtotext.speakers.identify.assign_names",
     "speechtotext.speakers.diarization.diarize",
     "speechtotext.speakers.diarization.embed_voice",
+    "speechtotext.speakers.nemotron.diarize",
+    "speechtotext.speakers.nemotron.missing",
     "speechtotext.asr.base.AsrError",
     "speechtotext.asr.faster_whisper.FasterWhisperBackend",
     "speechtotext.asr.whispercpp.WhisperCppBackend",

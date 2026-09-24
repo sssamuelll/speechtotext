@@ -144,6 +144,46 @@ model, quantization, device, and the effective request. Two engines over the
 same audio never share a digest. `--vad` and `--no-vad` under whisper.cpp do
 share one, because the effective request is identical.
 
+## Two diarizers, and the slow one is still the default
+
+In September 2026 a public leaderboard ranked pyannote's community-1, the
+diarizer here, sixth of twelve at 30.6% DER, and NVIDIA's
+Nemotron-3-Diarization first at 14.7%. That leaderboard is English, and it
+never tells a system how many people are speaking. Measured on this
+project's terms, most of the gap did not survive.
+
+On a 64-minute two-person call in Spanish, scored word by word against the
+call platform's own per-participant labels, pyannote told the count gave
+1.15% of the words to the wrong speaker and Nemotron 1.55%. Not told the
+count, pyannote gave 1.75%. For the recordings this tool was built for,
+pyannote with `--speakers` is the more accurate of the two. On four AMI
+meetings Nemotron as it ships scored worse, 30.1% against 20.1%, and the
+cause was not the model. The transformers port hands out bare frames above
+a threshold, so every pause ends a turn, and AMI's references bridge
+pauses. Merging sub-second gaps took it to 17.4%.
+
+What did survive is the clock: 55 seconds against 25 minutes for the same
+hour of audio on the same CPU. That earns a flag, not the default, because
+the default keeps the speaker count and the names, and because Nemotron's
+install is a git pin until transformers 5.18 ships.
+
+Wiring it settled three smaller things:
+
+- **Its features are computed in pieces.** A single pass over 64 minutes
+  peaked at 4.0 GB inside the STFT; in pieces the whole step peaks at 1.7
+  GB. The pieces are allowed only because a test shows they change nothing
+  the model sees, and on the real call the turns came out identical.
+- **It checks its dependencies before the transcription starts.**
+  Discovering a missing extra after an hour of ASR is the failure the
+  pyannote path still has.
+- **A count it cannot take is refused. Names it cannot give are a
+  warning.** Under Nemotron, `--speakers` would be inert, and by the rule
+  in the probe section an inert knob is rejected, so the run does not
+  start. Names are different. Identification is on by default, so refusing
+  would break every Nemotron run for anyone who ever enrolled a voice, and
+  the transcript is still what was asked for without them. That one is
+  degraded, and `warnings` says so.
+
 ## What a comparison against a commercial service settled
 
 In July 2026 this tool was measured against a commercial transcription service
