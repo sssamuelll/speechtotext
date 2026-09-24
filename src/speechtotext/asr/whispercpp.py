@@ -35,8 +35,9 @@ _NO_SIGNALS = SegmentNativeSignals(None, None, None)
 
 # What whisper-cli prints per segment while it decodes, -np included. Measured on v1.9.1
 # (2026-09-24): one burst per 30 s window, CRLF on Windows, a blank first line.
+# Two spaces after the closing bracket (format), then the segment text with its own leading space.
 _LIVE_LINE = re.compile(
-    r"^\[(\d+):(\d{2}):(\d{2})\.(\d{3}) --> (\d+):(\d{2}):(\d{2})\.(\d{3})\]\s?(.*)$"
+    r"^\[(\d+):(\d{2}):(\d{2})\.(\d{3}) --> (\d+):(\d{2}):(\d{2})\.(\d{3})\]  (.*)$"
 )
 
 

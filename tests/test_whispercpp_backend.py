@@ -244,7 +244,7 @@ def test_a_non_ascii_temp_base_fails_before_running(monkeypatch, tmp_path):
 
 
 def test_live_lines_become_segments_with_local_times():
-    segment = parse_live_line(b"[00:01:02.340 --> 01:00:00.000]  hello\r\n")
+    segment = parse_live_line(b"[00:01:02.340 --> 01:00:00.000]   hello\r\n")
     assert (segment.start, segment.end, segment.text) == (62.34, 3600.0, " hello")
     assert segment.words == () and segment.native_signals.no_speech is None
 
@@ -252,15 +252,17 @@ def test_live_lines_become_segments_with_local_times():
 def test_live_lines_tolerate_crlf_blank_lines_and_bad_bytes():
     assert parse_live_line(b"\r\n") is None                                  # the blank first line
     assert parse_live_line(b"whisper_init_from_file: loading model\n") is None
-    assert parse_live_line(b"[00:00:00.000 --> 00:00:01.000]   \r\n") is None  # no text
-    segment = parse_live_line(b"[00:00:01.000 --> 00:00:02.000]  caf\xe9\r\n")  # not UTF-8
+    assert parse_live_line(b"[00:00:00.000 --> 00:00:01.000]    \r\n") is None  # no text
+    segment = parse_live_line(b"[00:00:01.000 --> 00:00:02.000]   caf\xe9\r\n")  # not UTF-8
     assert segment is not None and segment.text.startswith(" caf")
+    segment = parse_live_line(b"[00:00:02.000 --> 00:00:03.000]   next\n")  # LF-only (macOS/Linux)
+    assert segment.text == " next"
 
 
 def test_each_live_line_reaches_the_callback_and_the_json_is_still_the_result():
     popen, _ = _popen_stub(lines=[b"\r\n",
-                                  b"[00:00:00.000 --> 00:00:01.500]  Segment one\r\n",
-                                  b"[00:00:01.500 --> 00:00:03.000]  Segment two\r\n"])
+                                  b"[00:00:00.000 --> 00:00:01.500]   Segment one\r\n",
+                                  b"[00:00:01.500 --> 00:00:03.000]   Segment two\r\n"])
     got = []
     result = _backend(popen).transcribe(_samples(), TranscriptionRequest(), on_segment=got.append)
     assert [(s.start, s.end, s.text) for s in got] == [(0.0, 1.5, " Segment one"),
@@ -270,7 +272,7 @@ def test_each_live_line_reaches_the_callback_and_the_json_is_still_the_result():
 
 def test_cancel_terminates_whisper_cli_and_reports_cancelled():
     stop = threading.Event()
-    popen, seen = _popen_stub(lines=[b"[00:00:00.000 --> 00:00:01.000]  one\r\n"], hang=True)
+    popen, seen = _popen_stub(lines=[b"[00:00:00.000 --> 00:00:01.000]   one\r\n"], hang=True)
     with pytest.raises(AsrError) as ei:
         _backend(popen).transcribe(_samples(), TranscriptionRequest(),
                                    on_segment=lambda s: stop.set(), cancel=stop)
@@ -289,7 +291,7 @@ def test_cancel_before_starting_never_launches_whisper_cli():
 
 
 def test_a_callback_error_kills_whisper_cli_and_propagates():
-    popen, seen = _popen_stub(lines=[b"[00:00:00.000 --> 00:00:01.000]  one\r\n"], hang=True)
+    popen, seen = _popen_stub(lines=[b"[00:00:00.000 --> 00:00:01.000]   one\r\n"], hang=True)
 
     def broken(segment):
         raise ValueError("bug in the caller")
