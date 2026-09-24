@@ -631,6 +631,17 @@ def test_silence_still_reaches_the_total():
     assert partials == []
 
 
+def test_done_reaches_the_exact_total_when_the_duration_does_not_round_evenly():
+    # 160007 samples: duration = 10.0004375 s. round(duration, 2) == 10.0, so a naive
+    # min(total, round(sum, 2)) caps the last event at 10.0 and it never reaches the
+    # unrounded total: the progress bar would stall just short of 100%.
+    samples = np.zeros(160007, dtype=np.float32)
+    duration = len(samples) / 16000
+    events = []
+    core.transcribe(samples, backend=FakeBackend(segments=()), chunk=False, on_progress=events.append)
+    assert _steps(events)[-1].done == _steps(events)[-1].total == duration
+
+
 def test_a_phantom_past_the_chunk_end_neither_overshoots_nor_previews():
     events, partials = [], []
     backend = FakeBackend([(1.0, 2.0, " real"), (9.9, 39.9, " Thanks for watching.")])
@@ -659,3 +670,34 @@ def test_cached_chunks_count_as_done_and_preview_nothing(tmp_path, monkeypatch):
     assert [(e.done, e.total) for e in _steps(events)] == [(600.0, 600.0)]
     assert _steps(events)[0].detail.endswith("(cache)")
     assert partials == [] and backend.calls == []
+
+
+def test_a_consumer_error_in_a_chunk_comes_out_as_it_is(tmp_path, monkeypatch):
+    # A callback bug (e.g. a UI widget already torn down) must never be relabeled as an
+    # engine failure: the plan's own review focus is that this comes out as it is.
+    audio = _two_chunks(tmp_path, monkeypatch)
+    backend = FakeBackend([(1.0, 2.0, " t")])
+
+    def boom(partial):
+        raise RuntimeError("consumer bug")
+
+    with pytest.raises(RuntimeError) as ei:
+        core.transcribe(audio, backend=backend, chunk=True, jobs=1, on_segment=boom)
+    assert str(ei.value) == "consumer bug"
+    assert not isinstance(ei.value, AsrError)
+    assert len(backend.calls) == 1     # chunk 2 never reached the engine
+
+
+def test_a_non_runtime_consumer_error_stops_the_pending_chunks(tmp_path, monkeypatch):
+    # Not every consumer bug is a RuntimeError: any exception type must still cancel the
+    # chunks still queued, not let them all reach the engine before it surfaces.
+    audio = _two_chunks(tmp_path, monkeypatch)
+    backend = FakeBackend([(1.0, 2.0, " t")])
+
+    def boom(partial):
+        raise ValueError("consumer bug")
+
+    with pytest.raises(ValueError) as ei:
+        core.transcribe(audio, backend=backend, chunk=True, jobs=1, on_segment=boom)
+    assert str(ei.value) == "consumer bug"
+    assert len(backend.calls) == 1     # chunk 2 never reached the engine

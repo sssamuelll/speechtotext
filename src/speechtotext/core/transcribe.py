@@ -162,6 +162,10 @@ class _Meter:
         self._on_segment = on_segment
         self._lock = threading.Lock()
         self._done: dict[int, float] = {}
+        # A consumer's own bug (a dead UI widget, a broken callback) must come out as it
+        # is, never disguised as an engine failure: recorded here so the pool loop can
+        # recognize it and re-raise it unchanged instead of wrapping it as backend_failed.
+        self.callback_error: BaseException | None = None
 
     def hook(self, span: int, start: float, end: float) -> Callable[[TranscriptionSegment], None]:
         """The engine callback for one chunk: local times in, global progress and text out."""
@@ -174,20 +178,31 @@ class _Meter:
             reached = min(segment.end, length)
             text = segment.text.strip()
             with self._lock:
-                if self._on_segment is not None and text:
-                    self._on_segment(PartialSegment(round(start + segment.start, 3),
-                                                    round(start + reached, 3), text))
-                self._advance(span, reached, detail)
+                try:
+                    if self._on_segment is not None and text:
+                        self._on_segment(PartialSegment(round(start + segment.start, 3),
+                                                        round(start + reached, 3), text))
+                    self._advance(span, reached, detail)
+                except BaseException as exc:
+                    self.callback_error = exc
+                    raise
 
         return on_local
 
     def finish(self, span: int, length: float, detail: str) -> None:
         with self._lock:
-            self._advance(span, length, detail)
+            try:
+                self._advance(span, length, detail)
+            except BaseException as exc:
+                self.callback_error = exc
+                raise
 
     def _advance(self, span: int, seconds: float, detail: str) -> None:
         self._done[span] = max(self._done.get(span, 0.0), seconds)
-        done = min(self._total, round(sum(self._done.values()), 2))
+        # round(total, 2) can be reached while the unrounded sum is still a hair short
+        # (len(samples) % 160 in 1..79): snap to the exact total rather than stall below it.
+        reached = round(sum(self._done.values()), 2)
+        done = self._total if reached >= round(self._total, 2) else reached
         self._emit(Progress("transcribe", done, self._total, detail))
 
 
@@ -252,10 +267,15 @@ def _identity(path: Path, backend: AsrBackend, request: TranscriptionRequest) ->
     ))
 
 
-def _run_span(backend, samples, request, start, end, identity, cancel, on_segment=None):
+def _run_span(backend, samples, request, start, end, identity, cancel, on_segment=None, meter=None):
     """(global segments, from_cache, language, probability, engine warnings). An old
     checkpoint can contain a phantom over the padding: clip_to_end also runs on read."""
     raise_if_cancelled(cancel)
+    if meter is not None and meter.callback_error is not None:
+        # A sibling chunk's consumer callback already failed: with jobs=1 this runs on the
+        # SAME thread that just recorded it, so the check is not a race against the main
+        # thread's pool.shutdown — it never reaches the engine for this chunk either.
+        raise meter.callback_error
     path = chunk_path(identity, start, end) if identity is not None else None
     if path is not None and path.exists():
         try:
@@ -446,35 +466,40 @@ def transcribe(
     meter = _Meter(duration, emit, on_segment)
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futs = {pool.submit(_run_span, backend, samples, eff, s, e, identity, cancel,
-                            meter.hook(i, s, e)): i
+                            meter.hook(i, s, e), meter): i
                 for i, (s, e) in enumerate(spans)}
-        for fut in as_completed(futs):
-            i = futs[fut]
-            s, e = spans[i]
-            try:
-                results[i], cached, langs[i], probs[i], span_warnings = fut.result()
-            except RuntimeError as exc:   # AsrError is also a RuntimeError
-                # On the first failure, pending work is canceled: with a broken engine and SLOW
-                # failures (paging, timeout), draining 17 chunks would take hours.
-                pool.shutdown(wait=False, cancel_futures=True)
-                if isinstance(exc, AsrError) and exc.code != "backend_failed":
-                    raise                                   # cancelled, unsupported_option: as-is
-                translated = _oom(exc, backend.backend_id)  # the wrapped message preserves the allocator text
-                if translated is not exc:
-                    raise translated from exc
-                if len(spans) == 1:
-                    raise
-                raise AsrError("backend_failed", True,
-                               f"engine {backend.backend_id} failed on chunk {i + 1}/{len(spans)} "
-                               f"({_mmss(s)}-{_mmss(e)}): {exc}") from exc
-            for w in span_warnings:
-                warning = f"{backend.backend_id}: {w}"
-                if warning not in extra:
-                    extra.append(warning)
-            span = e - s
-            cov = 100 * sum(x.end - x.start for x in results[i]) / span if span > 0 else 0.0
-            meter.finish(i, span, f"{_mmss(s)}-{_mmss(e)} {cov:.0f}% "
-                                  f"({'cache' if cached else 'new'})")
+        try:
+            for fut in as_completed(futs):
+                i = futs[fut]
+                s, e = spans[i]
+                try:
+                    results[i], cached, langs[i], probs[i], span_warnings = fut.result()
+                except RuntimeError as exc:   # AsrError is also a RuntimeError
+                    if exc is meter.callback_error:
+                        raise                                   # a consumer's own error: as-is, never disguised
+                    if isinstance(exc, AsrError) and exc.code != "backend_failed":
+                        raise                                   # cancelled, unsupported_option: as-is
+                    translated = _oom(exc, backend.backend_id)  # the wrapped message preserves the allocator text
+                    if translated is not exc:
+                        raise translated from exc
+                    if len(spans) == 1:
+                        raise
+                    raise AsrError("backend_failed", True,
+                                   f"engine {backend.backend_id} failed on chunk {i + 1}/{len(spans)} "
+                                   f"({_mmss(s)}-{_mmss(e)}): {exc}") from exc
+                for w in span_warnings:
+                    warning = f"{backend.backend_id}: {w}"
+                    if warning not in extra:
+                        extra.append(warning)
+                span = e - s
+                cov = 100 * sum(x.end - x.start for x in results[i]) / span if span > 0 else 0.0
+                meter.finish(i, span, f"{_mmss(s)}-{_mmss(e)} {cov:.0f}% "
+                                      f"({'cache' if cached else 'new'})")
+        except BaseException:
+            # On the first failure, pending work is canceled: with a broken engine and SLOW
+            # failures (paging, timeout), draining 17 chunks would take hours.
+            pool.shutdown(wait=False, cancel_futures=True)
+            raise
 
     segments = [seg for chunk_segs in results for seg in chunk_segs]
     detected = next((l for l in langs if l), None)

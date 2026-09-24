@@ -86,6 +86,7 @@ library.
   segment by segment, summed across the chunks running in parallel, and
   `total` is the duration; before, a file under 20 minutes jumped from 0 to 1.
   A finished chunk's `detail` ends in `(new)` instead of `(nuevo)`. <!-- # spanish-is-data: the old detail string being replaced -->
+  `on_progress` may now be called from worker threads, one call at a time.
 - `AsrBackend.transcribe` takes two keyword arguments, `on_segment` and
   `cancel`, and `transcribe()` passes both: a backend of your own has to accept
   them. The two built-in engines honor them between segments, so `cancel` now
