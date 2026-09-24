@@ -440,8 +440,9 @@ class AsrBackend(Protocol):
 `on_segment` receives each segment as soon as the engine has it, in order,
 with times local to `samples`. `cancel` is checked between segments: once it
 is set, the call raises `AsrError("cancelled")` instead of returning a partial
-result. Both engines decode 30-second windows, and that is the granularity of
-both.
+result. Both engines decode 30-second windows, so segments arrive in bursts,
+one per window. faster-whisper checks `cancel` as it hands over each segment;
+whisper.cpp ends its process as soon as `cancel` is set.
 
 `TranscriptionResult.segments` are
 `TranscriptionSegment(start, end, text, words, native_signals)`, and its

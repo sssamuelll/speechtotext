@@ -150,6 +150,10 @@ def _mmss(sec: float) -> str:
     return f"{m:02d}:{s:02d}"
 
 
+class _ConsumerFailed(Exception):
+    """A worker raises this after a consumer callback has failed; the main loop swaps it for the consumer's own exception."""
+
+
 class _Meter:
     """Seconds of audio transcribed so far, summed over the chunks running in parallel.
     Workers report from their own threads; the lock hands the callbacks one event at a time,
@@ -178,6 +182,8 @@ class _Meter:
             reached = min(segment.end, length)
             text = segment.text.strip()
             with self._lock:
+                if self.callback_error is not None:
+                    raise _ConsumerFailed()   # already failed elsewhere: never call it again
                 try:
                     if self._on_segment is not None and text:
                         self._on_segment(PartialSegment(round(start + segment.start, 3),
@@ -185,17 +191,22 @@ class _Meter:
                     self._advance(span, reached, detail)
                 except BaseException as exc:
                     self.callback_error = exc
-                    raise
+                    # A worker thread raises the marker, never the consumer's own object: with
+                    # N chunks still queued behind a broken callback, re-raising the same
+                    # exception on each of them would collect one false frame pair per chunk.
+                    raise _ConsumerFailed()
 
         return on_local
 
     def finish(self, span: int, length: float, detail: str) -> None:
         with self._lock:
+            if self.callback_error is not None:
+                raise self.callback_error   # already failed elsewhere: never call it again
             try:
                 self._advance(span, length, detail)
             except BaseException as exc:
                 self.callback_error = exc
-                raise
+                raise   # finish() already runs on the main thread: re-raise exc itself
 
     def _advance(self, span: int, seconds: float, detail: str) -> None:
         self._done[span] = max(self._done.get(span, 0.0), seconds)
@@ -274,8 +285,9 @@ def _run_span(backend, samples, request, start, end, identity, cancel, on_segmen
     if meter is not None and meter.callback_error is not None:
         # A sibling chunk's consumer callback already failed: with jobs=1 this runs on the
         # SAME thread that just recorded it, so the check is not a race against the main
-        # thread's pool.shutdown — it never reaches the engine for this chunk either.
-        raise meter.callback_error
+        # thread's pool.shutdown — it never reaches the engine for this chunk either. The
+        # marker, not the consumer's own object: see _ConsumerFailed.
+        raise _ConsumerFailed()
     path = chunk_path(identity, start, end) if identity is not None else None
     if path is not None and path.exists():
         try:
@@ -474,9 +486,9 @@ def transcribe(
                 s, e = spans[i]
                 try:
                     results[i], cached, langs[i], probs[i], span_warnings = fut.result()
+                except _ConsumerFailed:
+                    raise meter.callback_error from None   # a consumer's own error: as-is, never disguised
                 except RuntimeError as exc:   # AsrError is also a RuntimeError
-                    if exc is meter.callback_error:
-                        raise                                   # a consumer's own error: as-is, never disguised
                     if isinstance(exc, AsrError) and exc.code != "backend_failed":
                         raise                                   # cancelled, unsupported_option: as-is
                     translated = _oom(exc, backend.backend_id)  # the wrapped message preserves the allocator text

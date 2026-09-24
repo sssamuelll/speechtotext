@@ -701,3 +701,29 @@ def test_a_non_runtime_consumer_error_stops_the_pending_chunks(tmp_path, monkeyp
         core.transcribe(audio, backend=backend, chunk=True, jobs=1, on_segment=boom)
     assert str(ei.value) == "consumer bug"
     assert len(backend.calls) == 1     # chunk 2 never reached the engine
+
+
+def test_a_broken_consumer_is_called_once_even_with_parallel_chunks(tmp_path, monkeypatch):
+    # jobs=1 serializes chunks, so the single-chunk-at-a-time cases above cannot catch this:
+    # with jobs=2, two chunks can each be mid-callback when the other one fails, and a
+    # naive "is this THE recorded exception" check misses a second, freshly raised one.
+    audio = _two_chunks(tmp_path, monkeypatch)
+    barrier = threading.Barrier(2, timeout=5)
+
+    class SynchronizedBackend(FakeBackend):
+        def transcribe(self, samples, request, **kw):
+            barrier.wait()   # both chunks hand over their first segment at about the same time
+            return super().transcribe(samples, request, **kw)
+
+    backend = SynchronizedBackend([(1.0, 2.0, " t")])
+    calls = []
+
+    def boom(partial):
+        calls.append(1)
+        raise RuntimeError(f"consumer bug {len(calls)}")
+
+    with pytest.raises(RuntimeError) as ei:
+        core.transcribe(audio, backend=backend, chunk=True, jobs=2, on_segment=boom)
+    assert not isinstance(ei.value, AsrError)
+    assert str(ei.value) == "consumer bug 1"
+    assert len(calls) == 1
