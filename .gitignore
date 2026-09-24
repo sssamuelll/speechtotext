@@ -30,3 +30,6 @@ src/static/*.json
 # Anchored to the root so it doesn't sweep up a `models/` that shows up inside the package.
 .cache/
 /models/
+
+# Fonts scripts/hero_images.py downloads on first run
+scripts/.fonts/

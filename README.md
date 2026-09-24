@@ -1,186 +1,145 @@
-# speechtotext
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/img/hero-dark.svg">
+    <img alt="speechtotext. The audio never leaves your machine." src="docs/img/hero-light.svg" width="1200">
+  </picture>
+</p>
 
-A **100% local** speech-to-text library and CLI: transcription with
-[`faster-whisper`](https://github.com/SYSTRAN/faster-whisper), audio quality,
-diarization and speaker identification. No external APIs, no cost per use.
+<p align="center">
+  Local speech to text for files, with who said what.<br>
+  A Python library, a CLI and an MCP server over
+  <a href="https://github.com/SYSTRAN/faster-whisper">faster-whisper</a> and
+  <a href="https://github.com/ggml-org/whisper.cpp">whisper.cpp</a>.
+</p>
+
+<p align="center">
+  <a href="https://github.com/sssamuelll/speechtotext/actions/workflows/tests.yml"><img alt="tests" src="https://github.com/sssamuelll/speechtotext/actions/workflows/tests.yml/badge.svg"></a>
+  <a href="https://github.com/sssamuelll/speechtotext/releases"><img alt="release" src="https://img.shields.io/github/v/tag/sssamuelll/speechtotext?style=flat-square&label=release&sort=semver"></a>
+  <img alt="python" src="https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fsssamuelll%2Fspeechtotext%2Fmain%2Fpyproject.toml&style=flat-square">
+  <img alt="platform" src="https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-555?style=flat-square">
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/github/license/sssamuelll/speechtotext?style=flat-square"></a>
+</p>
+
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#what-it-does">What it does</a> ·
+  <a href="#measured-not-assumed">Measured</a> ·
+  <a href="#from-python">Python</a> ·
+  <a href="docs/README.md">Docs</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
+
+<p align="center">
+  <img alt="A terminal running speechtotext transcribe meeting.m4a --diarize --speakers 2: the route, the progress in minutes of audio, and the transcript with Speaker 1 and Speaker 2." src="docs/img/demo.gif" width="880">
+  <br>
+  <sub>Two synthetic voices from macOS text-to-speech. The run is real.</sub>
+</p>
 
 ## Why it is local
 
 This began as a script for a pile of interview recordings that could not leave
-the machine they sat on. They were other people's words, recorded and
-not yet published, and a transcription service would have meant handing them to
-a stranger. So the transcription had to run where the audio already was.
-Everything in this library follows from that: no API key, no account, no
-per-minute meter, and nothing uploaded.
+the machine they sat on. They were other people's words, recorded and not yet
+published, and a transcription service would have meant handing them to a
+stranger. So the transcription had to run where the audio already was.
+Everything here follows from that: no API key, no per-minute meter, nothing
+uploaded. Models download once; after that the machine works alone.
 
-## Scope
+## Install
 
-A file goes in, text comes out, and the audio stays where it was. That is the
-whole job: transcription, speaker labels, and the signals the engine emits along
-the way, as a Python library and a CLI.
+Python 3.11 or newer, and [ffmpeg](https://ffmpeg.org/) on the `PATH`
+(`brew install ffmpeg`, `apt install ffmpeg`, or the official Windows build).
+Then, as a tool:
+
+```bash
+uv tool install "speechtotext @ git+https://github.com/sssamuelll/speechtotext@v0.6.0"
+# or: pipx install "speechtotext @ git+https://github.com/sssamuelll/speechtotext@v0.6.0"
+```
+
+Extras: `[diarize]` for speakers and names (pyannote + torch, about 2 GB),
+`[nemotron]` for the [faster diarizer](docs/speakers.md#two-diarizers),
+`[mcp]` for the server.
+
+```bash
+uv tool install "speechtotext[diarize] @ git+https://github.com/sssamuelll/speechtotext@v0.6.0"
+```
+
+The first `transcribe` downloads `large-v3`, about 3 GB, once;
+`speechtotext models pull large-v3` does it ahead of time. Not on PyPI: the
+name is taken there. A project that imports the library pins the same tag in
+its requirements, and reads [`docs/api.md`](docs/api.md), the contract, and
+[`CHANGELOG.md`](CHANGELOG.md), where every break is written down.
+
+## Quick start
+
+```bash
+speechtotext transcribe meeting.m4a
+```
+
+```text
+no usable GPU: CPU
+Model large-v3 · engine faster-whisper · device cpu · compute int8
+Duration 0.5 min · ETA ~1 min (estimated)
+INFO:faster_whisper:Processing audio with duration 00:28.544
+INFO:faster_whisper:Detected language 'en' with probability 0.99
+  00:28 / 00:28 00:00-00:28 99% (new)
+Language detected: en (prob=0.99) · duration 28.5s · 7 segments · speech 0.5 of 0.5 min (99%) · engine faster-whisper
+no gaps of 5 s or more
+  OK meeting.json
+  OK meeting.srt
+  OK meeting.txt
+```
+
+That is a MacBook Air with 8 GB of RAM: no GPU, so the probe picked the CPU
+route, said what it would cost, and drew the progress in minutes of audio.
+The same file with speakers, on a machine with the `[diarize]` extra:
+
+```bash
+speechtotext transcribe meeting.m4a --diarize --speakers 2
+```
+
+```text
+Speaker 2: Morning. Did the overnight benchmark finish?
+Speaker 1: It did. The large model lost nothing on the 25 points. The small one dropped 3.
+Speaker 2: Then large stays the default. What did it cost?
+Speaker 1: About 5 times the clock. 11 minutes for a 14 minute meeting. On the CPU.
+```
+
+Anything ffmpeg can open goes in, audio or video. Three more commands cover
+most days:
+
+```bash
+speechtotext find lecture.mp3 "seismic vulnerability"   # where in three hours is this said
+speechtotext enroll "Alice" alice.wav                    # from now on, Alice is Alice, not Speaker 1
+speechtotext probe                                       # what your machine has and the route it gets
+```
+
+## What it does
+
+| | | |
+|---|---|---|
+| **Transcribe** | `txt`, `srt`, `vtt` and `json`, with `large-v3` by default because `small` [changes what was said](#measured-not-assumed). | [cli.md](docs/cli.md#transcribe) |
+| **Who said what** | Diarization marks the turns; a voice you enrolled once gets its name. Two diarizers, one 30× faster. | [speakers.md](docs/speakers.md) |
+| **Find a stretch** | A fast pass with `tiny` indexes the recording; then the full model transcribes only the region you want. | [cli.md](docs/cli.md#find) |
+| **Pick the route** | The probe reads the machine before loading anything: GPU with room, small GPU, or CPU. It fills in what you left on `auto` and never swaps the model in silence. | [Engines](#engines) |
+| **Long audio** | Above 20 minutes it chunks at silences, runs the chunks in parallel and checkpoints each one; an interrupted run resumes. | [cli.md](docs/cli.md#long-audio) |
+| **Say what not to trust** | The JSON carries the engine's own signals, `no_speech`, `avg_logprob`, `compression_ratio`, and marks a segment `suspect` when they say so. A suggestion to review, not a verdict. | [api.md](docs/api.md#json-schema) |
+| **Serve it** | Four tools over MCP on stdio, for a client such as Claude Desktop. | [cli.md](docs/cli.md#mcp) |
 
 What it deliberately does not do:
 
 - **No cloud.** Models download once; after that the machine works alone.
-- **No live path.** It reads files. Speaker embeddings take seconds per sample,
-  not milliseconds, and there is no streaming endpointer.
-- **No verdicts.** `audio/` measures the signal and `suspect` flags a segment
-  for review. Neither one decides whether a recording is good enough.
-- **No editing on top.** No summaries, no translation, no clean-up pass. The
-  text is what the engine said.
-- **No application.** No GUI, no project files. A program that needs those
-  imports this one.
+- **No live path.** It reads files. There is no microphone, no streaming endpointer.
+- **No verdicts.** It measures the signal and flags a segment for review. It never decides a recording is good enough.
+- **No editing on top.** No summaries, no translation, no clean-up pass. The text is what the engine said.
+- **No application.** No GUI, no project files. A program that needs those imports this one.
 
-Consumers pin the dependency to a **tag or SHA**
-(`speechtotext @ git+https://github.com/sssamuelll/speechtotext@v0.5.0`), never
-to a floating `@main`. What they pin against is the contract in
-**[`docs/api.md`](docs/api.md)**: the JSON schema, the public types, and what
-each module guarantees. Changes to that contract are recorded in
-[`CHANGELOG.md`](CHANGELOG.md). A change you need starts as an issue or a pull
-request here; once it is merged it ships in a tag, and you move your pin to that
-tag.
+## Measured, not assumed
 
----
-
-## Requirements
-
-- Python ≥ 3.11
-- [`ffmpeg`](https://ffmpeg.org/) on the `PATH`
-  - Linux/macOS: `apt install ffmpeg` / `brew install ffmpeg`
-  - Windows: download it from the official site and add `ffmpeg.exe` to the PATH
-
-> Transcription, diarization and search run on Linux, macOS and Windows.
-
-## Installation
-
-```bash
-# Offline CLI only (faster-whisper + typer)
-pip install -e .
-
-# CLI + diarization and speaker identification (pyannote + torch, ~2 GB)
-pip install -e ".[diarize]"
-
-# The faster diarizer, --diarizer nemotron (transformers + torch + librosa).
-# transformers ships it from 5.18; until that release, install transformers from git first:
-pip install "transformers @ git+https://github.com/huggingface/transformers@f324707307757d9c0b8dac1c4462eceff911fa2f"
-pip install -e ".[nemotron]"
-
-# Test suite
-pip install -e ".[dev]"
-
-# MCP server (the official `mcp` SDK)
-pip install -e ".[mcp]"
-```
-
----
-
-## The subcommands
-
-| Command | What for |
-|---|---|
-| `transcribe` | Turn an audio file into `txt`/`srt`/`vtt`/`json`, with speakers if you ask for them. |
-| `find` | Locate a topic inside a long recording without transcribing all of it. |
-| `enroll` | Enroll a person's voice so that their name shows up. |
-| `voices` | List the enrolled voices. |
-| `forget` | Delete a voice from the registry. |
-| `bench` | Measure which configuration suits your machine. |
-| `probe` | Show what your machine has and which route `transcribe` would pick (paste it into an issue). |
-| `models` | List, download (`pull`) and delete (`rm`) models. |
-| `mcp` | Serve the tools over MCP on stdio, for a client such as Claude Desktop. |
-
----
-
-## Offline transcription
-
-```bash
-speechtotext transcribe audio.wav
-speechtotext transcribe talk.mp3 --model medium --language auto --formats txt,srt
-speechtotext transcribe interview.m4a -o transcripts/ --device cuda
-```
-
-### Options
-
-| Flag | Default | Description |
-|---|---|---|
-| `--language`, `-l` | `auto` | `auto` detects the language (well with ≥ 30 s of audio; if the probability comes back low, the CLI suggests fixing it) or an ISO-639-1 code (`es`, `en`, `de`, `fr`, …). |
-| `--model`, `-m` | `large-v3` | `tiny`, `base`, `small`, `medium`, `large-v3`, `distil-large-v3`. `small` = fast draft. |
-| `--formats`, `-f` | `txt,srt,json` | Any combination of `txt`, `srt`, `vtt`, `json`. |
-| `--device`, `-d` | `auto` | `auto` probes the GPU (see [Engines](#engines)), `cpu`, `cuda`. |
-| `--compute-type` | `auto` | `auto` picks `int8` on CPU and `float16` on GPU. |
-| `--vad / --no-vad` | `--no-vad` | Filter for long silences. Off by default: measured, it drops short sentences without saying so. |
-| `--beam-size` | `5` | Beam search size (minimum 1). |
-| `--output`, `-o` | next to the audio | Output folder or base path. |
-| `--engine` | `auto` | `auto` (based on the machine), `faster-whisper` or `whispercpp` (see [Engines](#engines)). |
-| `--hotwords` | — | Terms the model should prefer, comma separated. |
-| `--hotwords-file` | — | A file with those terms, one per line. |
-| `--chunk / --no-chunk` | auto | Chunk the audio; automatic above 20 minutes. |
-| `--jobs`, `-j` | `4` | Chunks transcribed in parallel. |
-| `--diarize`, `-D` | off | Mark who is speaking (needs the `[diarize]` extra, or `[nemotron]` with `--diarizer nemotron`). |
-| `--diarizer` | `pyannote`, or `SPEECHTOTEXT_DIARIZER` | `pyannote` or `nemotron`, about 30× faster on CPU (see [Two diarizers](#two-diarizers)). |
-| `--speakers` | auto | Number of speakers, as a hint (for example `2`); auto when omitted. |
-| `--identify / --no-identify` | `--identify` | Put names to the voices enrolled with `enroll`. |
-| `--threshold` | `0.5` | Voice match threshold (cosine, 0-1). |
-
-### Which model
-
-`large-v3` is the default: in int8 it runs on CPU at roughly 1.3× real time,
-using about 3.5 GB of RAM, and it was the only one that lost nothing in
-[what the measurements say](#what-the-measurements-say). `-m small` is the fast
-draft: five times quicker, and it changes what was said. `tiny` and `base` are
-for testing the pipeline, not for reading the result. Before it starts, the CLI
-prints the duration and an ETA (estimated from the reference table, or measured
-if you ran [`bench`](#choosing-a-configuration-bench)). On your machine:
-[`probe`](#probe-and-models).
-
-### Hotwords
-
-```bash
-speechtotext transcribe lecture.mp3 --hotwords "pyannote,diarization"
-speechtotext transcribe lecture.mp3 --hotwords-file terms.txt
-```
-
-They bias the decoder toward terms the model does not know well: proper nouns,
-jargon, acronyms. **Measured, they did damage**: with lists of 4-5 terms, three
-blackouts of 28-30 s in two different recordings — a whole window replaced by
-one word — and no improvement in the term they were meant to fix (see
-[what the measurements say](#what-the-measurements-say)). If you use them,
-compare against a run without them. The CLI warns at 10 terms or 300 characters,
-and `faster-whisper` truncates silently around 223 tokens.
-
-### Long audio
-
-Above 20 minutes, `transcribe` chunks the audio by itself. It cuts at silences
-(never mid-word), transcribes the chunks in parallel according to `--jobs`, and
-saves each one in `~/.speechtotext/chunks`. If a run is interrupted, the next
-one resumes from the last finished chunk.
-
-The checkpoint is by content: the key includes the file, the model, the engine,
-the quantization, the device and the decoding flags. Changing any of those
-invalidates the cache instead of reusing a result that does not match.
-
-```bash
-speechtotext transcribe podcast_3h.mp3 --jobs 6      # more parallelism
-speechtotext transcribe interview.wav --no-chunk     # force a single pass
-```
-
-Chunking has a [measured](#what-the-measurements-say) price: nothing is lost at
-the seam, but every chunk after the first decodes with its 30 s windows shifted
-and drifts 2-3% from the single pass.
-
-Whisper pads the chunk's last window to 30 s and sometimes narrates over the
-padding. A segment that runs past where the chunk really ended is dropped, or
-trimmed back to it, so the invention never lands on top of the next chunk.
-Chunking is not a reason to turn `--vad` on; the default holds here too.
-
----
-
-## What the measurements say
-
-Fourteen minutes of a real meeting: two voices, Spanish from Spain and Spanish
-from Venezuela, one microphone, technical jargon. Nine configurations over the
-same audio. The metric is **25 concrete points**, not WER: points you had to be
-able to write up without going back to the recording, each with its time window
-and the words without which it makes no sense.
+Every default has a number behind it. Fourteen minutes of a real meeting, two
+voices, one microphone, technical jargon, nine configurations. The metric is
+25 concrete points a reader had to be able to write up without going back to
+the recording, not WER.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/benchmark-dark.svg">
@@ -193,321 +152,90 @@ and the words without which it makes no sense.
 | faster-whisper `large-v3` + VAD | 25 / 25 | 7.7 | 662 s |
 | whisper.cpp `large-v3` CUDA | **25 / 25** | 6.0 | **109 s** |
 | faster-whisper `large-v3` + hotwords | 24 / 25 | 3.8 | 667 s |
-| faster-whisper `large-v3` chunked, with or without VAD | 24 / 25 | — | — |
-| faster-whisper `large-v3` chunked + VAD + hotwords | 23 / 25 | — | ≈480 s |
 | faster-whisper `small` | 22 / 25 | 29.1 | 135 s |
-| whisper.cpp `small` CUDA | 21 / 25 | 27.5 | 55 s |
 
-Errors are counted across the 66 places where the transcriptions disagree and the
-answer is objective: a nonsense word that is not Spanish, a term, a number, a
-confirmed omission. The other 100 places in disagreement (one demonstrative
-swapped for another, filler words, commas) are left out on purpose. The chunked
-configurations were compared in pairs against their unchunked twin, not in that
-alignment. Wall clock on a Ryzen 9 5900X with a GTX 980, runs in series, model
-load included.
+- **`small` changes what was said.** Seventeen times more errors than `large-v3`, and they are not typos: a sentence meaning "everything falls out of order" came back as "then you tidy up". It saves nine minutes and costs three or four of the 25 points. So `large-v3` is the default.
+- **VAD deletes short sentences without saying so.** Four confirmed omissions and zero declared gaps. So it is off.
+- **Hotwords fail in blocks.** Three blackouts of 28-30 s across two recordings and no gain in the term they were meant to fix. The flag ships with that warning on it.
+- **Chunking loses nothing at the seam** and costs 2-3% of drift in every chunk after the first.
+- **whisper.cpp ties on points and loses on jargon**, six times faster on a GTX 980.
 
-What this taught:
-
-- **`small` changes what was said.** Seventeen times more errors than
-  `large-v3`, and they are not typos: *"todo se desordena"* ("everything falls
-  out of order") came out as
-  *"entonces ordenas"* ("then you tidy up"). <!-- # spanish-is-data: a quoted transcription is the evidence; translate it and the bullet proves nothing -->
-  It saves nine minutes and costs three or four of the 25 points.
-- **Hotwords fail in blocks.** With 4-5 terms, three blackouts of 28-30 s in two
-  recordings — a whole window replaced by *"listo"* ("done") — and no
-  improvement in the term they were meant to fix. n = 3, with no counterexample.
-- **VAD deletes short sentences without saying so.** Four confirmed omissions
-  and zero declared gaps: what it throws away before the model sees it leaves no
-  hole in the timeline.
-- **Chunking loses nothing at the seam.** It costs 2-3% of drift in every chunk
-  after the first, because the 30 s windows end up shifted; that is where one
-  point out of 25 fell.
-- **whisper.cpp ties on points and loses on jargon.** Six times faster on the
-  GTX 980 with 2 GB of VRAM, the same 25/25, and *Bézier* misspelled all ten
-  times, measured on a single recording.
-
-What this does not prove: one recording, one domain, one machine. The reference
-was adjudicated by whoever ran the benchmark, not by a human transcriptionist,
-and the omissions were confirmed with a second Whisper configuration. This
-method cannot see an error that every Whisper shares: *"clico la fecha"* for
-*flecha*, "date" where the speaker said "arrow", in all nine. The recording is
-private and is not published; the chart is regenerated with
-`python scripts/benchmark_chart.py`.
-
----
+One recording, one domain, one machine; the reference was adjudicated by whoever
+ran the benchmark. The method, the full table and what it cannot see are in
+[benchmark.md](docs/benchmark.md); why each number became a default is in
+[design.md](docs/design.md).
 
 ## Engines
 
-`--engine auto` (the default) probes the machine before loading anything, and
-`speechtotext probe` shows the same thing the CLI sees. It picks:
+`--engine auto`, the default, probes the machine before loading anything and
+picks:
 
 | The machine | Route |
 |---|---|
-| NVIDIA GPU with ≥ 5 GB of VRAM free | `faster-whisper` · `cuda` · `float16` |
-| NVIDIA GPU with 2-5 GB free, whisper.cpp installed (or Windows, where it is downloaded pinned) and model `large-v3` or `small` | `whispercpp` · `cuda` · `q5_0` |
+| NVIDIA GPU with 5 GB of VRAM free or more | `faster-whisper` · `cuda` · `float16` |
+| NVIDIA GPU with 2-5 GB free and whisper.cpp at hand (on Windows it is downloaded, pinned by SHA-256) | `whispercpp` · `cuda` · `q5_0` |
 | Anything else | `faster-whisper` · `cpu` · `int8` |
 
-What you ask for explicitly (`--engine`, `-d`) is honored; the probe only fills
-in what is missing, and it **never changes the model**: if `large-v3` does not
-fit in RAM, it stops and suggests `-m small`. The thresholds were measured on a
-single machine (5900X + GTX 980); `bench` is what tunes them, and its
-`bench.json` overrides the estimated ETA.
+What you ask for explicitly is honored; the probe only fills in what is missing,
+and it never changes the model. If `large-v3` does not fit in RAM, it stops and
+suggests `-m small` rather than loading something else quietly. Under
+whisper.cpp the flags the engine cannot honor are degraded with a notice or
+rejected before the run starts; the table is in
+[cli.md](docs/cli.md#engines).
 
-`faster-whisper` is the normal path: CPU or CUDA, every flag honored.
-`whispercpp` exists for old GPUs where CTranslate2 no longer performs. On
-Windows it uses a binary pinned by SHA-256 that is downloaded and verified the
-first time; on macOS and Linux it uses the `whisper-cli` on the `PATH`
-(`brew install whisper-cpp`) and declares `device=native`, because the build
-decides. The only things that change by themselves are the flags the engine
-cannot honor:
-
-| Flag | Under `whispercpp` |
-|---|---|
-| `--device` | Forced to `cuda` (the pinned binary is a CUDA build), with a notice. |
-| `--compute-type` | `auto` resolves to `q5_0`; asking for `float16` explicitly is an error. |
-| `--vad` | Turned off, with a notice. |
-| `--jobs` | Forced to 1. |
-| `--hotwords` | **Rejected**: the run does not start. |
-
-`--hotwords` stops instead of degrading, on purpose: the knob was measured inert
-under that engine, and pretending it had applied would be worse than saying so.
-
----
-
-## Diarization and speaker identification
-
-With the `[diarize]` extra, `speechtotext` marks **who said what** in a
-conversation recording and, if you enroll the voices, puts **names** on them.
-All local.
-
-### Requirements (once)
-
-It uses [pyannote](https://github.com/pyannote/pyannote-audio) models that
-download from Hugging Face and are _gated_:
-
-1. Create a **Read** token at https://huggingface.co/settings/tokens and export it:
-   ```bash
-   export HF_TOKEN=hf_your_token        # Windows: setx HF_TOKEN "hf_your_token"
-   ```
-2. Signed in to HF, accept access to the model at
-   https://huggingface.co/pyannote/speaker-diarization-community-1
-   (if pyannote asks you to accept a dependent model on first use, accept that one too).
-
-The first run downloads the models to `~/.cache/huggingface`; after that they
-stay cached.
-
-### Enrolling voices
+## Speakers
 
 ```bash
-speechtotext enroll "Alice" alice_sample.wav   # >=10 s of a single clean voice
-speechtotext voices                            # list the enrolled voices
-speechtotext forget "Alice"                    # delete a voice
+speechtotext transcribe call.m4a --diarize                 # Speaker 1, Speaker 2, ...
+speechtotext transcribe call.m4a --diarize --speakers 2    # a count, when you know it: measured, more accurate
+speechtotext enroll "Alice" alice.wav                      # ten seconds of one clean voice, once
 ```
 
-Voices are stored in `~/.speechtotext/` (override with `SPEECHTOTEXT_HOME`).
-
-Each voice is filed under the model that produced its embedding, and is compared
-only against vectors from that same model: the cosine between two different
-vector spaces means nothing. If you consume the registry as a library,
-`registry.get_embeddings(model)` demands that model for exactly this reason, and
-returns an empty dictionary rather than an error when that model has no enrolled
-voices. The on-disk format is in [`docs/api.md`](docs/api.md#voice-registry).
-
-### Transcribing with speakers
-
-```bash
-# anonymous: Speaker 1 / Speaker 2
-speechtotext transcribe conversation.mp3 --diarize
-
-# a hint of 2 speakers (better accuracy) + names from the enrolled voices
-speechtotext transcribe conversation.mp3 --diarize --speakers 2
-
-# stricter about putting names on
-speechtotext transcribe call.m4a -D --threshold 0.6
-```
-
-Sample `txt` output:
-
-```
-Alice: Good morning, can you hear me?
-Speaker 2: Loud and clear. Go ahead.
-```
-
-In `json` every segment gains a `"speaker"` field and there is a top-level
-`"speakers"`; in `srt`/`vtt` the speaker prefixes each line. Without
-`--diarize`, the output is unchanged.
-
-### Two diarizers
-
-`--diarizer pyannote`, the default, and `--diarizer nemotron`
-([Nemotron-3-Diarization](https://huggingface.co/nvidia/Nemotron-3-Diarization))
-answer the same question, who spoke when, at very different cost:
-
-| | `pyannote` (community-1) | `nemotron` |
+| | `pyannote`, the default | `nemotron` |
 |---|---|---|
 | 64 minutes of a call, CPU | 25 min | 55 s |
-| Peak RAM of that step | 1.7-1.9 GB | 1.7 GB |
-| `--speakers` | honored | an error: the run does not start |
-| Names from `enroll` | yes | no: it gives no voice embeddings |
-| Install | `[diarize]` + a Hugging Face token | `[nemotron]`, no token |
+| Takes `--speakers` | yes | no |
+| Names from `enroll` | yes | no |
+| Needs | `[diarize]` and a Hugging Face token | `[nemotron]` |
 
-Measured on 2026-09-24 on a Ryzen 9 5900X (12 threads, CPU only), both over the
-same transcription:
+On a 64-minute two-person call, pyannote told the count gave 1.15% of the words
+to the wrong speaker, Nemotron 1.55%, pyannote without the count 1.75%. The
+slow one stays the default because it keeps the count and the names; a machine
+that prefers the clock sets `SPEECHTOTEXT_DIARIZER=nemotron`. The token, the
+registry and the limits are in [speakers.md](docs/speakers.md).
 
-- **A 64-minute two-person video call in Spanish**, scored against the call
-  platform's own speaker labels (it receives one audio stream per
-  participant) over the 6,970 words both transcripts agree on. Words given to
-  the wrong speaker: pyannote with `--speakers 2` 1.15%, Nemotron 1.55%,
-  pyannote without the count 1.75%. Told the count, pyannote is the more
-  accurate; without it the two are level.
-- **Four AMI test meetings** (four speakers, English), diarization error rate
-  with no collar: pyannote 20.1%, Nemotron 30.1% as it ships. Almost all of
-  Nemotron's error is missed speech: it ends a turn at every pause, and AMI's
-  references bridge short pauses. Merging a speaker's gaps under one second
-  brings it to 17.4%, a value tuned on those same meetings. A transcript does
-  not feel this, because a word that falls in a pause keeps the speaker of
-  the words around it.
+## From Python
 
-What this does not prove: one call and four meetings. The call counts only
-words both transcripts agree on, so crosstalk is under-represented, and in
-crosstalk a third of the words went to the wrong speaker under either
-diarizer.
+```python
+from pathlib import Path
 
-To make Nemotron the default on a machine, set `SPEECHTOTEXT_DIARIZER`:
+from speechtotext.core.formats import write_srt
+from speechtotext.core.transcribe import transcribe
 
-```bash
-export SPEECHTOTEXT_DIARIZER=nemotron     # Windows: setx SPEECHTOTEXT_DIARIZER nemotron
-speechtotext transcribe call.mp3 -D       # now diarized by nemotron
-speechtotext transcribe call.mp3 -D --speakers 2   # pyannote: only it takes a count
+t = transcribe(
+    "meeting.m4a",
+    diarize=True,
+    speakers=2,
+    on_progress=lambda p: print(p.stage, p.done, p.total, p.detail),
+)
+for s in t.segments:
+    print(f"{s.start:6.1f}  {s.speaker or '-'}: {s.text}")
+write_srt(t.segments, Path("meeting.srt"))
 ```
 
-It is a default, not a request. `--diarizer` wins over it. `--speakers N`
-runs pyannote for that call and prints a line saying so, because a default
-never overrides something asked for explicitly. `--diarizer nemotron` together
-with `--speakers` is still an error. Only the CLI reads the variable: the
-library and the MCP tool use pyannote unless told otherwise.
+A file or 16 kHz mono samples go in; a `Transcript` comes out, with the
+segments, the language and its probability, the gaps, the engine that ran and
+every warning. `on_segment` receives each segment as the engine produces it, a
+live preview; `cancel` is a `threading.Event` that stops the run inside a
+chunk; `backend=` keeps a warm model across calls. The core never prints,
+which is what lets the same function sit under the CLI, the MCP server and a
+desktop app. The contract, with every type and error code, is
+[`docs/api.md`](docs/api.md#transcribe).
 
-Nemotron downloads about 400 MB once, from a pinned revision. It is not gated
-and its license ([OpenMDW 1.1](https://openmdw.ai/license/1-1/)) allows
-commercial use. Its speakers are numbered in the order they first speak.
+## MCP
 
-### Limits
-
-- With `faster-whisper`, words are attributed one by one, so a turn change
-  inside a segment splits it. Under `whispercpp` there are no word timestamps
-  and a whole segment goes to one speaker; on the call above that doubled the
-  words given to the wrong speaker (2.3-2.5% against 1.2-1.8%).
-- Identification depends on the quality of the enrollment and on `--threshold`;
-  very similar voices can be confused.
-- It works on CPU, but diarization adds time on top of the transcription.
-- Today only pyannote produces embeddings, and it runs the whole diarization
-  pipeline to do it: seconds per sample, not milliseconds. Good for batch, not
-  for a live path.
-
----
-
-## Finding a stretch
-
-Transcribing a long recording at full quality takes a while. If you only care
-about one stretch (an interview, a talk), `find` locates it without transcribing
-everything: it makes a fast pass with `tiny`, searches your query and returns
-the **regions** where it appears. With `--extract` it also clips the chosen
-stretch and transcribes it with the full model.
-
-```bash
-# locate: prints the regions (minutes) where the query appears
-speechtotext find recording.mp3 "seismic vulnerability"
-
-# extract: clips the densest region and transcribes it with the full model
-speechtotext find recording.mp3 "seismic vulnerability" --extract
-
-# pick another region, with diarization and names
-speechtotext find recording.mp3 "interview" --extract --region 2 -D --speakers 4
-```
-
-| Flag | Default | Description |
-|---|---|---|
-| `--extract`, `-e` | off | Clip the chosen region and transcribe it with the full model. |
-| `--region` | `1` | Which region to extract (1 = the densest). |
-| `--model`, `-m` | `large-v3` | Model for transcribing the clip (small = fast draft). |
-| `--scan-model` | `tiny` | Model for the fast indexing pass. |
-| `--language`, `-l` | `auto` | Language for transcribing the clip. |
-| `--formats`, `-f` | `txt,srt` | Output formats for the clip. |
-| `--diarize`, `-D` | off | Diarize the extracted clip. |
-| `--diarizer` | `pyannote`, or `SPEECHTOTEXT_DIARIZER` | `pyannote` or `nemotron` (see [Two diarizers](#two-diarizers)). |
-| `--speakers` | none | Number of speakers (a hint). |
-| `--identify` / `--no-identify` | on | Name enrolled voices. |
-| `--threshold` | `0.5` | Voice match threshold (cosine, 0-1). |
-| `--context` | `10.0` | Seconds of margin around the clip. |
-| `--output`, `-o` | next to the audio | Output folder for the clip. |
-| `--rebuild` | off | Rebuild the index even if one exists. |
-| `--top` | `5` | How many regions to list. |
-| `--hotwords` | none | Hard terms for transcribing the clip (see `transcribe`). |
-| `--hotwords-file` | none | Lexicon file for transcribing the clip (see `transcribe`). |
-
-The first `find` on a file builds the index (slow, once); later searches on that
-same file are instant. The index is kept in `~/.speechtotext/index/`. Matching
-ignores accents and case.
-
-> `find --extract` transcribes with `device auto`, `compute-type auto`, VAD off
-> and `beam-size 5` fixed. `--engine`, `--chunk` and `--jobs` aren't exposed
-> either -- for those, extract first and then run `transcribe` on the clip.
-> Everything else `find` accepts (`--model`, `--language`, `--formats`,
-> `--diarize`, `--diarizer`, `--speakers`, `--identify`, `--threshold`,
-> `--hotwords`) passes straight through.
-
----
-
-## Choosing a configuration: `bench`
-
-```bash
-speechtotext bench sample.wav              # measures the viable configurations
-speechtotext bench sample.wav --quick      # fewer configurations
-speechtotext bench sample.wav --seconds 90 # a longer stretch
-speechtotext bench --show                  # repaints the last measurement
-```
-
-It measures, on **your** machine, the combinations of engine, model and
-quantization your hardware can take, each one in an isolated subprocess, and
-recommends one per use case (fast, balanced, quality). The result is kept in
-`bench.json`, and `--show` repaints it without measuring again.
-
----
-
-## Probe and models
-
-```bash
-speechtotext probe                          # what the machine has and which route transcribe would pick
-speechtotext models                         # installed models
-speechtotext models pull large-v3           # download (announces the size first)
-speechtotext models pull small --engine whispercpp
-speechtotext models rm small
-```
-
-The `faster-whisper` models live in the Hugging Face cache; the whisper.cpp ones
-live under `%LOCALAPPDATA%\speechtotext` (Windows),
-`~/Library/Application Support/speechtotext` (macOS) or
-`~/.local/share/speechtotext` (Linux). `SPEECHTOTEXT_HOME` overrides all of that
-if you set it. The same API from Python: `speechtotext.core.models`
-([contract](docs/api.md#probe-and-models)).
-
----
-
-## MCP server
-
-`speechtotext mcp` exposes four tools over stdio, for MCP clients such as Claude
-Desktop. It needs the extra: `pip install -e ".[mcp]"`.
-
-| Tool | What it does |
-|---|---|
-| `transcribe(path, language?, model?, diarize?, diarizer?)` | Transcribes and writes the JSON next to the audio; returns the text and the path. `diarizer` is `pyannote` (default) or `nemotron`. |
-| `find(path, query)` | The regions of the audio where the query appears, without transcribing all of it. |
-| `voices()` | The enrolled voices. |
-| `probe()` | What the machine has and which route `transcribe` would pick. |
-
-Client configuration (adjust the path to your environment's executable: on
-Windows it is `...\Scripts\speechtotext.exe`, on macOS and Linux
-`.../bin/speechtotext`):
+`speechtotext mcp` serves `transcribe`, `find`, `voices` and `probe` over
+stdio, with the `[mcp]` extra. One block in the client's configuration:
 
 ```json
 {
@@ -520,93 +248,31 @@ Windows it is `...\Scripts\speechtotext.exe`, on macOS and Linux
 }
 ```
 
-The server prints nothing on its own: on stdio, stdout is the protocol. Long
-transcriptions report no progress for that reason, and the client waits.
-
----
-
-## Output
-
-`txt` is the flat transcription, `srt`/`vtt` are subtitles with times, and
-`json` is the complete format: segments with times, detected language, gaps
-without speech, and the engine's native signals (`no_speech`, `avg_logprob`,
-`compression_ratio`) that let you decide whether a segment can be trusted.
-
-The full schema, with which keys appear and when, is in
-**[`docs/api.md`](docs/api.md#json-schema)**. A segment marked
-`"suspect": true` is a suggestion to review it, not a verdict.
-
----
-
-## Package layout
-
-```
-src/speechtotext/
-├── core/                 the transcription path
-│   ├── transcribe.py     file → Transcript: route, single decode, chunks, progress
-│   ├── enginepin.py      SHA-256 download and verification of the binary and the ggml
-│   ├── chunked.py        chunking at silences, checkpoint and parallelism
-│   ├── finder.py         fast index and region search (subcommand find)
-│   ├── benchmark.py      measurement of configurations (subcommand bench)
-│   ├── probe.py          machine probe and route choice (subcommand probe)
-│   ├── models.py         models: where they live, list, pull, remove (subcommand models)
-│   ├── formats.py        txt/srt/vtt/json writers + is_suspect + gaps
-│   ├── segments.py       LabeledSegment and reading of native signals
-│   ├── audio.py          transcode_to_wav() + typed errors
-│   └── postprocess.py    normalization of clock times in the text
-├── speakers/             diarization and identification (extra [diarize])
-│   ├── diarization.py    pyannote + assignment by overlap + embed_voice
-│   ├── identify.py       cosine + assign_names (a name per voice)
-│   └── registry.py       voice registry, filed by model
-├── audio/                measurements over the signal
-│   ├── evidence.py       voice evidence by deterministic DSP
-│   ├── quality.py        RMS, SNR, clipping, noise floor
-│   ├── gate.py           pre-inference eligibility against thresholds
-│   ├── io.py             decoding to mono float32
-│   ├── level.py          fixed gain with a limiter
-│   ├── fingerprint.py    cryptographic fingerprint of an audio pipeline
-│   └── types.py          immutable domain models
-├── asr/                  the engine contract and its two backends
-│   ├── base.py           AsrBackend, Caps, AsrError
-│   ├── types.py          TranscriptionRequest / TranscriptionResult
-│   ├── faster_whisper.py FasterWhisperBackend
-│   └── whispercpp.py     WhisperCppBackend (subprocess over a pinned whisper-cli)
-└── cli/                  the user-facing surface
-    ├── app.py            typer: transcribe / find / enroll / voices / forget / bench / probe / models / mcp
-    └── mcp_server.py     the four MCP tools and the stdio server
-```
-
----
+On Windows the executable is `...\Scripts\speechtotext.exe`. The tools and
+their arguments are in [cli.md](docs/cli.md#mcp).
 
 ## Documentation
 
 | Document | What is in it |
 |---|---|
-| [`docs/api.md`](docs/api.md) | The contract for consumers: JSON, public types, guarantees. |
+| [`docs/cli.md`](docs/cli.md) | Every subcommand and flag, the engines, long audio, output formats, environment variables, where things live. |
+| [`docs/speakers.md`](docs/speakers.md) | Who said what: the token, enrolling, the two diarizers with their measurement, the limits. |
+| [`docs/benchmark.md`](docs/benchmark.md) | The transcription benchmark: method, full table, what it does not prove. |
+| [`docs/api.md`](docs/api.md) | The contract for consumers: JSON schema, public types, guarantees. |
 | [`docs/design.md`](docs/design.md) | Why the product has this shape, with the measurement behind each decision. |
-| [`docs/README.md`](docs/README.md) | Index of `docs/`. |
 | [`CHANGELOG.md`](CHANGELOG.md) | What changed between tags, and what breaks. |
 
----
+## Contributing
 
-## Development
-
-```bash
-pip install -e ".[dev]"
-pytest -q
-```
-
-CI runs the suite on Linux, macOS and Windows against Python 3.11 and 3.14, and
-it also builds the wheel and installs it in a clean venv to check that the
-package works outside this tree. The local gate is still `pytest -q`.
-
-### Adding a new output format to the CLI
-
-1. Add `write_xxx(segments, path)` in `src/speechtotext/core/formats.py`.
-2. Add `"xxx"` to `VALID_FORMATS` and to the `writers` table in `src/speechtotext/cli/app.py`.
-
----
+`pip install -e ".[dev]"` and `pytest -q`; the suite runs without a GPU,
+without network and without models, and CI runs it on Linux, macOS and Windows.
+A bug report needs the command, what came out, and the output of
+`speechtotext probe`. The layout of the code and the rules a change has to meet
+are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT.
+[MIT](LICENSE). Built on [faster-whisper](https://github.com/SYSTRAN/faster-whisper),
+[whisper.cpp](https://github.com/ggml-org/whisper.cpp),
+[pyannote](https://github.com/pyannote/pyannote-audio) and
+[Nemotron-3-Diarization](https://huggingface.co/nvidia/Nemotron-3-Diarization).
