@@ -1,0 +1,27 @@
+name: Feature request
+description: Something the tool should do and does not.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: What you are trying to do
+      description: The recording, the result you need from it, and what stands in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: What you do instead today
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Anything measured
+      description: Defaults here ship with a number behind them. If you have compared two ways of doing this, say what you saw.
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: I have read what the tool deliberately does not do (README, "What it deliberately does not do").
+          required: true

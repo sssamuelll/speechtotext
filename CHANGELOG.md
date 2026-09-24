@@ -12,6 +12,9 @@ library.
 
 ### Added
 
+- `LICENSE`: the MIT text `pyproject.toml` had declared since 0.4.0 without
+  the file. With it, `CONTRIBUTING.md`, `SECURITY.md`, a code of conduct,
+  issue forms that ask for `speechtotext probe`, and a PR template.
 - `transcribe(on_segment=...)` receives each `PartialSegment(start, end, text)`
   as the engine produces it, in seconds of the whole recording and before
   diarization: a live preview. Audio read from a checkpoint produces none.
@@ -24,7 +27,7 @@ library.
   does not start. It gives no embeddings, so enrolled voices are not named,
   and `warnings` says so. A missing dependency also stops the run before the
   transcription starts. pyannote stays the default. Until transformers 5.18
-  is released, the extra needs transformers installed from git (README).
+  is released, the extra needs transformers installed from git (docs/speakers.md).
 - The MCP `transcribe` tool gains `diarizer`, with the same two values.
 - `SPEECHTOTEXT_DIARIZER` sets the CLI's default diarizer (`transcribe` and
   `find`). It is a default: `--diarizer` wins over it, and `--speakers N`
@@ -68,6 +71,12 @@ library.
 
 ### Changed
 
+- The README is a front page. The reference moved whole into `docs/cli.md`
+  (every flag, the engines, long audio, formats, environment variables),
+  `docs/speakers.md` and `docs/benchmark.md`; the package layout into
+  `CONTRIBUTING.md`. `tests/test_docs.py` keeps every link and anchor
+  between them resolving, and every `python` block importing names that
+  exist. The signature blocks in `docs/api.md` now parse as Python.
 - The CLI shows progress in minutes of audio, `mm:ss / mm:ss`. Redirected to a
   file, it prints one line per minute of audio instead of one per chunk.
 - whisper.cpp: a run that outlives its timeout is killed and raised as a
