@@ -150,7 +150,7 @@ Hoy el progreso y la cancelación solo se consultan entre trozos de 10 minutos, 
 
 ### 7.1 La ventana y el camino básico
 
-Lista de grabaciones a la izquierda (en cola, en curso, listas) y contenido a la derecha. Cuatro pantallas:
+Lista de grabaciones a la izquierda (en cola, en curso, listas) y contenido a la derecha. Cuatro pantallas (maqueta de estructura, con un estilo provisional que §7.3 sustituye: [`flujo-base.png`](2026-09-24-app-escritorio-cimientos/flujo-base.png)):
 
 1. **Primera vez.** Dice qué hace la app y cuánto pesan los modelos (3,5 GB) antes de descargarlos, y empieza con un clic. No pide cuenta, correo ni token. Mientras descarga ya acepta archivos, que esperan en la cola.
 2. **En curso.** Soltar es empezar: no hay paso de confirmación. Muestra los pasos (preparar el audio, transcribir, separar hablantes), el tiempo restante calculado con los minutos ya transcritos y marcado como estimado, el idioma detectado con "Cambiar", la vista previa del texto y "Cancelar".
@@ -183,6 +183,8 @@ Del Swiss se queda la disciplina: un solo acento, jerarquía clara, cifras en mo
 | Botón principal | fondo `#18181b`, texto blanco · 17,7:1 | fondo `#f5eff3`, texto `#18181b` · 15,6:1 |
 
 Los tokens viven en `design/`, junto a los textos, y de ahí se generan los colores y tipografías de Swift y de XAML. La app sigue la apariencia del sistema.
+
+Maqueta aprobada: [`direccion-2026.png`](2026-09-24-app-escritorio-cimientos/direccion-2026.png). Sus cifras de contraste son cotas inferiores, medidas con el vidrio de la lista al 45 %; las de la tabla usan los valores finales.
 
 ## 8. Distribución
 
