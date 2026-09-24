@@ -432,8 +432,16 @@ class AsrBackend(Protocol):
     caps: Caps               # hotwords / vad / word_timestamps -> honored | degraded | rejected
     model_id: str; model_version: str; engine_version: str; quant: str; device: str
     def warm(self) -> None                                  # loads (once); the object is the cache
-    def transcribe(self, samples: np.ndarray, request: TranscriptionRequest) -> TranscriptionResult
+    def transcribe(self, samples: np.ndarray, request: TranscriptionRequest, *,
+                   on_segment: Callable[[TranscriptionSegment], None] | None = None,
+                   cancel: threading.Event | None = None) -> TranscriptionResult
 ```
+
+`on_segment` receives each segment as soon as the engine has it, in order,
+with times local to `samples`. `cancel` is checked between segments: once it
+is set, the call raises `AsrError("cancelled")` instead of returning a partial
+result. Both engines decode 30-second windows, and that is the granularity of
+both.
 
 `TranscriptionResult.segments` are
 `TranscriptionSegment(start, end, text, words, native_signals)`, and its

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 import time
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
@@ -10,7 +11,7 @@ from typing import Callable
 
 import numpy as np
 
-from speechtotext.asr.base import AsrError, Caps
+from speechtotext.asr.base import AsrError, Caps, raise_if_cancelled
 from speechtotext.asr.types import (
     NativeSignals,
     SegmentNativeSignals,
@@ -60,6 +61,26 @@ class FasterWhisperConfig:
             separators=(",", ":"), sort_keys=True,
         ).encode("utf-8")
         return hashlib.sha256(payload).hexdigest()
+
+
+def _optional_float(source, name: str) -> float | None:
+    value = getattr(source, name, None)
+    return float(value) if value is not None else None
+
+
+def _segment(raw) -> TranscriptionSegment:
+    """One faster-whisper segment in the contract's types; a signal it lacks stays None."""
+    words = tuple(
+        TranscriptionWord(text=word.word, start=float(word.start), end=float(word.end),
+                          confidence=_optional_float(word, "probability"))
+        for word in (getattr(raw, "words", None) or ())
+    )
+    signals = SegmentNativeSignals(
+        no_speech=_optional_float(raw, "no_speech_prob"),
+        avg_logprob=_optional_float(raw, "avg_logprob"),
+        compression_ratio=_optional_float(raw, "compression_ratio"),
+    )
+    return TranscriptionSegment(float(raw.start), float(raw.end), raw.text, words, signals)
 
 
 class FasterWhisperBackend:
@@ -145,8 +166,12 @@ class FasterWhisperBackend:
         self,
         samples: np.ndarray,
         request: TranscriptionRequest,
+        *,
+        on_segment: Callable[[TranscriptionSegment], None] | None = None,
+        cancel: threading.Event | None = None,
     ) -> TranscriptionResult:
         self.warm()
+        raise_if_cancelled(cancel)
         started = self._clock()
         try:
             raw_segments, info = self._model.transcribe(
@@ -159,60 +184,36 @@ class FasterWhisperBackend:
                 condition_on_previous_text=False,
                 word_timestamps=request.word_timestamps,
             )
-            raw_segments = list(raw_segments)
+            pending = iter(raw_segments)
         except AsrError:
             raise
         except Exception as exc:
             raise AsrError("backend_failed", True, str(exc)) from exc
-        elapsed_ms = round((self._clock() - started) * 1000)
         segments: list[TranscriptionSegment] = []
-        all_words: list[TranscriptionWord] = []
-        weights: list[float] = []
+        # The generator decodes one 30 s window per request, so each segment reaches the
+        # caller while the rest of the audio is still ahead. The callback runs outside the
+        # try: its own error is not the engine's and propagates as it is.
+        while True:
+            try:
+                raw = next(pending, None)
+            except AsrError:
+                raise
+            except Exception as exc:
+                raise AsrError("backend_failed", True, str(exc)) from exc
+            if raw is None:
+                break
+            segment = _segment(raw)
+            segments.append(segment)
+            if on_segment is not None:
+                on_segment(segment)
+            raise_if_cancelled(cancel)
+        elapsed_ms = round((self._clock() - started) * 1000)
         no_speech: list[float] = []
         logprobs: list[tuple[float, float]] = []
         compression: list[float] = []
-        for raw in raw_segments:
-            words = tuple(
-                TranscriptionWord(
-                    text=word.word,
-                    start=float(word.start),
-                    end=float(word.end),
-                    confidence=(
-                        float(word.probability)
-                        if getattr(word, "probability", None) is not None
-                        else None
-                    ),
-                )
-                for word in (getattr(raw, "words", None) or ())
-            )
-            signals = SegmentNativeSignals(
-                no_speech=(
-                    float(raw.no_speech_prob)
-                    if getattr(raw, "no_speech_prob", None) is not None
-                    else None
-                ),
-                avg_logprob=(
-                    float(raw.avg_logprob)
-                    if getattr(raw, "avg_logprob", None) is not None
-                    else None
-                ),
-                compression_ratio=(
-                    float(raw.compression_ratio)
-                    if getattr(raw, "compression_ratio", None) is not None
-                    else None
-                ),
-            )
-            segment = TranscriptionSegment(
-                float(raw.start),
-                float(raw.end),
-                raw.text,
-                words,
-                signals,
-            )
-            segments.append(segment)
-            all_words.extend(words)
+        for segment in segments:
+            signals = segment.native_signals
             weight = max(0.001, segment.end - segment.start)
-            weights.append(weight)
             if signals.no_speech is not None:
                 no_speech.append(signals.no_speech)
             if signals.avg_logprob is not None:
@@ -225,7 +226,7 @@ class FasterWhisperBackend:
             if logprobs
             else None
         )
-        text = "".join(raw.text for raw in raw_segments).strip()
+        text = "".join(segment.text for segment in segments).strip()
         warnings: list[str] = []
         if not text:
             warnings.append("empty_transcript")
@@ -235,7 +236,7 @@ class FasterWhisperBackend:
         return TranscriptionResult(
             text=text,
             language=language,
-            words=tuple(all_words),
+            words=tuple(word for segment in segments for word in segment.words),
             segments=tuple(segments),
             backend=self.backend_id,
             model=self._model_id,

@@ -1,9 +1,10 @@
+import threading
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
-from speechtotext.asr import AsrBackend, Caps, TranscriptionRequest
+from speechtotext.asr import AsrBackend, AsrError, Caps, TranscriptionRequest
 from speechtotext.asr.faster_whisper import FasterWhisperBackend, FasterWhisperConfig
 
 _INFO = SimpleNamespace(language="es", language_probability=0.98)
@@ -150,3 +151,75 @@ def test_vad_and_auto_are_sent_to_the_engine():
     )
     assert calls["kwargs"]["vad_filter"] is True
     assert calls["kwargs"]["language"] is None
+
+
+def _raw(start, end, text):
+    return SimpleNamespace(start=start, end=end, text=text, words=None,
+                           no_speech_prob=None, avg_logprob=None, compression_ratio=None)
+
+
+def _lazy(segments, pulled):
+    """Like faster-whisper's generator: it records each segment as the engine hands it over."""
+    for segment in segments:
+        pulled.append(segment.text)
+        yield segment
+
+
+def test_each_segment_reaches_the_callback_before_the_next_is_decoded():
+    pulled, seen = [], []
+    backend = _backend("large-v3", _lazy([_raw(0.0, 1.0, " one"), _raw(1.0, 2.5, " two")], pulled),
+                       _INFO, {})
+    result = backend.transcribe(
+        _samples(3.0), TranscriptionRequest(),
+        on_segment=lambda s: seen.append((s.start, s.end, s.text, list(pulled))),
+    )
+    assert seen == [(0.0, 1.0, " one", [" one"]), (1.0, 2.5, " two", [" one", " two"])]
+    assert [s.text for s in result.segments] == [" one", " two"]
+
+
+def test_cancel_stops_between_segments_and_decodes_no_further():
+    pulled, stop = [], threading.Event()
+    segments = [_raw(0.0, 1.0, " one"), _raw(1.0, 2.0, " two"), _raw(2.0, 3.0, " three")]
+    backend = _backend("large-v3", _lazy(segments, pulled), _INFO, {})
+    with pytest.raises(AsrError) as ei:
+        backend.transcribe(_samples(3.0), TranscriptionRequest(),
+                           on_segment=lambda s: stop.set(), cancel=stop)
+    assert (ei.value.code, ei.value.recoverable) == ("cancelled", True)
+    assert str(ei.value) == "transcription cancelled"
+    assert pulled == [" one"]
+
+
+def test_cancel_before_starting_never_reaches_the_model():
+    stop = threading.Event()
+    stop.set()
+
+    class Untouchable:
+        def transcribe(self, audio, **opts):
+            pytest.fail("decoded after cancel")
+
+    backend = FasterWhisperBackend("large-v3", model_factory=lambda path, **kw: Untouchable())
+    with pytest.raises(AsrError) as ei:
+        backend.transcribe(_samples(), TranscriptionRequest(), cancel=stop)
+    assert ei.value.code == "cancelled"
+
+
+def test_a_callback_error_is_not_reported_as_an_engine_failure():
+    backend = _backend("large-v3", iter([_raw(0.0, 1.0, " one")]), _INFO, {})
+
+    def broken(segment):
+        raise ValueError("bug in the caller")
+
+    with pytest.raises(ValueError, match="bug in the caller"):
+        backend.transcribe(_samples(), TranscriptionRequest(), on_segment=broken)
+
+
+def test_an_error_while_decoding_is_still_an_engine_failure():
+    # Guard: passes today and must keep passing once the loop reads one segment at a time.
+    def failing():
+        yield _raw(0.0, 1.0, " one")
+        raise RuntimeError("CUDA error: out of range")
+
+    backend = _backend("large-v3", failing(), _INFO, {})
+    with pytest.raises(AsrError) as ei:
+        backend.transcribe(_samples(), TranscriptionRequest())
+    assert ei.value.code == "backend_failed" and "CUDA error" in str(ei.value)
