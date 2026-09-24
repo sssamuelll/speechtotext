@@ -167,6 +167,13 @@ hour of audio on the same CPU. That earns a flag, not the default, because
 the default keeps the speaker count and the names, and because Nemotron's
 install is a git pin until transformers 5.18 ships.
 
+A machine that prefers the clock can make Nemotron its own default with
+`SPEECHTOTEXT_DIARIZER`, which only the CLI reads. It follows the probe's
+rule: a default fills in what was left unsaid and never overrides what was
+said. So `--speakers N` still runs pyannote, the only diarizer that can
+honor it, and prints a line saying so. Refusing there would punish a habit
+the user had before setting the variable once.
+
 Wiring it settled three smaller things:
 
 - **Its features are computed in pieces.** A single pass over 64 minutes

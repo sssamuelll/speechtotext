@@ -418,6 +418,73 @@ def test_diarizer_nemotron_with_a_speaker_count_does_not_start(tmp_path, monkeyp
     assert calls == []                       # refused before the engine saw any audio
 
 
+# --- SPEECHTOTEXT_DIARIZER: a machine's default, never a request ------------------------
+
+_PYANNOTE_ID = "pyannote/speaker-diarization-community-1"
+_NEMOTRON_ID = "nvidia/Nemotron-3-Diarization"
+
+
+def _two_speakers(monkeypatch, tmp_path):
+    """Both diarizers stubbed at the model boundary; returns the audio and the JSON path."""
+    clusters = {"SPEAKER_00": np.array([1.0, 0.0]), "SPEAKER_01": np.array([0.0, 1.0])}
+    turns = [(0.0, 5.0, "SPEAKER_00"), (5.0, 9.0, "SPEAKER_01")]
+    _fake_diarization(monkeypatch, tmp_path, turns, clusters, {})
+    _fake_nemotron(monkeypatch, [(0.0, 5.0, "speaker_0"), (5.0, 9.0, "speaker_1")])
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 5.0), _seg(5.0, 9.0)], _info(9.0))
+    return audio, tmp_path / "out.json"
+
+
+def _diarizer_in(json_path):
+    import json
+
+    return json.loads(json_path.read_text(encoding="utf-8"))["engine"]["diarizer"]
+
+
+def test_the_environment_can_make_nemotron_the_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("SPEECHTOTEXT_DIARIZER", "nemotron")
+    audio, out = _two_speakers(monkeypatch, tmp_path)
+    result = _invoke(audio, tmp_path, "-f", "json", "--diarize")
+    assert result.exit_code == 0, result.output
+    assert _diarizer_in(out) == _NEMOTRON_ID
+
+
+def test_an_explicit_diarizer_outranks_the_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("SPEECHTOTEXT_DIARIZER", "nemotron")
+    audio, out = _two_speakers(monkeypatch, tmp_path)
+    result = _invoke(audio, tmp_path, "-f", "json", "--diarize", "--diarizer", "pyannote")
+    assert result.exit_code == 0, result.output
+    assert _diarizer_in(out) == _PYANNOTE_ID
+
+
+def test_an_explicit_speaker_count_outranks_the_environment_default(tmp_path, monkeypatch):
+    # Only pyannote can honor --speakers: a nemotron DEFAULT gives way to the explicit count,
+    # and says so. Refusing would punish an old habit for a setting the user made once.
+    monkeypatch.setenv("SPEECHTOTEXT_DIARIZER", "nemotron")
+    audio, out = _two_speakers(monkeypatch, tmp_path)
+    result = _invoke(audio, tmp_path, "-f", "json", "--diarize", "--speakers", "2")
+    assert result.exit_code == 0, result.output
+    assert _diarizer_in(out) == _PYANNOTE_ID
+    assert "--speakers needs pyannote" in _flattened(result.output)
+
+
+def test_explicit_nemotron_with_a_count_is_refused_whatever_the_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("SPEECHTOTEXT_DIARIZER", "nemotron")
+    calls = []
+    _fake_nemotron(monkeypatch, [(0.0, 9.0, "speaker_0")])
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0), calls=calls)
+    result = _invoke(audio, tmp_path, "--diarize", "--diarizer", "nemotron", "--speakers", "2")
+    assert result.exit_code == 2 and calls == []
+
+
+def test_a_misspelled_environment_diarizer_names_the_variable(tmp_path, monkeypatch):
+    monkeypatch.setenv("SPEECHTOTEXT_DIARIZER", "nemotorn")
+    calls = []
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0), calls=calls)
+    result = _invoke(audio, tmp_path, "--diarize")
+    assert result.exit_code == 2 and calls == []
+    assert "SPEECHTOTEXT_DIARIZER" in _flattened(result.output)
+
+
 def test_an_unknown_diarizer_is_a_usage_error(tmp_path, monkeypatch):
     audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0))
     result = _invoke(audio, tmp_path, "--diarize", "--diarizer", "whisperx")

@@ -84,3 +84,10 @@ def test_find_extract_clips_and_transcribes_with_the_new_defaults(tmp_path, monk
     result = runner.invoke(app, ["find", str(audio), "sismica", "--extract", "-D", "--diarizer", "nemotron"])
     assert result.exit_code == 0, result.stdout
     assert runs[0][1]["diarizer"] == "nemotron"
+
+    # The machine's default reaches find the same way it reaches transcribe.
+    monkeypatch.setenv("SPEECHTOTEXT_DIARIZER", "nemotron")
+    runs.clear()
+    result = runner.invoke(app, ["find", str(audio), "sismica", "--extract", "-D"])
+    assert result.exit_code == 0, result.stdout
+    assert runs[0][1]["diarizer"] == "nemotron"
