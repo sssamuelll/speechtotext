@@ -37,6 +37,9 @@ from speechtotext.asr.base import AsrError
 from speechtotext.audio.io import AudioDecodeError
 from speechtotext.core import probe as core_probe
 from speechtotext.core.transcribe import (
+    DIARIZER_NEMOTRON,
+    DIARIZER_PYANNOTE,
+    DIARIZERS,
     ENGINE_FASTER,
     ENGINE_WHISPERCPP,
     transcribe as core_transcribe,
@@ -113,6 +116,28 @@ def _resolve_hotwords(hotwords: Optional[str], hotwords_file: Optional[Path]) ->
     return ", ".join(parts) or None
 
 
+def _check_diarizer(diarizer: str, diarize: bool, speakers: Optional[int]) -> None:
+    """Refuse bad diarizer flags before any audio is touched: `find --extract` would otherwise
+    build a whole index and cut a clip first. The core checks the same for library callers."""
+    if diarizer not in DIARIZERS:
+        raise typer.BadParameter(f"--diarizer must be one of {', '.join(DIARIZERS)}, not {diarizer!r}")
+    if not (diarize and diarizer == DIARIZER_NEMOTRON):
+        return
+    if speakers is not None:
+        raise typer.BadParameter(
+            f"--speakers {speakers} has no effect with --diarizer nemotron, which counts speakers "
+            "itself; drop --speakers or use --diarizer pyannote"
+        )
+    from speechtotext.speakers import nemotron
+
+    problem = nemotron.missing()
+    if problem is not None:
+        # The message carries the exact install line (a git pin, for now).
+        console.print("[red]Nemotron cannot run here:[/red]")
+        console.print(f"  {problem}", markup=False)
+        raise typer.Exit(1)
+
+
 def transcribe_file(
     audio: Path,
     output: Optional[Path],
@@ -131,6 +156,7 @@ def transcribe_file(
     chunk: Optional[bool] = None,
     jobs: int = 4,
     engine: str = "auto",
+    diarizer: str = DIARIZER_PYANNOTE,
 ) -> None:
     """Transcribe a file (optionally with diarization) and write the requested formats.
     core.transcribe does all the work; flags are parsed, output rendered, and files written here."""
@@ -138,6 +164,7 @@ def transcribe_file(
         requested = parse_formats(formats)
     except ValueError as e:
         raise typer.BadParameter(str(e))
+    _check_diarizer(diarizer, diarize, speakers)
 
     base = _resolve_output_base(audio, output)
     base.parent.mkdir(parents=True, exist_ok=True)
@@ -239,8 +266,8 @@ def transcribe_file(
             t = core_transcribe(
                 audio, model=model, language=language, engine=engine,
                 device=device, compute_type=compute_type, route=route, vad=vad,
-                beam_size=beam_size, hotwords=terms, diarize=diarize, speakers=speakers,
-                identify=identify, threshold=threshold, chunk=chunk, jobs=jobs,
+                beam_size=beam_size, hotwords=terms, diarize=diarize, diarizer=diarizer,
+                speakers=speakers, identify=identify, threshold=threshold, chunk=chunk, jobs=jobs,
                 on_progress=on_progress,
             )
         except AsrError as e:
@@ -252,13 +279,19 @@ def transcribe_file(
                 console.print(f"  {e}", markup=False)
                 raise typer.Exit(1)
             if e.code == "diarize_unavailable":
-                console.print(r'[red]The diarization extra is missing:[/red] pip install -e ".\[diarize]"')
+                if diarizer == DIARIZER_NEMOTRON:
+                    # The core's message carries the exact install line (a git pin, for now).
+                    console.print("[red]Nemotron cannot run here:[/red]")
+                    console.print(f"  {e}", markup=False)
+                else:
+                    console.print(r'[red]The diarization extra is missing:[/red] pip install -e ".\[diarize]"')
                 raise typer.Exit(1)
             if e.code == "diarize_failed":
                 console.print(f"[red]Diarization failed:[/red] {e}")
-                console.print(
-                    "Check that you accepted the pyannote model terms and that HF_TOKEN is set."
-                )
+                if diarizer == DIARIZER_PYANNOTE:
+                    console.print(
+                        "Check that you accepted the pyannote model terms and that HF_TOKEN is set."
+                    )
                 raise typer.Exit(1)
             console.print(str(e), markup=False)
             raise typer.Exit(1)
@@ -311,7 +344,9 @@ def transcribe_file(
                 part += f" (best score {d.best_score:.2f} < {threshold:.2f})"
             parts.append(part)
         console.print(" · ".join(parts))
-        if d.auto and d.speakers > 5:
+        # Only pyannote takes the count: telling a Nemotron user to set it would be advice
+        # the next run refuses.
+        if d.auto and d.speakers > 5 and diarizer == DIARIZER_PYANNOTE:
             console.print(
                 f"[yellow]{d.speakers} speakers detected automatically; if you know how many "
                 "there are, set the number with --speakers N[/yellow]"
@@ -376,7 +411,15 @@ def transcribe(
     ),
     beam_size: int = typer.Option(5, "--beam-size", min=1, help="Beam search size."),
     diarize: bool = typer.Option(
-        False, "--diarize", "-D", help=r"Mark who's speaking (diarization). Requires the \[diarize] extra."
+        False, "--diarize", "-D",
+        help=r"Mark who's speaking (diarization). Requires the \[diarize] extra, or \[nemotron] "
+        "with --diarizer nemotron.",
+    ),
+    diarizer: str = typer.Option(
+        DIARIZER_PYANNOTE, "--diarizer",
+        help=r"pyannote (takes --speakers, puts names on enrolled voices) | nemotron (~30x "
+        r"faster on CPU; counts speakers itself, so --speakers is an error; no names; "
+        r"needs the \[nemotron] extra).",
     ),
     speakers: Optional[int] = typer.Option(
         None, "--speakers", min=1, help="Number of speakers (a hint; auto when omitted)."
@@ -422,12 +465,13 @@ def transcribe(
         audio, output, language, model, formats, device, compute_type,
         vad, beam_size, diarize, speakers, identify, threshold,
         hotwords=_resolve_hotwords(hotwords, hotwords_file),
-        chunk=chunk, jobs=jobs, engine=engine,
+        chunk=chunk, jobs=jobs, engine=engine, diarizer=diarizer,
     )
 
 
 def _extract_region(audio, regions, region, output, language, model, formats,
-                    diarize, speakers, identify, threshold, context, hotwords=None):
+                    diarize, speakers, identify, threshold, context, hotwords=None,
+                    diarizer=DIARIZER_PYANNOTE):
     import subprocess
 
     from speechtotext.core.finder import clip_window
@@ -464,7 +508,7 @@ def _extract_region(audio, regions, region, output, language, model, formats,
     transcribe_file(
         clip, base_dir, language, model, formats,
         "auto", "auto", False, 5, diarize, speakers, identify, threshold,
-        hotwords=hotwords,
+        hotwords=hotwords, diarizer=diarizer,
     )
 
 
@@ -482,6 +526,7 @@ def find(
     language: str = typer.Option("auto", "--language", "-l", help="Language for transcribing the clip."),
     formats: str = typer.Option("txt,srt", "--formats", "-f", help="Output formats for the clip."),
     diarize: bool = typer.Option(False, "--diarize", "-D", help="Diarize the extracted clip."),
+    diarizer: str = typer.Option(DIARIZER_PYANNOTE, "--diarizer", help="pyannote | nemotron (see transcribe)."),
     speakers: Optional[int] = typer.Option(None, "--speakers", min=1, help="Number of speakers (a hint)."),
     identify: bool = typer.Option(True, "--identify/--no-identify", help="Name enrolled voices."),
     threshold: float = typer.Option(0.5, "--threshold", min=0.0, max=1.0, help="Voice match threshold."),
@@ -500,6 +545,8 @@ def find(
     """Search a long audio file; with --extract, clip and transcribe the region."""
     from speechtotext.core import finder
 
+    if extract:
+        _check_diarizer(diarizer, diarize, speakers)
     segments, cached = finder.load_or_build_index(audio, scan_model, rebuild)
     console.print(f"Index: {'cached' if cached else 'built'} ({scan_model}, {len(segments)} segments)")
 
@@ -516,7 +563,7 @@ def find(
         _extract_region(
             audio, regions, region, output, language, model, formats,
             diarize, speakers, identify, threshold, context,
-            hotwords=_resolve_hotwords(hotwords, hotwords_file),
+            hotwords=_resolve_hotwords(hotwords, hotwords_file), diarizer=diarizer,
         )
 
 

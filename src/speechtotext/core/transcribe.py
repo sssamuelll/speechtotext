@@ -28,6 +28,12 @@ from speechtotext.core.segments import LabeledSegment
 
 SAMPLE_RATE = 16000
 
+# pyannote is the default: with the speaker count given it was the most accurate on a
+# two-person call. Nemotron is ~30x faster on CPU, takes no count and gives no embeddings
+# (so no names). Measured 2026-09-24; README, "Two diarizers".
+DIARIZER_PYANNOTE, DIARIZER_NEMOTRON = "pyannote", "nemotron"
+DIARIZERS = (DIARIZER_PYANNOTE, DIARIZER_NEMOTRON)
+
 Stage = Literal["download", "decode", "load", "transcribe", "diarize"]
 
 
@@ -90,12 +96,15 @@ class EngineInfo:
     device: str
     selection: str = "explicit"
     diarization: str | None = None
+    diarizer: str | None = None   # the diarization model's id, when there was diarization
 
     def to_dict(self) -> dict:
         d = {"name": self.name, "version": self.version, "model": self.model,
              "quant": self.quant, "device": self.device, "selection": self.selection}
         if self.diarization is not None:
             d["diarization"] = self.diarization
+        if self.diarizer is not None:
+            d["diarizer"] = self.diarizer
         return d
 
 
@@ -212,21 +221,28 @@ def _run_span(backend, samples, request, start, end, identity, cancel):
     return segs, False, result.language, result.native_signals.language_probability, result.warnings
 
 
-def _diarize(samples, segments, speakers, identify, threshold):
+def _diarize(samples, segments, speakers, identify, threshold, diarizer=DIARIZER_PYANNOTE):
     from speechtotext.speakers import diarization, registry
     from speechtotext.speakers.identify import assign_names, cosine
 
     try:
-        turns, clusters = diarization.diarize(samples, SAMPLE_RATE, num_speakers=speakers)
+        if diarizer == DIARIZER_NEMOTRON:
+            from speechtotext.speakers import nemotron
+
+            # No embeddings: the speaker count comes from the turns, and nobody gets a name.
+            turns, clusters = nemotron.diarize(samples, SAMPLE_RATE), {}
+        else:
+            turns, clusters = diarization.diarize(samples, SAMPLE_RATE, num_speakers=speakers)
     except ImportError as exc:
+        extra = "nemotron" if diarizer == DIARIZER_NEMOTRON else "diarize"
         raise AsrError("diarize_unavailable", False,
-                       'the diarization extra is missing: pip install -e ".[diarize]"') from exc
+                       f'the diarization extra is missing: pip install -e ".[{extra}]"') from exc
     except Exception as exc:
         raise AsrError("diarize_failed", False, str(exc)) from exc
     labeled = diarization.assign_segments(segments, turns)
     name_map: dict[str, str] = {}
     enrolled: dict = {}
-    if identify:
+    if identify and diarizer != DIARIZER_NEMOTRON:
         enrolled = registry.get_embeddings(diarization.EMBEDDING_MODEL)
         if enrolled:
             name_map = assign_names(clusters, enrolled, threshold)
@@ -234,8 +250,34 @@ def _diarize(samples, segments, speakers, identify, threshold):
     if enrolled and not name_map and clusters:
         best = max(cosine(vec, ref) for vec in clusters.values() for ref in enrolled.values())
     unattributed_pct = round(100 * sum(1 for s in labeled if s.speaker is None) / len(labeled)) if labeled else 0
-    report = DiarizationReport(len(clusters), unattributed_pct, len(name_map), len(enrolled), best, speakers is None)
+    found = len({spk for *_, spk in turns}) if diarizer == DIARIZER_NEMOTRON else len(clusters)
+    report = DiarizationReport(found, unattributed_pct, len(name_map), len(enrolled), best, speakers is None)
     return diarization.apply_names(labeled, name_map), report
+
+
+def _diarizer_id(diarizer: str) -> str:
+    """The model id the JSON records: which checkpoint drew the turns."""
+    if diarizer == DIARIZER_NEMOTRON:
+        from speechtotext.speakers.nemotron import MODEL_ID
+
+        return MODEL_ID
+    from speechtotext.speakers.diarization import EMBEDDING_MODEL
+
+    return EMBEDDING_MODEL
+
+
+def _nemotron_notes(identify) -> list[str]:
+    """Names are on by default, so a run with enrolled voices is not refused: the transcript
+    is still what was asked for, without the names. Said, never skipped in silence."""
+    from speechtotext.speakers import diarization, registry
+
+    if not identify:
+        return []
+    n = len(registry.get_embeddings(diarization.EMBEDDING_MODEL))
+    if not n:
+        return []
+    return [f"nemotron gives no voice embeddings: {n} enrolled voice{'s' if n != 1 else ''} "
+            "not compared; names need --diarizer pyannote"]
 
 
 def transcribe(
@@ -251,6 +293,7 @@ def transcribe(
     hotwords: tuple[str, ...] = (),
     word_timestamps: bool = False,
     diarize: bool = False,
+    diarizer: str = DIARIZER_PYANNOTE,
     speakers: int | None = None,
     identify: bool = True,
     threshold: float = 0.5,
@@ -268,6 +311,23 @@ def transcribe(
     `route`: an already resolved Route (the CLI probes, prints, and passes it); `engine="auto"`
     marks `engine.selection="auto"`."""
     emit = on_progress or (lambda p: None)
+
+    if diarizer not in DIARIZERS:
+        raise ValueError(f"unknown diarizer: {diarizer!r}; available: {DIARIZERS}")
+    if diarize and diarizer == DIARIZER_NEMOTRON:
+        if speakers is not None:
+            # The model decides the count itself: the flag would be inert, and an inert knob
+            # is rejected, never dropped in silence (design.md, "The probe fills in gaps").
+            raise AsrError("unsupported_option", False,
+                           f"--speakers {speakers} has no effect with --diarizer nemotron, which "
+                           "counts speakers itself; drop --speakers or use --diarizer pyannote")
+        # Its dependencies are a git install until transformers 5.18 ships: asking now costs
+        # milliseconds, finding out after the ASR costs the whole transcription.
+        from speechtotext.speakers import nemotron
+
+        problem = nemotron.missing()
+        if problem is not None:
+            raise AsrError("diarize_unavailable", False, problem)
 
     def check_cancel() -> None:
         if cancel is not None and cancel.is_set():
@@ -377,7 +437,9 @@ def transcribe(
     if diarize:
         check_cancel()
         emit(Progress("diarize", 0, None, ""))
-        labeled, report = _diarize(samples, segments, speakers, identify, threshold)
+        labeled, report = _diarize(samples, segments, speakers, identify, threshold, diarizer)
+        if diarizer == DIARIZER_NEMOTRON:
+            extra.extend(_nemotron_notes(identify))
         final = [LabeledSegment(s.start, s.end, normalize_hours(s.text), s.speaker, src_dur=s.src_dur,
                                 no_speech=s.no_speech, avg_logprob=s.avg_logprob,
                                 compression_ratio=s.compression_ratio) for s in labeled]
@@ -390,6 +452,7 @@ def transcribe(
         backend.backend_id, backend.engine_version, backend.model_id, backend.quant, backend.device,
         selection="auto" if route is not None and engine == "auto" else "explicit",
         diarization=("word" if eff.word_timestamps else "segment") if diarize else None,
+        diarizer=_diarizer_id(diarizer) if diarize else None,
     )
     return Transcript(final, lang_out, prob, duration, speech_s, gaps, engine_info, eff,
                       warnings + tuple(extra), report)

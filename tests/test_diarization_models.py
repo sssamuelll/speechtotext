@@ -17,9 +17,12 @@ import pytest
 
 # The guard requires BOTH things. With only HF_TOKEN, the test started in an environment
 # without the [diarize] extra and died while importing pyannote: a failure unrelated to
-# the code.
+# the code. `pyannote` is looked up before `pyannote.audio` because find_spec on a dotted
+# name imports the parent and RAISES when it is absent: with HF_TOKEN set and only the
+# [nemotron] extra, the whole file failed to collect.
 @pytest.mark.skipif(
     not os.environ.get("HF_TOKEN")
+    or importlib.util.find_spec("pyannote") is None
     or importlib.util.find_spec("pyannote.audio") is None,
     reason="requires HF_TOKEN + accepted gated models + the [diarize] extra",
 )

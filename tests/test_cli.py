@@ -367,6 +367,63 @@ def test_the_diarization_report_suggests_speakers_when_the_automatic_count_is_to
     assert "--speakers N" not in result.stdout
 
 
+# --- the second diarizer --------------------------------------------------------------
+
+
+def _fake_nemotron(monkeypatch, turns, missing=None):
+    """Stub Nemotron's model boundary and its dependency check; the rest runs for real."""
+    from speechtotext.speakers import nemotron
+
+    monkeypatch.setattr(nemotron, "diarize", lambda samples, sample_rate: turns)
+    monkeypatch.setattr(nemotron, "missing", lambda: missing)
+    monkeypatch.setattr(registry, "get_embeddings", lambda model: {})
+
+
+def test_diarizer_nemotron_does_not_suggest_a_count_it_would_refuse(tmp_path, monkeypatch):
+    import json
+
+    turns = [(float(i), float(i + 1), f"speaker_{i}") for i in range(6)]
+    _fake_nemotron(monkeypatch, turns)
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(float(i), float(i + 1)) for i in range(6)], _info(6.0))
+
+    result = _invoke(audio, tmp_path, "-f", "json", "--diarize", "--diarizer", "nemotron")
+    assert result.exit_code == 0, result.stdout
+    assert "6 speakers" in _flattened(result.stdout)
+    assert "--speakers N" not in result.stdout
+    payload = json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))
+    assert payload["engine"]["diarizer"] == "nvidia/Nemotron-3-Diarization"
+    assert [s["speaker"] for s in payload["segments"]] == [f"Speaker {i + 1}" for i in range(6)]
+
+
+def test_a_missing_nemotron_prints_its_own_install_line(tmp_path, monkeypatch):
+    install = 'pip install "transformers @ git+https://github.com/huggingface/transformers@abc123"'
+    _fake_nemotron(monkeypatch, [], missing=f"transformers is not installed; {install}")
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0))
+
+    result = _invoke(audio, tmp_path, "--diarize", "--diarizer", "nemotron")
+    assert result.exit_code == 1
+    output = _flattened(result.stdout)
+    assert "transformers@abc123" in output
+    assert ".[diarize]" not in output          # that is pyannote's extra, not this one
+
+
+def test_diarizer_nemotron_with_a_speaker_count_does_not_start(tmp_path, monkeypatch):
+    calls = []
+    _fake_nemotron(monkeypatch, [(0.0, 9.0, "speaker_0")])
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0), calls=calls)
+
+    result = _invoke(audio, tmp_path, "--diarize", "--diarizer", "nemotron", "--speakers", "2")
+    assert result.exit_code == 2
+    assert "--speakers 2 has no effect" in _flattened(result.output)   # a usage error: stderr
+    assert calls == []                       # refused before the engine saw any audio
+
+
+def test_an_unknown_diarizer_is_a_usage_error(tmp_path, monkeypatch):
+    audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(0.0, 9.0)], _info(10.0))
+    result = _invoke(audio, tmp_path, "--diarize", "--diarizer", "whisperx")
+    assert result.exit_code == 2
+
+
 # --- 1.6 · measured vs forced language ---------------------------------------------
 
 

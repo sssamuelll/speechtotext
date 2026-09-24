@@ -3,6 +3,7 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from typer.testing import CliRunner
 
 from speechtotext.cli.app import app
@@ -39,6 +40,22 @@ def test_find_no_match(tmp_path, monkeypatch):
     assert "No match for" in result.stdout
 
 
+@pytest.mark.parametrize("flags", [
+    ("--diarizer", "whisperx"),                              # no such diarizer
+    ("--diarizer", "nemotron", "--speakers", "2"),           # a count nemotron cannot take
+])
+def test_find_refuses_bad_diarizer_flags_before_indexing(tmp_path, monkeypatch, flags):
+    # Caught after the index and the clip, these cost a full scan of a long file for nothing.
+    from speechtotext.core import finder
+
+    audio = _seed(tmp_path, monkeypatch)
+    indexed = []
+    monkeypatch.setattr(finder, "load_or_build_index", lambda *a, **k: indexed.append(a) or ([], True))
+    result = runner.invoke(app, ["find", str(audio), "sismica", "--extract", "-D", *flags])
+    assert result.exit_code == 2
+    assert indexed == []
+
+
 def test_find_extract_clips_and_transcribes_with_the_new_defaults(tmp_path, monkeypatch):
     from speechtotext.cli import app as app_mod
 
@@ -58,4 +75,12 @@ def test_find_extract_clips_and_transcribes_with_the_new_defaults(tmp_path, monk
     assert clip.name.startswith("programa_") and clip.suffix == ".wav" and base_dir == tmp_path
     assert (language, model, formats) == ("auto", "large-v3", "txt,srt")
     assert (device, compute_type, vad, beam) == ("auto", "auto", False, 5)
-    assert kw == {"hotwords": None}
+    assert kw == {"hotwords": None, "diarizer": "pyannote"}
+
+    from speechtotext.speakers import nemotron
+
+    monkeypatch.setattr(nemotron, "missing", lambda: None)   # pass-through, not the install check
+    runs.clear()
+    result = runner.invoke(app, ["find", str(audio), "sismica", "--extract", "-D", "--diarizer", "nemotron"])
+    assert result.exit_code == 0, result.stdout
+    assert runs[0][1]["diarizer"] == "nemotron"
