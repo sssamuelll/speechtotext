@@ -229,8 +229,10 @@ def test_serve_registers_against_the_real_sdk():
     # Schemas come from annotations: anything without a default is required.
     assert schemas["transcribe"]["required"] == ["path"]
     assert sorted(schemas["transcribe"]["properties"]) == [
-        "diarize", "language", "model", "path",
+        "diarize", "diarizer", "language", "model", "path",
     ]
+    # What an agent reads: without asking, it gets pyannote.
+    assert schemas["transcribe"]["properties"]["diarizer"]["default"] == "pyannote"
     assert sorted(schemas["find"]["required"]) == ["path", "query"]
     assert not schemas["voices"].get("properties")
     assert not schemas["probe"].get("properties")
