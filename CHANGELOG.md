@@ -89,9 +89,10 @@ library.
   `on_progress` may now be called from worker threads, one call at a time.
 - `AsrBackend.transcribe` takes two keyword arguments, `on_segment` and
   `cancel`, and `transcribe()` passes both: a backend of your own has to accept
-  them. The two built-in engines honor them between segments, so `cancel` now
-  stops `transcribe()` inside a chunk, not only between chunks. Callbacks run
-  on worker threads, one at a time.
+  them, and let exceptions from `on_segment` propagate unwrapped. The two
+  built-in engines honor them between segments, so `cancel` now stops
+  `transcribe()` inside a chunk, not only between chunks. Callbacks run on
+  worker threads, one at a time.
 - **The project's public surface moved wholesale, Spanish to English.** Every
   identifier, error message, warning, doc and default reachable through the
   library's public API now speaks English. The concrete breaks below come out

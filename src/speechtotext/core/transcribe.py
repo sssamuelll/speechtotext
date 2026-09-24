@@ -159,11 +159,12 @@ class _Meter:
     Workers report from their own threads; the lock hands the callbacks one event at a time,
     in order, so `done` never goes back."""
 
-    def __init__(self, total: float, emit: ProgressCallback,
-                 on_segment: SegmentCallback | None) -> None:
+    def __init__(self, total: float, emit: ProgressCallback, on_segment: SegmentCallback | None,
+                 cancel: threading.Event | None) -> None:
         self._total = total
         self._emit = emit
         self._on_segment = on_segment
+        self._cancel = cancel
         self._lock = threading.Lock()
         self._done: dict[int, float] = {}
         # A consumer's own bug (a dead UI widget, a broken callback) must come out as it
@@ -177,6 +178,8 @@ class _Meter:
         detail = f"{_mmss(start)}-{_mmss(end)}"
 
         def on_local(segment: TranscriptionSegment) -> None:
+            if self._cancel is not None and self._cancel.is_set():
+                return   # already cancelled: a line already in the pipe reaches nobody
             if segment.end - length > length - segment.start:
                 return   # more padding than audio: clip_to_end drops it, so nobody sees it
             reached = min(segment.end, length)
@@ -475,7 +478,7 @@ def transcribe(
     langs: list = [None] * len(spans)
     probs: list = [None] * len(spans)
     extra: list[str] = []   # engine warnings (e.g. empty_transcript), deduplicated across chunks
-    meter = _Meter(duration, emit, on_segment)
+    meter = _Meter(duration, emit, on_segment, cancel)
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futs = {pool.submit(_run_span, backend, samples, eff, s, e, identity, cancel,
                             meter.hook(i, s, e), meter): i
@@ -484,21 +487,33 @@ def transcribe(
             for fut in as_completed(futs):
                 i = futs[fut]
                 s, e = spans[i]
+                consumer_failed = False
                 try:
                     results[i], cached, langs[i], probs[i], span_warnings = fut.result()
-                except _ConsumerFailed:
-                    raise meter.callback_error from None   # a consumer's own error: as-is, never disguised
-                except RuntimeError as exc:   # AsrError is also a RuntimeError
-                    if isinstance(exc, AsrError) and exc.code != "backend_failed":
-                        raise                                   # cancelled, unsupported_option: as-is
-                    translated = _oom(exc, backend.backend_id)  # the wrapped message preserves the allocator text
-                    if translated is not exc:
-                        raise translated from exc
-                    if len(spans) == 1:
+                except Exception as exc:   # BaseException (KeyboardInterrupt, ...) passes through
+                    if meter.callback_error is not None:
+                        # The marker, or a backend that wrapped it into something else entirely
+                        # (its own AsrError, say): either way the consumer already failed, and
+                        # that is raised below, OUTSIDE this clause, not here.
+                        consumer_failed = True
+                    elif isinstance(exc, RuntimeError):   # AsrError is also a RuntimeError
+                        if isinstance(exc, AsrError) and exc.code != "backend_failed":
+                            raise                                   # cancelled, unsupported_option: as-is
+                        translated = _oom(exc, backend.backend_id)  # the wrapped message preserves the allocator text
+                        if translated is not exc:
+                            raise translated from exc
+                        if len(spans) == 1:
+                            raise
+                        raise AsrError("backend_failed", True,
+                                       f"engine {backend.backend_id} failed on chunk {i + 1}/{len(spans)} "
+                                       f"({_mmss(s)}-{_mmss(e)}): {exc}") from exc
+                    else:
                         raise
-                    raise AsrError("backend_failed", True,
-                                   f"engine {backend.backend_id} failed on chunk {i + 1}/{len(spans)} "
-                                   f"({_mmss(s)}-{_mmss(e)}): {exc}") from exc
+                if consumer_failed:
+                    # Raised here, outside the except clause above: nothing here is "handling"
+                    # another exception, so the consumer's own __cause__ and __context__ reach
+                    # the caller exactly as it raised them, with no marker chained in between.
+                    raise meter.callback_error
                 for w in span_warnings:
                     warning = f"{backend.backend_id}: {w}"
                     if warning not in extra:

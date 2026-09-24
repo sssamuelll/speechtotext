@@ -727,3 +727,96 @@ def test_a_broken_consumer_is_called_once_even_with_parallel_chunks(tmp_path, mo
     assert not isinstance(ei.value, AsrError)
     assert str(ei.value) == "consumer bug 1"
     assert len(calls) == 1
+
+
+def test_a_consumer_error_keeps_its_cause_and_context(tmp_path, monkeypatch):
+    # raise ... from None (round 2's own fix) replaced the consumer's __cause__ with None
+    # and its __context__ with the private marker: this checks both survive, unmangled.
+    def boom(partial):
+        try:
+            raise KeyError("root cause")
+        except KeyError as root:
+            raise RuntimeError("consumer bug") from root
+
+    def check(exc):
+        assert str(exc) == "consumer bug"
+        assert isinstance(exc.__cause__, KeyError)
+        assert not isinstance(exc.__context__, core._ConsumerFailed)
+
+    with pytest.raises(RuntimeError) as ei:
+        core.transcribe(_zeros(10.0), backend=FakeBackend(), chunk=False, on_segment=boom)
+    check(ei.value)
+
+    audio = _two_chunks(tmp_path, monkeypatch)
+    with pytest.raises(RuntimeError) as ei:
+        core.transcribe(audio, backend=FakeBackend([(1.0, 2.0, " t")]), chunk=True, jobs=1,
+                        on_segment=boom)
+    check(ei.value)
+
+
+def test_a_backend_that_wraps_errors_cannot_disguise_a_consumer_bug(tmp_path, monkeypatch):
+    # A backend that turns any exception from its own loop into its own AsrError must not
+    # be able to hide a consumer bug behind it: the guarantee holds whatever the backend does.
+    class WrappingBackend(FakeBackend):
+        def transcribe(self, samples, request, *, on_segment=None, cancel=None):
+            try:
+                return super().transcribe(samples, request, on_segment=on_segment, cancel=cancel)
+            except Exception as exc:
+                raise AsrError("backend_failed", True, str(exc))
+
+    def boom(partial):
+        raise RuntimeError("consumer bug")
+
+    def check(exc):
+        assert not isinstance(exc, AsrError)
+        assert str(exc) == "consumer bug"
+
+    with pytest.raises(RuntimeError) as ei:
+        core.transcribe(_zeros(10.0), backend=WrappingBackend(), chunk=False, on_segment=boom)
+    check(ei.value)
+
+    audio = _two_chunks(tmp_path, monkeypatch)
+    with pytest.raises(RuntimeError) as ei:
+        core.transcribe(audio, backend=WrappingBackend([(1.0, 2.0, " t")]), chunk=True, jobs=1,
+                        on_segment=boom)
+    check(ei.value)
+
+
+def test_nothing_reaches_the_callbacks_after_cancel():
+    # Real engines can already have a line in whisper-cli's pipe, or a segment past
+    # faster-whisper's own check, before cancel is set: on_local must not act on it either.
+    class BatchedBackend(FakeBackend):
+        """Hands over every segment first, then checks cancel once — like whisper-cli's pipe."""
+
+        def transcribe(self, samples, request, *, on_segment=None, cancel=None):
+            self.calls.append((len(samples), request))
+            segs = tuple(
+                TranscriptionSegment(s, e, t, (), SegmentNativeSignals(None, None, None))
+                for s, e, t in self.segments
+            )
+            for seg in segs:
+                if on_segment is not None:
+                    on_segment(seg)
+            raise_if_cancelled(cancel)
+            return TranscriptionResult(
+                text="", language=self.language, words=(), segments=segs,
+                backend=self.backend_id, model=self.model_id, model_version=self.model_version,
+                latency_ms=1, native_signals=NativeSignals(None, None, None, self.probability),
+                warnings=(),
+            )
+
+    stop = threading.Event()
+    partials, events = [], []
+
+    def on_segment(partial):
+        partials.append(partial.text)
+        stop.set()
+
+    backend = BatchedBackend([(0.0, 1.0, " a"), (1.0, 2.0, " b"), (2.0, 3.0, " c")])
+    with pytest.raises(AsrError) as ei:
+        core.transcribe(_zeros(10.0), backend=backend, chunk=False, cancel=stop,
+                        on_segment=on_segment, on_progress=events.append)
+    assert ei.value.code == "cancelled"
+    assert partials == ["a"]
+    steps = _steps(events)
+    assert len(steps) == 1 and steps[0].done == 1.0   # nothing after the first segment

@@ -442,7 +442,8 @@ with times local to `samples`. `cancel` is checked between segments: once it
 is set, the call raises `AsrError("cancelled")` instead of returning a partial
 result. Both engines decode 30-second windows, so segments arrive in bursts,
 one per window. faster-whisper checks `cancel` as it hands over each segment;
-whisper.cpp ends its process as soon as `cancel` is set.
+whisper.cpp ends its process as soon as `cancel` is set. An exception raised
+by `on_segment` belongs to the caller: let it propagate unwrapped.
 
 `TranscriptionResult.segments` are
 `TranscriptionSegment(start, end, text, words, native_signals)`, and its
@@ -508,7 +509,10 @@ not in time order. Audio read from a checkpoint produces none. Both callbacks
 may be called from worker threads, never two at once. `cancel` is a
 `threading.Event` checked each time the engine hands over a segment (a
 stretch with no speech delays it; under whisper.cpp the process is ended at
-once), and the call then raises `AsrError("cancelled")`.
+once), and the call then raises `AsrError("cancelled")`. If a callback
+raises, the run stops: pending chunks are cancelled, neither callback is
+called again, and the callback's own exception comes out of `transcribe()`
+unchanged, with its cause and context.
 
 Errors: `AsrError(code, recoverable, message)` with `code` in
 `unsupported_option`, `out_of_memory`, `insufficient_resources`,
