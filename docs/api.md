@@ -466,6 +466,9 @@ does not load engines):
   model pinned by SHA-256 (`core/enginepin.py`), always CUDA, `q5_0`.
   Rejects hotwords (the prompt is inert under `-mc 0`), degrades VAD and
   words, and emits no native signals.
+  It reads whisper-cli's output as it decodes, one line per segment, for
+  `on_segment`; the result still comes from its JSON. Cancelling ends the
+  process.
 
 `TranscriptionRequest(language="es", hotwords=(), word_timestamps=True, beam_size=5, context=None, vad=False)`;
 `language="auto"` lets it detect. The `fingerprint` includes `vad`.
