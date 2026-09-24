@@ -1,0 +1,8 @@
+# Only the Actions. The Python pins are tight on purpose (see pyproject.toml);
+# they move with a measurement, not on a schedule.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
