@@ -431,10 +431,10 @@ class AsrBackend(Protocol):
     backend_id: str          # "faster-whisper" | "whispercpp"
     caps: Caps               # hotwords / vad / word_timestamps -> honored | degraded | rejected
     model_id: str; model_version: str; engine_version: str; quant: str; device: str
-    def warm(self) -> None                                  # loads (once); the object is the cache
+    def warm(self) -> None: ...                             # loads (once); the object is the cache
     def transcribe(self, samples: np.ndarray, request: TranscriptionRequest, *,
                    on_segment: Callable[[TranscriptionSegment], None] | None = None,
-                   cancel: threading.Event | None = None) -> TranscriptionResult
+                   cancel: threading.Event | None = None) -> TranscriptionResult: ...
 ```
 
 `on_segment` receives each segment as soon as the engine has it, in order,
@@ -557,11 +557,11 @@ measured) and `estimated` is `False` only if it came from this machine's
 labeled `device="native"`.
 
 ```python
-models.data_dir() -> Path                                    # SPEECHTOTEXT_HOME or the system path
-models.installed(engine=None) -> list[ModelInfo]             # ModelInfo(engine, name, path, size_bytes, verified)
-models.ensure(engine, name, on_progress=None) -> Path         # downloads if missing; Progress("download", …)
-models.remove(engine, name) -> None                           # FileNotFoundError if not there
-models.remote_size(engine, name) -> int | None                # bytes ensure would download; None without network
+models.data_dir()                               # -> Path: SPEECHTOTEXT_HOME or the system path
+models.installed(engine=None)                   # -> list[ModelInfo]: ModelInfo(engine, name, path, size_bytes, verified)
+models.ensure(engine, name, on_progress=None)   # -> Path: downloads if missing; Progress("download", …)
+models.remove(engine, name)                     # -> None: FileNotFoundError if not there
+models.remote_size(engine, name)                # -> int | None: bytes ensure would download; None without network
 ```
 
 `verified` is `True` only for whisper.cpp (sha256 against the pin);
