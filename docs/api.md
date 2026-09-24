@@ -432,8 +432,18 @@ class AsrBackend(Protocol):
     caps: Caps               # hotwords / vad / word_timestamps -> honored | degraded | rejected
     model_id: str; model_version: str; engine_version: str; quant: str; device: str
     def warm(self) -> None                                  # loads (once); the object is the cache
-    def transcribe(self, samples: np.ndarray, request: TranscriptionRequest) -> TranscriptionResult
+    def transcribe(self, samples: np.ndarray, request: TranscriptionRequest, *,
+                   on_segment: Callable[[TranscriptionSegment], None] | None = None,
+                   cancel: threading.Event | None = None) -> TranscriptionResult
 ```
+
+`on_segment` receives each segment as soon as the engine has it, in order,
+with times local to `samples`. `cancel` is checked between segments: once it
+is set, the call raises `AsrError("cancelled")` instead of returning a partial
+result. Both engines decode 30-second windows, so segments arrive in bursts,
+one per window. faster-whisper checks `cancel` as it hands over each segment;
+whisper.cpp ends its process as soon as `cancel` is set. An exception raised
+by `on_segment` belongs to the caller: let it propagate unwrapped.
 
 `TranscriptionResult.segments` are
 `TranscriptionSegment(start, end, text, words, native_signals)`, and its
@@ -458,6 +468,9 @@ does not load engines):
   model pinned by SHA-256 (`core/enginepin.py`), always CUDA, `q5_0`.
   Rejects hotwords (the prompt is inert under `-mc 0`), degrades VAD and
   words, and emits no native signals.
+  It reads whisper-cli's output as it decodes, one line per segment, for
+  `on_segment`; the result still comes from its JSON. Cancelling ends the
+  process.
 
 `TranscriptionRequest(language="es", hotwords=(), word_timestamps=True, beam_size=5, context=None, vad=False)`;
 `language="auto"` lets it detect. The `fingerprint` includes `vad`.
@@ -467,7 +480,7 @@ does not load engines):
 ## `transcribe()`
 
 ```python
-from speechtotext.core.transcribe import transcribe, Transcript, Progress, AsrError
+from speechtotext.core.transcribe import transcribe, Transcript, Progress, PartialSegment, AsrError
 
 t = transcribe("meeting.mp4", model="large-v3", on_progress=print)
 ```
@@ -484,8 +497,22 @@ path with n chunks; chunks leave a checkpoint by content in
 `Progress(stage, done, total, detail)` with stages
 `decode → load → transcribe → diarize` (with a file, `decode` is emitted
 twice: first with `total=None` and then with `done = total = duration`;
-`download` is emitted by `models.ensure`); `cancel` is a
-`threading.Event` checked between chunks.
+`download` is emitted by `models.ensure`).
+
+During `transcribe`, `done` and `total` are seconds of audio: `done` grows as
+the engine finishes each segment, summed across the chunks that run in
+parallel, and never goes back; `total` is the duration. `on_segment` receives
+each `PartialSegment(start, end, text)` as the engine produces it, in seconds
+of the whole recording, trimmed and with no speaker yet: a live preview, not
+the result. With parallel chunks, `PartialSegment` calls arrive interleaved,
+not in time order. Audio read from a checkpoint produces none. Both callbacks
+may be called from worker threads, never two at once. `cancel` is a
+`threading.Event` checked each time the engine hands over a segment (a
+stretch with no speech delays it; under whisper.cpp the process is ended at
+once), and the call then raises `AsrError("cancelled")`. If a callback
+raises, the run stops: pending chunks are cancelled, neither callback is
+called again, and the callback's own exception comes out of `transcribe()`
+unchanged, with its cause and context.
 
 Errors: `AsrError(code, recoverable, message)` with `code` in
 `unsupported_option`, `out_of_memory`, `insufficient_resources`,

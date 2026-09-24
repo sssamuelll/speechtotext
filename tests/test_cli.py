@@ -67,12 +67,16 @@ def _fake_transcribe(monkeypatch, tmp_path, segments, info, boom=None, calls=Non
         def warm(self):
             pass
 
-        def transcribe(self, samples, request):
+        def transcribe(self, samples, request, *, on_segment=None, cancel=None):
             if calls is not None:
                 calls.append((samples, request))
             if boom is not None:
                 raise boom
-            return _result(segments, info)
+            result = _result(segments, info)
+            for segment in result.segments:
+                if on_segment is not None:
+                    on_segment(segment)
+            return result
 
     monkeypatch.setattr(core_transcribe, "make_backend", FakeBackend)
     return audio
@@ -914,7 +918,7 @@ def test_bench_with_broken_ffmpeg_exits_with_a_message(tmp_path, monkeypatch):
     assert "Could not clip" in result.stdout
 
 
-def test_chunking_is_announced_and_each_chunk_is_listed_outside_a_tty(tmp_path, monkeypatch):
+def test_chunking_is_announced_and_progress_is_listed_in_audio_minutes_outside_a_tty(tmp_path, monkeypatch):
     from speechtotext.core import transcribe as core_transcribe
 
     audio = _fake_transcribe(monkeypatch, tmp_path, [_seg(1.0, 2.0)], _info(1200.0))
@@ -925,8 +929,19 @@ def test_chunking_is_announced_and_each_chunk_is_listed_outside_a_tty(tmp_path, 
     assert result.exit_code == 0, result.stdout
     output = _flattened(result.stdout)
     assert "Chunked (jobs=2)" in output
-    assert "[1/2]" in output and "[2/2]" in output
-    assert "(nuevo)" in output
+    # The chunks run in parallel: the first line can read 10:02, the other chunk's first
+    # segment already counted. What is fixed: at least one line before the end, and the end.
+    assert len(re.findall(r"\d\d:\d\d / 20:00", output)) >= 2 and "20:00 / 20:00" in output
+    assert "(new)" in output and "[1/2]" not in output
+
+
+def test_redirected_progress_prints_one_line_per_minute_of_audio(tmp_path, monkeypatch):
+    segments = [_seg(float(s), float(s + 10)) for s in range(0, 300, 10)]   # 30 segments, 5 min
+    audio = _fake_transcribe(monkeypatch, tmp_path, segments, _info(300.0))
+    result = _invoke(audio, tmp_path)
+    assert result.exit_code == 0, result.stdout
+    printed = re.findall(r"(\d\d:\d\d) / 05:00", _flattened(result.stdout))
+    assert printed == ["01:00", "02:00", "03:00", "04:00", "05:00"]
 
 
 # --- spec §5.2 defaults, ETA, and uncertain language --------------------------------

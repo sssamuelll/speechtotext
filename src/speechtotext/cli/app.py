@@ -36,6 +36,7 @@ from types import SimpleNamespace
 from speechtotext.asr.base import AsrError
 from speechtotext.audio.io import AudioDecodeError
 from speechtotext.core import probe as core_probe
+from speechtotext.core import transcribe as core_module
 from speechtotext.core.transcribe import (
     DIARIZER_NEMOTRON,
     DIARIZER_PYANNOTE,
@@ -259,10 +260,10 @@ def transcribe_file(
     ) as progress:
         task = progress.add_task(f"Transcribing {audio.name}", total=None)
 
-        notified = False
+        printed_at = 0.0
 
         def on_progress(p):
-            nonlocal notified
+            nonlocal printed_at
             if p.stage == "decode" and p.total:
                 dur_min = p.total / 60
                 if route.eta_factor:
@@ -271,17 +272,19 @@ def transcribe_file(
                     console.print(f"Duration {dur_min:.1f} min · ETA ~{eta_min} min ({source})")
                 else:
                     console.print(f"Duration {dur_min:.1f} min · ETA not measured for this route")
-                return
-            if p.stage == "transcribe" and p.total and p.total > 1:
-                if not notified:
-                    notified = True
+                # The same decision the core makes, on the same inputs.
+                if core_module.should_chunk(p.total, chunk):
                     console.print(f"[bold]Chunked[/bold] (jobs={jobs}) · {model}")
-                line = f"[{int(p.done)}/{int(p.total)}] {p.detail}"
+                return
+            if p.stage == "transcribe" and p.total:
+                line = f"{_fmt(p.done)} / {_fmt(p.total)} {p.detail}".rstrip()
                 if console.is_terminal:
                     progress.update(task, description=line, total=p.total, completed=p.done)
-                else:
-                    # When redirected to a file, Live does not refresh: one line per chunk or the
-                    # hours-long run goes silent (spec 2026-07-08, "the silent log when redirected").
+                elif p.done - printed_at >= 60 or p.done >= p.total > printed_at:
+                    # Redirected to a file, Live does not refresh. One line per minute of audio:
+                    # hours of silence is the failure the 2026-07-08 spec names; a line per
+                    # segment is the opposite one.
+                    printed_at = p.done
                     console.print(f"  {line}", markup=False)
             else:
                 progress.update(task, description=f"{p.stage} {p.detail}".strip())

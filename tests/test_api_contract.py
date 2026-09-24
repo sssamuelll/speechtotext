@@ -37,6 +37,7 @@ CONTRACT = (
     "speechtotext.core.transcribe.transcribe",
     "speechtotext.core.transcribe.Transcript",
     "speechtotext.core.transcribe.Progress",
+    "speechtotext.core.transcribe.PartialSegment",
     "speechtotext.core.transcribe.EngineInfo",
     "speechtotext.core.transcribe.DiarizationReport",
     "speechtotext.core.transcribe.load_audio",
