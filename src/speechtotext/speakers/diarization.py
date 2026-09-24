@@ -140,6 +140,11 @@ def _waveform(samples, sample_rate: int) -> dict:
     import torch
 
     data = np.ascontiguousarray(samples, dtype=np.float32)
+    if not data.flags.writeable:
+        # The decoded samples arrive read-only, and torch.from_numpy warns
+        # about a read-only buffer on every run, in the user's terminal. The
+        # copy costs 4 bytes per sample, next to the gigabytes pyannote uses.
+        data = data.copy()
     return {"waveform": torch.from_numpy(data).unsqueeze(0), "sample_rate": sample_rate}
 
 

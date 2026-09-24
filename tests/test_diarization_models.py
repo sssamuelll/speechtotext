@@ -110,3 +110,35 @@ def test_waveform_for_pyannote_is_a_1xN_tensor():
     wf = _waveform(np.zeros(160, dtype=np.float32), 16000)
     assert wf["sample_rate"] == 16000
     assert isinstance(wf["waveform"], torch.Tensor) and tuple(wf["waveform"].shape) == (1, 160)
+
+
+def test_waveform_for_pyannote_is_writable(monkeypatch):
+    """The decoded samples reach pyannote read-only, and `torch.from_numpy`
+    warns about a read-only buffer on every diarized run, into the user's
+    terminal. The stand-in torch turns that warning into a failure, so this
+    runs where torch is not installed."""
+    import sys
+    import types
+
+    import numpy as np
+
+    from speechtotext.speakers.diarization import _waveform
+
+    class Tensor:
+        def __init__(self, arr):
+            self.arr = arr
+
+        def unsqueeze(self, dim):
+            return self
+
+    def from_numpy(arr):
+        assert arr.flags.writeable, "torch.from_numpy was handed a read-only array"
+        return Tensor(arr)
+
+    monkeypatch.setitem(sys.modules, "torch", types.SimpleNamespace(from_numpy=from_numpy))
+
+    samples = np.zeros(160, dtype=np.float32)
+    samples.flags.writeable = False
+    wf = _waveform(samples, 16000)
+    assert wf["sample_rate"] == 16000
+    assert np.array_equal(wf["waveform"].arr, samples)
