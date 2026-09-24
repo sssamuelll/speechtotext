@@ -116,7 +116,7 @@ speechtotext transcribe interview.m4a -o transcripts/ --device cuda
 | `--chunk / --no-chunk` | auto | Chunk the audio; automatic above 20 minutes. |
 | `--jobs`, `-j` | `4` | Chunks transcribed in parallel. |
 | `--diarize`, `-D` | off | Mark who is speaking (needs the `[diarize]` extra, or `[nemotron]` with `--diarizer nemotron`). |
-| `--diarizer` | `pyannote` | `pyannote` or `nemotron`, about 30× faster on CPU (see [Two diarizers](#two-diarizers)). |
+| `--diarizer` | `pyannote`, or `SPEECHTOTEXT_DIARIZER` | `pyannote` or `nemotron`, about 30× faster on CPU (see [Two diarizers](#two-diarizers)). |
 | `--speakers` | auto | Number of speakers, as a hint (for example `2`); auto when omitted. |
 | `--identify / --no-identify` | `--identify` | Put names to the voices enrolled with `enroll`. |
 | `--threshold` | `0.5` | Voice match threshold (cosine, 0-1). |
@@ -373,6 +373,20 @@ words both transcripts agree on, so crosstalk is under-represented, and in
 crosstalk a third of the words went to the wrong speaker under either
 diarizer.
 
+To make Nemotron the default on a machine, set `SPEECHTOTEXT_DIARIZER`:
+
+```bash
+export SPEECHTOTEXT_DIARIZER=nemotron     # Windows: setx SPEECHTOTEXT_DIARIZER nemotron
+speechtotext transcribe call.mp3 -D       # now diarized by nemotron
+speechtotext transcribe call.mp3 -D --speakers 2   # pyannote: only it takes a count
+```
+
+It is a default, not a request. `--diarizer` wins over it. `--speakers N`
+runs pyannote for that call and prints a line saying so, because a default
+never overrides something asked for explicitly. `--diarizer nemotron` together
+with `--speakers` is still an error. Only the CLI reads the variable: the
+library and the MCP tool use pyannote unless told otherwise.
+
 Nemotron downloads about 400 MB once, from a pinned revision. It is not gated
 and its license ([OpenMDW 1.1](https://openmdw.ai/license/1-1/)) allows
 commercial use. Its speakers are numbered in the order they first speak.
@@ -420,7 +434,7 @@ speechtotext find recording.mp3 "interview" --extract --region 2 -D --speakers 4
 | `--language`, `-l` | `auto` | Language for transcribing the clip. |
 | `--formats`, `-f` | `txt,srt` | Output formats for the clip. |
 | `--diarize`, `-D` | off | Diarize the extracted clip. |
-| `--diarizer` | `pyannote` | `pyannote` or `nemotron` (see [Two diarizers](#two-diarizers)). |
+| `--diarizer` | `pyannote`, or `SPEECHTOTEXT_DIARIZER` | `pyannote` or `nemotron` (see [Two diarizers](#two-diarizers)). |
 | `--speakers` | none | Number of speakers (a hint). |
 | `--identify` / `--no-identify` | on | Name enrolled voices. |
 | `--threshold` | `0.5` | Voice match threshold (cosine, 0-1). |

@@ -22,6 +22,10 @@ library.
   transcription starts. pyannote stays the default. Until transformers 5.18
   is released, the extra needs transformers installed from git (README).
 - The MCP `transcribe` tool gains `diarizer`, with the same two values.
+- `SPEECHTOTEXT_DIARIZER` sets the CLI's default diarizer (`transcribe` and
+  `find`). It is a default: `--diarizer` wins over it, and `--speakers N`
+  runs pyannote for that call and prints a line saying so. The library and the
+  MCP tool do not read it.
 - **New contract**: `speakers.nemotron.diarize` and `speakers.nemotron.missing`.
 - The JSON `engine` block gains `diarizer`, the id of the model that drew the
   turns, whenever there was diarization.

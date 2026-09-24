@@ -116,6 +116,30 @@ def _resolve_hotwords(hotwords: Optional[str], hotwords_file: Optional[Path]) ->
     return ", ".join(parts) or None
 
 
+DIARIZER_ENV = "SPEECHTOTEXT_DIARIZER"
+
+
+def _resolve_diarizer(flag: Optional[str], diarize: bool, speakers: Optional[int]) -> str:
+    """--diarizer if it was given; otherwise SPEECHTOTEXT_DIARIZER; otherwise pyannote.
+
+    The variable is a machine's default, and a default never overrides what was asked for
+    explicitly (the probe's rule, design.md): only pyannote can honor --speakers N, so a
+    nemotron default gives way to the count and says so. An explicit --diarizer nemotron
+    with --speakers is still refused by _check_diarizer."""
+    if flag is not None:
+        return flag
+    env = os.environ.get(DIARIZER_ENV, "").strip()
+    if not env:
+        return DIARIZER_PYANNOTE
+    if env not in DIARIZERS:
+        raise typer.BadParameter(f"{DIARIZER_ENV}={env!r} is not a diarizer; use one of {', '.join(DIARIZERS)}")
+    if env == DIARIZER_NEMOTRON and diarize and speakers is not None:
+        console.print(f"[yellow]--speakers needs pyannote: using it for this run "
+                      f"({DIARIZER_ENV}=nemotron is a default, not a request)[/yellow]")
+        return DIARIZER_PYANNOTE
+    return env
+
+
 def _check_diarizer(diarizer: str, diarize: bool, speakers: Optional[int]) -> None:
     """Refuse bad diarizer flags before any audio is touched: `find --extract` would otherwise
     build a whole index and cut a clip first. The core checks the same for library callers."""
@@ -415,11 +439,12 @@ def transcribe(
         help=r"Mark who's speaking (diarization). Requires the \[diarize] extra, or \[nemotron] "
         "with --diarizer nemotron.",
     ),
-    diarizer: str = typer.Option(
-        DIARIZER_PYANNOTE, "--diarizer",
+    diarizer: Optional[str] = typer.Option(
+        None, "--diarizer",
         help=r"pyannote (takes --speakers, puts names on enrolled voices) | nemotron (~30x "
         r"faster on CPU; counts speakers itself, so --speakers is an error; no names; "
-        r"needs the \[nemotron] extra).",
+        r"needs the \[nemotron] extra). Default: pyannote, or the SPEECHTOTEXT_DIARIZER "
+        "environment variable.",
     ),
     speakers: Optional[int] = typer.Option(
         None, "--speakers", min=1, help="Number of speakers (a hint; auto when omitted)."
@@ -465,7 +490,8 @@ def transcribe(
         audio, output, language, model, formats, device, compute_type,
         vad, beam_size, diarize, speakers, identify, threshold,
         hotwords=_resolve_hotwords(hotwords, hotwords_file),
-        chunk=chunk, jobs=jobs, engine=engine, diarizer=diarizer,
+        chunk=chunk, jobs=jobs, engine=engine,
+        diarizer=_resolve_diarizer(diarizer, diarize, speakers),
     )
 
 
@@ -526,7 +552,9 @@ def find(
     language: str = typer.Option("auto", "--language", "-l", help="Language for transcribing the clip."),
     formats: str = typer.Option("txt,srt", "--formats", "-f", help="Output formats for the clip."),
     diarize: bool = typer.Option(False, "--diarize", "-D", help="Diarize the extracted clip."),
-    diarizer: str = typer.Option(DIARIZER_PYANNOTE, "--diarizer", help="pyannote | nemotron (see transcribe)."),
+    diarizer: Optional[str] = typer.Option(
+        None, "--diarizer", help="pyannote | nemotron (see transcribe; default: SPEECHTOTEXT_DIARIZER or pyannote).",
+    ),
     speakers: Optional[int] = typer.Option(None, "--speakers", min=1, help="Number of speakers (a hint)."),
     identify: bool = typer.Option(True, "--identify/--no-identify", help="Name enrolled voices."),
     threshold: float = typer.Option(0.5, "--threshold", min=0.0, max=1.0, help="Voice match threshold."),
@@ -546,6 +574,7 @@ def find(
     from speechtotext.core import finder
 
     if extract:
+        diarizer = _resolve_diarizer(diarizer, diarize, speakers)
         _check_diarizer(diarizer, diarize, speakers)
     segments, cached = finder.load_or_build_index(audio, scan_model, rebuild)
     console.print(f"Index: {'cached' if cached else 'built'} ({scan_model}, {len(segments)} segments)")
