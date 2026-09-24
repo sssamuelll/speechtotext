@@ -105,6 +105,7 @@ import json
 import threading
 
 from speechtotext.asr import AsrError, Caps
+from speechtotext.asr.base import raise_if_cancelled
 from speechtotext.asr.types import (
     NativeSignals, SegmentNativeSignals, TranscriptionResult, TranscriptionSegment,
     TranscriptionWord,
@@ -129,7 +130,7 @@ class FakeBackend:
     def warm(self):
         self.warmed += 1
 
-    def transcribe(self, samples, request):
+    def transcribe(self, samples, request, *, on_segment=None, cancel=None):
         self.calls.append((len(samples), request))
         if self.boom is not None:
             if self.wrap:
@@ -140,6 +141,10 @@ class FakeBackend:
                                  SegmentNativeSignals(None, None, None))
             for s, e, t in self.segments
         )
+        for seg in segs:          # like a real engine: hand each one over, then look at cancel
+            if on_segment is not None:
+                on_segment(seg)
+            raise_if_cancelled(cancel)
         return TranscriptionResult(
             text="".join(t for _, _, t in self.segments).strip(), language=self.language,
             words=(), segments=segs, backend=self.backend_id, model=self.model_id,
@@ -182,10 +187,12 @@ def test_progress_uses_callback_and_decodes_once(tmp_path, monkeypatch):
     assert calls == [tmp_path / "a.wav"]
     # Two decode events: before (indeterminate) and after, with done = total = duration,
     # which is what the CLI needs for the ETA
-    assert [e.stage for e in events] == ["decode", "decode", "load", "transcribe"]
+    assert [e.stage for e in events] == ["decode", "decode", "load", "transcribe", "transcribe"]
     assert (events[0].done, events[0].total) == (0, None)
     assert (events[1].done, events[1].total, events[1].detail) == (10.0, 10.0, "a.wav")
-    assert events[-1].done == 1 and events[-1].total == 1 and "(nuevo)" in events[-1].detail
+    assert (events[3].done, events[3].total) == (2.0, 10.0)     # the 1-2 s segment, as it lands
+    assert (events[-1].done, events[-1].total) == (10.0, 10.0)
+    assert events[-1].detail.endswith("(new)")
     assert t.duration == 10.0
 
 
@@ -280,8 +287,8 @@ def test_multiple_chunks_reassemble_in_order_with_global_times(tmp_path, monkeyp
     t = core.transcribe(audio, backend=backend, chunk=True, jobs=2, on_progress=events.append)
     assert [(s.start, s.end) for s in t.segments] == [(1.0, 2.0), (601.0, 602.0)]
     assert sorted(n for n, _ in backend.calls) == [600 * 16000, 600 * 16000]
-    details = [e.detail for e in events if e.stage == "transcribe"]
-    assert len(details) == 2 and all("(nuevo)" in d for d in details)
+    finished = [e.detail for e in events if e.stage == "transcribe" and e.detail.endswith("(new)")]
+    assert len(finished) == 2
     assert t.language_probability is None  # Multiple chunks: none measured a single probability
 
 
@@ -486,8 +493,8 @@ def test_engine_warnings_reach_the_transcript_without_being_duplicated(tmp_path,
     from dataclasses import replace as dc_replace
 
     class WarningBackend(FakeBackend):
-        def transcribe(self, samples, request):
-            return dc_replace(super().transcribe(samples, request), warnings=("empty_transcript",))
+        def transcribe(self, samples, request, **kw):
+            return dc_replace(super().transcribe(samples, request, **kw), warnings=("empty_transcript",))
 
     t = core.transcribe(_zeros(5.0), backend=WarningBackend(), chunk=False)
     assert t.warnings == ("faster-whisper: empty_transcript",)
@@ -504,8 +511,8 @@ def test_caps_warnings_come_before_engine_warnings():
     from dataclasses import replace as dc_replace
 
     class WarningBackend(FakeBackend):
-        def transcribe(self, samples, request):
-            return dc_replace(super().transcribe(samples, request), warnings=("empty_transcript",))
+        def transcribe(self, samples, request, **kw):
+            return dc_replace(super().transcribe(samples, request, **kw), warnings=("empty_transcript",))
 
     backend = WarningBackend(backend_id="whispercpp", caps=Caps("rejected", "degraded", "degraded"))
     t = core.transcribe(_zeros(5.0), backend=backend, vad=True, chunk=False)
@@ -540,12 +547,115 @@ def test_mid_pool_cancellation_does_not_launch_more_chunks(tmp_path, monkeypatch
     stop_event = threading.Event()
 
     class CancellingBackend(FakeBackend):
-        def transcribe(self, samples, request):
+        def transcribe(self, samples, request, **kw):
             stop_event.set()     # The first chunk requests a stop from within
-            return super().transcribe(samples, request)
+            return super().transcribe(samples, request, **kw)
 
     backend = CancellingBackend()
     with pytest.raises(AsrError) as ei:
         core.transcribe(audio, backend=backend, cancel=stop_event, chunk=True, jobs=1)
     assert ei.value.code == "cancelled"
     assert len(backend.calls) == 1     # Chunks 2 and 3 never reached the engine
+
+
+# --- progress, cancel and text per fragment (spec 2026-09-24, §6.4) ---------------------
+
+def _steps(events):
+    return [e for e in events if e.stage == "transcribe"]
+
+
+def _two_chunks(tmp_path, monkeypatch):
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    audio = tmp_path / "largo.wav"
+    audio.write_bytes(b"RIFF")
+    monkeypatch.setattr(core, "load_audio", lambda p: _zeros(1200.0))
+    monkeypatch.setattr(core, "plan_chunks", lambda path, dur: [(0.0, 600.0), (600.0, 1200.0)])
+    return audio
+
+
+def test_progress_advances_in_audio_seconds_within_a_single_chunk():
+    events = []
+    backend = FakeBackend([(0.0, 2.0, " a"), (2.0, 5.0, " b"), (5.0, 8.0, " c")])
+    core.transcribe(_zeros(10.0), backend=backend, chunk=False, on_progress=events.append)
+    assert [e.done for e in _steps(events)] == [2.0, 5.0, 8.0, 10.0]
+    assert {e.total for e in _steps(events)} == {10.0}
+    assert _steps(events)[-1].detail.endswith("(new)")
+
+
+def test_parallel_chunks_sum_and_never_go_back(tmp_path, monkeypatch):
+    audio = _two_chunks(tmp_path, monkeypatch)
+    events = []
+    core.transcribe(audio, backend=FakeBackend([(1.0, 2.0, " t"), (2.0, 300.0, " u")]),
+                    chunk=True, jobs=2, on_progress=events.append)
+    dones = [e.done for e in _steps(events)]
+    assert dones == sorted(dones) and dones[-1] == 1200.0
+    assert {e.total for e in _steps(events)} == {1200.0}
+
+
+def test_partial_segments_arrive_in_global_time_without_speakers(tmp_path, monkeypatch):
+    audio = _two_chunks(tmp_path, monkeypatch)
+    partials = []
+    core.transcribe(audio, backend=FakeBackend([(1.0, 2.0, " t")]), chunk=True, jobs=2,
+                    on_segment=partials.append)
+    assert sorted(partials, key=lambda p: p.start) == [
+        core.PartialSegment(1.0, 2.0, "t"), core.PartialSegment(601.0, 602.0, "t"),
+    ]
+
+
+def test_cancel_reaches_the_engine_in_the_middle_of_a_chunk(tmp_path, monkeypatch):
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"RIFF")
+    monkeypatch.setattr(core, "load_audio", lambda p: _zeros(600.0))
+    monkeypatch.setattr(core, "plan_chunks", lambda path, dur: [(0.0, 600.0)])
+    stop, seen = threading.Event(), []
+
+    def stop_after_the_first(partial):
+        seen.append(partial.text)
+        stop.set()
+
+    backend = FakeBackend([(0.0, 1.0, " a"), (1.0, 2.0, " b"), (2.0, 3.0, " c")])
+    with pytest.raises(AsrError) as ei:
+        core.transcribe(audio, backend=backend, chunk=True, cancel=stop,
+                        on_segment=stop_after_the_first)
+    assert ei.value.code == "cancelled"
+    assert seen == ["a"]                                    # stopped before the second segment
+    assert not list((tmp_path / "chunks").glob("*.json"))   # a cancelled chunk leaves no checkpoint
+
+
+def test_silence_still_reaches_the_total():
+    events, partials = [], []
+    core.transcribe(_zeros(10.0), backend=FakeBackend(segments=()), chunk=False,
+                    on_progress=events.append, on_segment=partials.append)
+    assert [(e.done, e.total) for e in _steps(events)] == [(10.0, 10.0)]
+    assert partials == []
+
+
+def test_a_phantom_past_the_chunk_end_neither_overshoots_nor_previews():
+    events, partials = [], []
+    backend = FakeBackend([(1.0, 2.0, " real"), (9.9, 39.9, " Thanks for watching.")])
+    t = core.transcribe(_zeros(10.0), backend=backend, chunk=False,
+                        on_progress=events.append, on_segment=partials.append)
+    assert [p.text for p in partials] == ["real"]
+    assert max(e.done for e in _steps(events)) == 10.0
+    assert [s.text for s in t.segments] == [" real"]
+
+
+def test_cached_chunks_count_as_done_and_preview_nothing(tmp_path, monkeypatch):
+    monkeypatch.setenv("SPEECHTOTEXT_HOME", str(tmp_path))
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"RIFF")
+    monkeypatch.setattr(core, "load_audio", lambda p: _zeros(600.0))
+    monkeypatch.setattr(core, "plan_chunks", lambda path, dur: [(0.0, 600.0)])
+    backend = FakeBackend()
+    request, _ = core._apply_caps(backend, core._request(language="auto", vad=False, hotwords=(),
+                                                         beam_size=5, word_timestamps=False))
+    chunked.chunk_path(core._identity(audio, backend, request), 0.0, 600.0).write_text(
+        json.dumps({"language": "es", "segments": [{"start": 1.0, "end": 2.0, "text": " cache"}]}),
+        encoding="utf-8")
+    events, partials = [], []
+    core.transcribe(audio, backend=backend, chunk=True, on_progress=events.append,
+                    on_segment=partials.append)
+    assert [(e.done, e.total) for e in _steps(events)] == [(600.0, 600.0)]
+    assert _steps(events)[0].detail.endswith("(cache)")
+    assert partials == [] and backend.calls == []

@@ -67,7 +67,7 @@ def _fake_transcribe(monkeypatch, tmp_path):
     fake = SimpleNamespace(backend_id="faster-whisper", model_id="small", device="cpu", quant="int8",
                            model_version="1", engine_version="faster-whisper 1.2.0",
                            caps=Caps("honored", "honored", "honored"), warm=lambda: None,
-                           transcribe=lambda samples, request: result)
+                           transcribe=lambda samples, request, **kw: result)
     monkeypatch.setattr(core_transcribe, "make_backend", lambda *a, **k: fake)
     return audio
 

@@ -14,8 +14,8 @@ from typing import Callable, Literal
 
 import numpy as np
 
-from speechtotext.asr.base import AsrBackend, AsrError
-from speechtotext.asr.types import TranscriptionRequest, TranscriptionResult
+from speechtotext.asr.base import AsrBackend, AsrError, raise_if_cancelled
+from speechtotext.asr.types import TranscriptionRequest, TranscriptionResult, TranscriptionSegment
 from speechtotext.core.chunked import (
     TimedSegment, TimedWord, chunk_path, clip_to_end, pick_cuts, plan_chunks,
     seg_from_dict, seg_to_dict, shift_segments, should_chunk,
@@ -46,6 +46,19 @@ class Progress:
 
 
 ProgressCallback = Callable[[Progress], None]
+
+
+@dataclass(frozen=True)
+class PartialSegment:
+    """A segment the engine has just produced, in seconds of the whole recording and before
+    diarization: no speaker yet, and the text trimmed. For a live preview; the Transcript is
+    the result."""
+    start: float
+    end: float
+    text: str
+
+
+SegmentCallback = Callable[[PartialSegment], None]
 
 
 def resolve_route(engine: str = "auto", device: str = "auto", compute_type: str = "auto",
@@ -137,6 +150,47 @@ def _mmss(sec: float) -> str:
     return f"{m:02d}:{s:02d}"
 
 
+class _Meter:
+    """Seconds of audio transcribed so far, summed over the chunks running in parallel.
+    Workers report from their own threads; the lock hands the callbacks one event at a time,
+    in order, so `done` never goes back."""
+
+    def __init__(self, total: float, emit: ProgressCallback,
+                 on_segment: SegmentCallback | None) -> None:
+        self._total = total
+        self._emit = emit
+        self._on_segment = on_segment
+        self._lock = threading.Lock()
+        self._done: dict[int, float] = {}
+
+    def hook(self, span: int, start: float, end: float) -> Callable[[TranscriptionSegment], None]:
+        """The engine callback for one chunk: local times in, global progress and text out."""
+        length = end - start
+        detail = f"{_mmss(start)}-{_mmss(end)}"
+
+        def on_local(segment: TranscriptionSegment) -> None:
+            if segment.end - length > length - segment.start:
+                return   # more padding than audio: clip_to_end drops it, so nobody sees it
+            reached = min(segment.end, length)
+            text = segment.text.strip()
+            with self._lock:
+                if self._on_segment is not None and text:
+                    self._on_segment(PartialSegment(round(start + segment.start, 3),
+                                                    round(start + reached, 3), text))
+                self._advance(span, reached, detail)
+
+        return on_local
+
+    def finish(self, span: int, length: float, detail: str) -> None:
+        with self._lock:
+            self._advance(span, length, detail)
+
+    def _advance(self, span: int, seconds: float, detail: str) -> None:
+        self._done[span] = max(self._done.get(span, 0.0), seconds)
+        done = min(self._total, round(sum(self._done.values()), 2))
+        self._emit(Progress("transcribe", done, self._total, detail))
+
+
 def _request(*, language, vad, hotwords, beam_size, word_timestamps) -> TranscriptionRequest:
     return TranscriptionRequest(language=language, hotwords=tuple(hotwords),
                                 word_timestamps=word_timestamps, beam_size=beam_size, vad=vad)
@@ -198,11 +252,10 @@ def _identity(path: Path, backend: AsrBackend, request: TranscriptionRequest) ->
     ))
 
 
-def _run_span(backend, samples, request, start, end, identity, cancel):
+def _run_span(backend, samples, request, start, end, identity, cancel, on_segment=None):
     """(global segments, from_cache, language, probability, engine warnings). An old
     checkpoint can contain a phantom over the padding: clip_to_end also runs on read."""
-    if cancel is not None and cancel.is_set():
-        raise AsrError("cancelled", True, "transcription cancelled")
+    raise_if_cancelled(cancel)
     path = chunk_path(identity, start, end) if identity is not None else None
     if path is not None and path.exists():
         try:
@@ -212,7 +265,7 @@ def _run_span(backend, samples, request, start, end, identity, cancel):
         except (json.JSONDecodeError, KeyError):
             pass  # corrupt checkpoint -> recompute
     a, b = int(start * SAMPLE_RATE), int(end * SAMPLE_RATE)
-    result = backend.transcribe(samples[a:b], request)
+    result = backend.transcribe(samples[a:b], request, on_segment=on_segment, cancel=cancel)
     segs = clip_to_end(shift_segments(_timed(result), start), end)
     if path is not None:
         path.write_text(json.dumps({"language": result.language,
@@ -302,6 +355,7 @@ def transcribe(
     backend: AsrBackend | None = None,
     route: Route | None = None,
     on_progress: ProgressCallback | None = None,
+    on_segment: SegmentCallback | None = None,
     cancel: threading.Event | None = None,
 ) -> Transcript:
     """File (path as Path or str, or 16 kHz mono samples) -> Transcript. Short and long
@@ -309,7 +363,11 @@ def transcribe(
     or silence-based cutting (fixed pick_cuts): this is the code path for `find` and the library.
 
     `route`: an already resolved Route (the CLI probes, prints, and passes it); `engine="auto"`
-    marks `engine.selection="auto"`."""
+    marks `engine.selection="auto"`.
+
+    During the transcribe stage `on_progress` counts seconds of audio and `on_segment` gets
+    each PartialSegment as the engine produces it. Both may run on worker threads, one call
+    at a time."""
     emit = on_progress or (lambda p: None)
 
     if diarizer not in DIARIZERS:
@@ -328,10 +386,6 @@ def transcribe(
         problem = nemotron.missing()
         if problem is not None:
             raise AsrError("diarize_unavailable", False, problem)
-
-    def check_cancel() -> None:
-        if cancel is not None and cancel.is_set():
-            raise AsrError("cancelled", True, "transcription cancelled")
 
     # The route is resolved BEFORE decoding: a nonexistent --engine or a model that does not
     # fit stops in milliseconds, not after decoding an hour of audio. A caller that already
@@ -371,7 +425,7 @@ def transcribe(
     request = _request(language=language, vad=vad, hotwords=hotwords, beam_size=beam_size,
                        word_timestamps=word_timestamps or diarize)
     eff, warnings = _apply_caps(backend, request)
-    check_cancel()
+    raise_if_cancelled(cancel)
 
     emit(Progress("load", 0, None, backend.model_id))
     try:
@@ -389,10 +443,12 @@ def transcribe(
     langs: list = [None] * len(spans)
     probs: list = [None] * len(spans)
     extra: list[str] = []   # engine warnings (e.g. empty_transcript), deduplicated across chunks
+    meter = _Meter(duration, emit, on_segment)
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futs = {pool.submit(_run_span, backend, samples, eff, s, e, identity, cancel): i
+        futs = {pool.submit(_run_span, backend, samples, eff, s, e, identity, cancel,
+                            meter.hook(i, s, e)): i
                 for i, (s, e) in enumerate(spans)}
-        for done, fut in enumerate(as_completed(futs), start=1):
+        for fut in as_completed(futs):
             i = futs[fut]
             s, e = spans[i]
             try:
@@ -417,8 +473,8 @@ def transcribe(
                     extra.append(warning)
             span = e - s
             cov = 100 * sum(x.end - x.start for x in results[i]) / span if span > 0 else 0.0
-            emit(Progress("transcribe", done, len(spans),
-                          f"{_mmss(s)}-{_mmss(e)} {cov:.0f}% ({'cache' if cached else 'nuevo'})"))
+            meter.finish(i, span, f"{_mmss(s)}-{_mmss(e)} {cov:.0f}% "
+                                  f"({'cache' if cached else 'new'})")
 
     segments = [seg for chunk_segs in results for seg in chunk_segs]
     detected = next((l for l in langs if l), None)
@@ -435,7 +491,7 @@ def transcribe(
 
     report = None
     if diarize:
-        check_cancel()
+        raise_if_cancelled(cancel)
         emit(Progress("diarize", 0, None, ""))
         labeled, report = _diarize(samples, segments, speakers, identify, threshold, diarizer)
         if diarizer == DIARIZER_NEMOTRON:

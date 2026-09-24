@@ -199,7 +199,7 @@ def test_cli_transcribe_carries_the_signals_into_json(tmp_path, monkeypatch):
     fake = SimpleNamespace(backend_id="faster-whisper", model_id="small", device="cpu", quant="int8",
                            model_version="1", engine_version="faster-whisper 1.2.0",
                            caps=Caps("honored", "honored", "honored"), warm=lambda: None,
-                           transcribe=lambda samples, request: result)
+                           transcribe=lambda samples, request, **kw: result)
     monkeypatch.setattr(core_transcribe, "make_backend", lambda *a, **k: fake)
 
     # -o with a nonexistent path and no trailing separator is a BASE path, not a folder

@@ -12,6 +12,10 @@ library.
 
 ### Added
 
+- `transcribe(on_segment=...)` receives each `PartialSegment(start, end, text)`
+  as the engine produces it, in seconds of the whole recording and before
+  diarization: a live preview. Audio read from a checkpoint produces none.
+- **New contract**: `core.transcribe.PartialSegment`.
 - A second diarizer: `--diarizer nemotron` (and `transcribe(diarizer="nemotron")`)
   runs NVIDIA's Nemotron-3-Diarization, behind the new `[nemotron]` extra. On
   CPU it diarized 64 minutes in 55 s where pyannote took 25 minutes, with the
@@ -64,6 +68,11 @@ library.
 
 ### Changed
 
+- The CLI shows progress in minutes of audio, `mm:ss / mm:ss`. Redirected to a
+  file, it prints one line per minute of audio instead of one per chunk.
+- whisper.cpp: a run that outlives its timeout is killed and raised as a
+  `RuntimeError` — `backend_failed`, naming the chunk, in a chunked run —
+  instead of escaping as a raw `subprocess.TimeoutExpired`.
 - CI actually turned on: the suite runs on Linux, macOS and Windows against
   Python 3.11 and 3.14, and a separate job builds the wheel and installs it
   in a clean venv. Before, the workflow existed but installed an extra
@@ -73,6 +82,15 @@ library.
 
 ### Changed — breaking
 
+- `Progress("transcribe")` counts seconds of audio, not chunks. `done` grows
+  segment by segment, summed across the chunks running in parallel, and
+  `total` is the duration; before, a file under 20 minutes jumped from 0 to 1.
+  A finished chunk's `detail` ends in `(new)` instead of `(nuevo)`. <!-- # spanish-is-data: the old detail string being replaced -->
+- `AsrBackend.transcribe` takes two keyword arguments, `on_segment` and
+  `cancel`, and `transcribe()` passes both: a backend of your own has to accept
+  them. The two built-in engines honor them between segments, so `cancel` now
+  stops `transcribe()` inside a chunk, not only between chunks. Callbacks run
+  on worker threads, one at a time.
 - **The project's public surface moved wholesale, Spanish to English.** Every
   identifier, error message, warning, doc and default reachable through the
   library's public API now speaks English. The concrete breaks below come out

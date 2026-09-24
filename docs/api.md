@@ -478,7 +478,7 @@ does not load engines):
 ## `transcribe()`
 
 ```python
-from speechtotext.core.transcribe import transcribe, Transcript, Progress, AsrError
+from speechtotext.core.transcribe import transcribe, Transcript, Progress, PartialSegment, AsrError
 
 t = transcribe("meeting.mp4", model="large-v3", on_progress=print)
 ```
@@ -495,8 +495,18 @@ path with n chunks; chunks leave a checkpoint by content in
 `Progress(stage, done, total, detail)` with stages
 `decode → load → transcribe → diarize` (with a file, `decode` is emitted
 twice: first with `total=None` and then with `done = total = duration`;
-`download` is emitted by `models.ensure`); `cancel` is a
-`threading.Event` checked between chunks.
+`download` is emitted by `models.ensure`).
+
+During `transcribe`, `done` and `total` are seconds of audio: `done` grows as
+the engine finishes each segment, summed across the chunks that run in
+parallel, and never goes back; `total` is the duration. `on_segment` receives
+each `PartialSegment(start, end, text)` as the engine produces it, in seconds
+of the whole recording, trimmed and with no speaker yet: a live preview, not
+the result. Audio read from a checkpoint produces none. Both callbacks may be
+called from worker threads, never two at once. `cancel` is a
+`threading.Event` checked between segments: once it is set, the call raises
+`AsrError("cancelled")` at the end of the 30-second window the engine is
+decoding.
 
 Errors: `AsrError(code, recoverable, message)` with `code` in
 `unsupported_option`, `out_of_memory`, `insufficient_resources`,
