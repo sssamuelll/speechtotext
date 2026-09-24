@@ -34,7 +34,7 @@ jobs:
         python: ["3.11", "3.14"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Without this, the token stays in git's local config while code from the
           # PR runs. Nothing gets pushed from here, so it isn't needed.
@@ -81,7 +81,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
