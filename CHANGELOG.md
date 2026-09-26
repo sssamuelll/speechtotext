@@ -10,6 +10,10 @@ library.
 
 ## Unreleased
 
+---
+
+## v0.6.0 — 2026-09-26
+
 ### Added
 
 - `LICENSE`: the MIT text `pyproject.toml` had declared since 0.4.0 without
