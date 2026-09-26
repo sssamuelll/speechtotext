@@ -40,7 +40,7 @@ jobs:
           # PR runs. Nothing gets pushed from here, so it isn't needed.
           persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -85,7 +85,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           # The floor: if the wheel builds and installs on 3.11, it installs
           # everywhere.
